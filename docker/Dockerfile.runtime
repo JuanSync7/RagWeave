@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project metadata and source needed by server/api + worker.
+COPY pyproject.toml /app/pyproject.toml
+COPY config /app/config
+COPY src /app/src
+COPY server /app/server
+COPY prompts /app/prompts
+COPY processed /app/processed
+COPY documents /app/documents
+
+RUN pip install --upgrade pip && pip install .
+
