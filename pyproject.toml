@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag"
+version = "0.1.0"
+description = "Local RAG pipeline with idempotent ingestion and swappable reliability/observability."
+requires-python = ">=3.10"
+dependencies = [
+  "weaviate-client",
+  "sentence-transformers",
+  "transformers",
+  "torch",
+  "networkx",
+  "langchain-core",
+  "langchain-text-splitters",
+  "langgraph",
+  "numpy",
+  "temporalio",
+  "langfuse",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-mock",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
