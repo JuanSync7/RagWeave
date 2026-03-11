@@ -133,6 +133,7 @@ def _load_prompt(filename: str) -> str:
 
 _REFORMULATOR_PROMPT: Optional[str] = None
 _EVALUATOR_PROMPT: Optional[str] = None
+_COMBINED_PROMPT: Optional[str] = None
 
 
 def _get_reformulator_prompt() -> str:
@@ -147,6 +148,13 @@ def _get_evaluator_prompt() -> str:
     if _EVALUATOR_PROMPT is None:
         _EVALUATOR_PROMPT = _load_prompt("query_evaluator.md")
     return _EVALUATOR_PROMPT
+
+
+def _get_combined_prompt() -> str:
+    global _COMBINED_PROMPT
+    if _COMBINED_PROMPT is None:
+        _COMBINED_PROMPT = _load_prompt("query_reformulate_and_evaluate.md")
+    return _COMBINED_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -394,12 +402,26 @@ def _match_kg_terms(query: str, max_terms: int = 20) -> str:
     return "Known terms in the knowledge base: " + ", ".join(matched)
 
 
-def reformulate_node(state: QueryState) -> dict:
-    """LLM-based query reformulation (creation agent)."""
+def reformulate_and_evaluate_node(state: QueryState) -> dict:
+    """Combined LLM reformulation + evaluation in a single Ollama call.
+
+    Halves the number of LLM round-trips compared to separate nodes.
+    """
     new_iteration = state["iteration"] + 1
 
     if not state["ollama_available"]:
-        return {"iteration": new_iteration}
+        conf = _heuristic_confidence(state["current_query"])
+        logger.info(
+            "Iteration %d: heuristic confidence=%.2f (Ollama unavailable)",
+            new_iteration,
+            conf,
+        )
+        return {
+            "current_query": state["current_query"],
+            "iteration": new_iteration,
+            "confidence": conf,
+            "reasoning": "fallback heuristic (Ollama unavailable)",
+        }
 
     previous_feedback = ""
     if state["reasoning"]:
@@ -409,7 +431,7 @@ def reformulate_node(state: QueryState) -> dict:
 
     kg_terms = _match_kg_terms(state["original_query"])
 
-    prompt = _get_reformulator_prompt().format(
+    prompt = _get_combined_prompt().format(
         original_query=state["original_query"],
         iteration=new_iteration,
         max_iterations=state["max_iterations"],
@@ -421,61 +443,58 @@ def reformulate_node(state: QueryState) -> dict:
     result = _call_ollama(prompt)
 
     if result:
-        reformulated = result.strip().strip('"').strip("'")
-        # Avoid empty reformulations
-        if reformulated:
-            logger.info(
-                "Iteration %d: reformulated '%s' -> '%s'",
-                new_iteration,
-                state["current_query"],
-                reformulated,
-            )
-            return {"current_query": reformulated, "iteration": new_iteration}
-
-    logger.warning("Iteration %d: reformulation failed, keeping current query", new_iteration)
-    return {"iteration": new_iteration}
-
-
-def evaluate_node(state: QueryState) -> dict:
-    """LLM-based query quality evaluation (verification agent)."""
-    if not state["ollama_available"]:
-        conf = _heuristic_confidence(state["current_query"])
-        logger.info(
-            "Iteration %d: heuristic confidence=%.2f (Ollama unavailable)",
-            state["iteration"],
-            conf,
-        )
-        return {
-            "confidence": conf,
-            "reasoning": "fallback heuristic (Ollama unavailable)",
-        }
-
-    prompt = _get_evaluator_prompt().format(query=state["current_query"])
-    result = _call_ollama(prompt)
-
-    if result:
         try:
-            # Strip markdown code fences if present
             cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", result.strip())
             parsed = json.loads(cleaned)
+            reformulated = str(parsed.get("reformulated_query", "")).strip()
             confidence = float(parsed.get("confidence", 0.0))
             confidence = max(0.0, min(1.0, confidence))
             reasoning = str(parsed.get("reasoning", ""))
-            logger.info(
-                "Iteration %d: confidence=%.2f reasoning='%s'",
-                state["iteration"],
-                confidence,
-                reasoning,
-            )
-            return {"confidence": confidence, "reasoning": reasoning}
+
+            if reformulated:
+                logger.info(
+                    "Iteration %d: '%s' -> '%s' (confidence=%.2f, reasoning='%s')",
+                    new_iteration,
+                    state["current_query"],
+                    reformulated,
+                    confidence,
+                    reasoning,
+                )
+            else:
+                reformulated = state["current_query"]
+                logger.info(
+                    "Iteration %d: reformulation empty, keeping current query (confidence=%.2f, reasoning='%s')",
+                    new_iteration,
+                    confidence,
+                    reasoning,
+                )
+            return {
+                "current_query": reformulated,
+                "iteration": new_iteration,
+                "confidence": confidence,
+                "reasoning": reasoning,
+            }
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning(
-                "Failed to parse evaluator JSON: %s. Raw: %s", e, result[:200]
+                "Failed to parse combined JSON: %s. Raw: %s", e, result[:200]
             )
+            return {
+                "current_query": state["current_query"],
+                "iteration": new_iteration,
+                "confidence": 0.5,
+                "reasoning": "parse failed",
+            }
 
-    # Fallback on parse failure
-    logger.warning("Iteration %d: evaluation failed, using default confidence", state["iteration"])
-    return {"confidence": 0.5, "reasoning": "evaluation parse failed, using default"}
+    logger.warning(
+        "Iteration %d: combined reformulate+evaluate returned no content, keeping query",
+        new_iteration,
+    )
+    return {
+        "current_query": state["current_query"],
+        "iteration": new_iteration,
+        "confidence": 0.5,
+        "reasoning": "empty response",
+    }
 
 
 def exhaust_node(state: QueryState) -> dict:
@@ -506,15 +525,15 @@ def exhaust_node(state: QueryState) -> dict:
 def _route_after_sanitize(state: QueryState) -> str:
     if state.get("action") == "ask_user":
         return "end"
-    return "reformulate"
+    return "reformulate_and_evaluate"
 
 
-def _route_after_evaluate(state: QueryState) -> str:
+def _route_after_combined(state: QueryState) -> str:
     if state["confidence"] >= state["confidence_threshold"]:
         return "end"
     if state["iteration"] >= state["max_iterations"]:
         return "exhaust"
-    return "reformulate"
+    return "reformulate_and_evaluate"
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +545,7 @@ def _build_graph():
     graph = StateGraph(QueryState)
 
     graph.add_node("sanitize", sanitize_node)
-    graph.add_node("reformulate", reformulate_node)
-    graph.add_node("evaluate", evaluate_node)
+    graph.add_node("reformulate_and_evaluate", reformulate_and_evaluate_node)
     graph.add_node("exhaust", exhaust_node)
 
     graph.set_entry_point("sanitize")
@@ -535,13 +553,12 @@ def _build_graph():
     graph.add_conditional_edges(
         "sanitize",
         _route_after_sanitize,
-        {"end": END, "reformulate": "reformulate"},
+        {"end": END, "reformulate_and_evaluate": "reformulate_and_evaluate"},
     )
-    graph.add_edge("reformulate", "evaluate")
     graph.add_conditional_edges(
-        "evaluate",
-        _route_after_evaluate,
-        {"end": END, "reformulate": "reformulate", "exhaust": "exhaust"},
+        "reformulate_and_evaluate",
+        _route_after_combined,
+        {"end": END, "reformulate_and_evaluate": "reformulate_and_evaluate", "exhaust": "exhaust"},
     )
     graph.add_edge("exhaust", END)
 
@@ -554,6 +571,24 @@ _COMPILED_GRAPH = _build_graph()
 # ---------------------------------------------------------------------------
 # Public entry point — backward-compatible with rag_chain.py
 # ---------------------------------------------------------------------------
+
+
+def warm_up_ollama() -> None:
+    """Send a tiny request to Ollama to pre-load the query processing model.
+
+    Call this at worker startup so the first real query doesn't pay the
+    cold-start cost (~5-10s model load).
+    """
+    if not _check_ollama_available():
+        logger.warning("Ollama not reachable — skipping warm-up")
+        return
+
+    logger.info("Warming up Ollama model '%s'...", QUERY_PROCESSING_MODEL)
+    import time
+    t0 = time.perf_counter()
+    _call_ollama("ping", system="Reply with 'ok' only.")
+    elapsed = (time.perf_counter() - t0) * 1000
+    logger.info("Ollama warm-up done in %.0fms", elapsed)
 
 
 def process_query(

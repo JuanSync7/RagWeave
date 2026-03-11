@@ -26,9 +26,27 @@ logger = logging.getLogger("rag.vector_store")
 tracer = get_tracer()
 
 
+def create_persistent_client() -> weaviate.WeaviateClient:
+    """Create a long-lived Weaviate embedded client.
+
+    Caller is responsible for calling client.close() on shutdown.
+    Preferred for server/worker processes that serve many queries.
+    """
+    span = tracer.start_span("vector_store.create_persistent_client")
+    client = weaviate.connect_to_embedded(
+        persistence_data_path=WEAVIATE_DATA_DIR,
+    )
+    span.end(status="ok")
+    return client
+
+
 @contextmanager
 def get_weaviate_client():
-    """Context manager for Weaviate embedded client."""
+    """Context manager for Weaviate embedded client.
+
+    Opens and closes the embedded instance per use — suitable for CLI
+    and batch scripts. For server use, prefer create_persistent_client().
+    """
     span = tracer.start_span("vector_store.get_weaviate_client")
     client = weaviate.connect_to_embedded(
         persistence_data_path=WEAVIATE_DATA_DIR,

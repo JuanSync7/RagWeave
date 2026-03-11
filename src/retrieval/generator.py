@@ -72,6 +72,27 @@ class OllamaGenerator:
             retryable_exceptions=(URLError, TimeoutError, ConnectionError),
         )
 
+    def _build_messages(
+        self,
+        query: str,
+        context_chunks: List[str],
+        scores: Optional[List[float]] = None,
+    ) -> list[dict]:
+        if scores:
+            context = "\n\n".join(
+                f"[{i+1}] (relevance: {score:.0%}) {chunk}"
+                for i, (chunk, score) in enumerate(zip(context_chunks, scores))
+            )
+        else:
+            context = "\n\n".join(
+                f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
+            )
+        user_message = _USER_TEMPLATE.format(context=context, question=query)
+        return [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ]
+
     def generate(
         self,
         query: str,
@@ -98,23 +119,10 @@ class OllamaGenerator:
             },
         )
 
-        if scores:
-            context = "\n\n".join(
-                f"[{i+1}] (relevance: {score:.0%}) {chunk}"
-                for i, (chunk, score) in enumerate(zip(context_chunks, scores))
-            )
-        else:
-            context = "\n\n".join(
-                f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
-            )
-        user_message = _USER_TEMPLATE.format(context=context, question=query)
-
+        messages = self._build_messages(query, context_chunks, scores)
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": messages,
             "stream": False,
             "options": {
                 "num_predict": self.max_tokens,
@@ -155,6 +163,57 @@ class OllamaGenerator:
             logger.warning("Could not parse Ollama response: %s", e)
             span.end(status="error", error=e)
             return None
+
+    def generate_stream(
+        self,
+        query: str,
+        context_chunks: List[str],
+        scores: Optional[List[float]] = None,
+    ):
+        """Stream tokens from Ollama. Yields content strings as they arrive.
+
+        Same prompt as generate(), but uses Ollama's streaming mode so
+        callers can display tokens incrementally.
+        """
+        if not context_chunks:
+            return
+
+        messages = self._build_messages(query, context_chunks, scores)
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "num_predict": self.max_tokens,
+                "temperature": self.temperature,
+            },
+        }
+
+        try:
+            req = Request(
+                f"{self.base_url}/api/chat",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            resp = urlopen(req, timeout=120)
+            try:
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield token
+                    if chunk.get("done"):
+                        break
+            finally:
+                resp.close()
+        except URLError as e:
+            logger.warning("Ollama streaming failed: %s", e)
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning("Could not parse Ollama stream chunk: %s", e)
 
     def is_available(self) -> bool:
         """Check if Ollama is running and the model is available."""

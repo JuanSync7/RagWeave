@@ -26,7 +26,10 @@ RERANKER_MODEL_PATH = os.environ.get(
 # --- Weaviate ---
 WEAVIATE_COLLECTION_NAME = "RAGDocuments"
 # Weaviate embedded mode stores data here
-WEAVIATE_DATA_DIR = str(PROJECT_ROOT / ".weaviate_data")
+WEAVIATE_DATA_DIR = os.environ.get(
+    "RAG_WEAVIATE_DATA_DIR",
+    str(PROJECT_ROOT / ".weaviate_data"),
+)
 
 # --- Hybrid Search ---
 # Alpha: 0.0 = pure BM25, 1.0 = pure vector, 0.5 = balanced
@@ -118,6 +121,11 @@ RETRY_BACKOFF_MULTIPLIER = float(
 # --- Temporal (optional) ---
 TEMPORAL_TARGET_HOST = os.environ.get("RAG_TEMPORAL_TARGET_HOST", "localhost:7233")
 TEMPORAL_TASK_QUEUE = os.environ.get("RAG_TEMPORAL_TASK_QUEUE", "rag-reliability")
+
+# --- Server ---
+RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
+RAG_API_URL = os.environ.get("RAG_API_URL", "http://localhost:8000")
+RAG_WORKER_CONCURRENCY = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
 
 # --- Observability ---
 OBSERVABILITY_PROVIDER = os.environ.get("RAG_OBSERVABILITY_PROVIDER", "noop")
