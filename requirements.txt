@@ -1,0 +1,13 @@
+weaviate-client
+sentence-transformers
+transformers
+torch
+networkx
+langchain-core
+langchain-text-splitters
+langgraph
+numpy
+temporalio
+langfuse
+pytest
+pytest-mock
