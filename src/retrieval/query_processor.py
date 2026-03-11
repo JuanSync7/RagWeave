@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import hashlib
 from dataclasses import dataclass
 from enum import Enum
 from collections import defaultdict
@@ -42,7 +43,14 @@ from config.settings import (
     QUERY_PROCESSING_MODEL,
     QUERY_PROCESSING_TEMPERATURE,
     QUERY_PROCESSING_TIMEOUT,
+    RETRY_BACKOFF_MULTIPLIER,
+    RETRY_INITIAL_BACKOFF_SECONDS,
+    RETRY_MAX_ATTEMPTS,
+    RETRY_MAX_BACKOFF_SECONDS,
 )
+from src.platform.observability.providers import get_tracer
+from src.platform.reliability.providers import get_retry_provider
+from src.platform.schemas.reliability import RetryPolicy
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -58,6 +66,16 @@ if not logger.handlers:
         logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
     )
     logger.addHandler(_file_handler)
+
+_retry_provider = get_retry_provider()
+_tracer = get_tracer()
+_retry_policy = RetryPolicy(
+    max_attempts=RETRY_MAX_ATTEMPTS,
+    initial_backoff_seconds=RETRY_INITIAL_BACKOFF_SECONDS,
+    max_backoff_seconds=RETRY_MAX_BACKOFF_SECONDS,
+    backoff_multiplier=RETRY_BACKOFF_MULTIPLIER,
+    retryable_exceptions=(URLError, TimeoutError, ConnectionError),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +232,10 @@ def _detect_injection(query: str) -> bool:
 
 def _call_ollama(prompt: str, system: str = "") -> Optional[str]:
     """Call Ollama chat API. Returns response text or None on failure."""
+    span = _tracer.start_span(
+        "query_processor.call_ollama",
+        {"model": QUERY_PROCESSING_MODEL},
+    )
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -235,21 +257,45 @@ def _call_ollama(prompt: str, system: str = "") -> Optional[str]:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(req, timeout=QUERY_PROCESSING_TIMEOUT) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("message", {}).get("content")
+
+        def _do_request():
+            with urlopen(req, timeout=QUERY_PROCESSING_TIMEOUT) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                return result.get("message", {}).get("content")
+
+        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+        result = _retry_provider.execute(
+            operation_name="query_processor_ollama_chat",
+            fn=_do_request,
+            policy=_retry_policy,
+            idempotency_key=f"query_ollama:{key}",
+        )
+        span.end(status="ok")
+        return result
     except (URLError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Ollama call failed: %s", e)
+        span.end(status="error", error=e)
         return None
 
 
 def _check_ollama_available() -> bool:
     """Check if Ollama API is reachable."""
+    span = _tracer.start_span("query_processor.ollama_healthcheck")
     try:
         req = Request(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags", method="GET")
-        with urlopen(req, timeout=5) as resp:
-            return resp.status == 200
+        def _check():
+            with urlopen(req, timeout=5) as resp:
+                return resp.status == 200
+        result = _retry_provider.execute(
+            operation_name="query_processor_ollama_healthcheck",
+            fn=_check,
+            policy=_retry_policy,
+            idempotency_key="query_ollama_healthcheck",
+        )
+        span.end(status="ok")
+        return result
     except Exception:
+        span.end(status="error")
         return False
 
 
@@ -531,45 +577,58 @@ def process_query(
     Returns:
         QueryResult with the processed query and recommended action.
     """
-    ollama_available = _check_ollama_available()
-    if not ollama_available:
-        logger.warning("Ollama unavailable; falling back to heuristic mode")
+    root_span = _tracer.start_span("query_processor.process_query", {"raw_query_len": len(raw_query)})
+    span_status = "ok"
+    span_error = None
+    try:
+        ollama_available = _check_ollama_available()
+        if not ollama_available:
+            logger.warning("Ollama unavailable; falling back to heuristic mode")
 
-    initial_state: QueryState = {
-        "original_query": raw_query,
-        "current_query": raw_query,
-        "confidence": 0.0,
-        "reasoning": "",
-        "iteration": 0,
-        "max_iterations": max_iterations,
-        "confidence_threshold": confidence_threshold,
-        "action": "",
-        "clarification_message": "",
-        "ollama_available": ollama_available,
-    }
+        initial_state: QueryState = {
+            "original_query": raw_query,
+            "current_query": raw_query,
+            "confidence": 0.0,
+            "reasoning": "",
+            "iteration": 0,
+            "max_iterations": max_iterations,
+            "confidence_threshold": confidence_threshold,
+            "action": "",
+            "clarification_message": "",
+            "ollama_available": ollama_available,
+        }
 
-    logger.info("Processing query: '%s'", raw_query[:100])
-    final_state = _COMPILED_GRAPH.invoke(initial_state)
+        logger.info("Processing query: '%s'", raw_query[:100])
+        final_state = _COMPILED_GRAPH.invoke(initial_state)
 
-    action = (
-        QueryAction.ASK_USER
-        if final_state["action"] == "ask_user"
-        else QueryAction.SEARCH
-    )
-    clarification = final_state["clarification_message"] or None
+        action = (
+            QueryAction.ASK_USER
+            if final_state["action"] == "ask_user"
+            else QueryAction.SEARCH
+        )
+        clarification = final_state["clarification_message"] or None
 
-    logger.info(
-        "Query processing complete: action=%s confidence=%.2f iterations=%d query='%s'",
-        action.value,
-        final_state["confidence"],
-        final_state["iteration"],
-        final_state["current_query"][:100],
-    )
+        logger.info(
+            "Query processing complete: action=%s confidence=%.2f iterations=%d query='%s'",
+            action.value,
+            final_state["confidence"],
+            final_state["iteration"],
+            final_state["current_query"][:100],
+        )
 
-    return QueryResult(
-        processed_query=final_state["current_query"],
-        confidence=final_state["confidence"],
-        action=action,
-        clarification_message=clarification,
-        iterations=final_state["iteration"],
-    )
+        result = QueryResult(
+            processed_query=final_state["current_query"],
+            confidence=final_state["confidence"],
+            action=action,
+            clarification_message=clarification,
+            iterations=final_state["iteration"],
+        )
+        root_span.set_attribute("action", result.action.value)
+        root_span.set_attribute("confidence", result.confidence)
+        return result
+    except Exception as exc:
+        span_status = "error"
+        span_error = exc
+        raise
+    finally:
+        root_span.end(status=span_status, error=span_error)

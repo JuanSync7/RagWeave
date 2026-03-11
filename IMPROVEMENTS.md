@@ -3,77 +3,9 @@
  * @end-summary -->
 # RAG System: Gaps, Improvements & Automated Evaluation
 
-This document covers three areas:
-1. **What's missing** — gaps in the current system
-2. **What can be improved** — making the system more robust
-3. **Automated evaluation infrastructure** — weekly regression testing with LLM-as-judge
-
----
-
-## Part 1: What's Missing
-
-### 1.1 No Test Suite
-
-The entire codebase (2,600+ lines across 10 modules) has zero tests. This is the single biggest risk — any refactoring or improvement could silently break the pipeline.
-
-**What needs tests:**
-
-| Component | Test Type | What to verify |
-|-----------|-----------|----------------|
-| `document_processor.py` | Unit | Boilerplate removal, metadata extraction, encoding handling |
-| `markdown_processor.py` | Unit | Heading normalization, semantic chunk boundaries, section metadata |
-| `knowledge_graph.py` | Unit | Entity extraction, case dedup, relation filtering, acronym expansion |
-| `query_processor.py` | Unit | Injection detection, sanitization, confidence routing |
-| `vector_store.py` | Integration | Hybrid search correctness, filter behavior, empty results |
-| `reranker.py` | Unit | Score normalization (sigmoid), ranking order preservation |
-| `generator.py` | Unit | Citation formatting, Ollama fallback behavior |
-| `rag_chain.py` | Integration | End-to-end pipeline: query → search → rerank → generate |
-| `query.py` | Unit | Filter parsing (`source:`, `section:` prefix extraction) |
-
-### 1.2 No Dependency Management
-
-No `requirements.txt`, `pyproject.toml`, or lockfile exists. The environment can't be reproduced.
-
-**Inferred dependencies** (from imports):
-```
-weaviate-client
-sentence-transformers
-transformers
-torch
-networkx
-langchain-core
-langchain-text-splitters
-langgraph
-gliner  # optional
-```
-
-### 1.3 Inconsistent Logging
-
-Only `query_processor.py` uses Python's `logging` module (writes to `logs/query_processor.log`). All other modules use bare `print()` statements (35+ across the codebase). This makes production monitoring impossible — no log levels, no structured output, no rotation.
-
-### 1.4 No Retry Logic for External Services
-
-Ollama calls in `generator.py` and `query_processor.py` fail immediately on timeout or connection error. A single network hiccup kills the entire query. No exponential backoff, no circuit breaker.
-
-### 1.5 No Observability
-
-No metrics on:
-- Embedding latency per batch
-- Search latency and result counts
-- Reranker score distributions
-- Filter hit rates (how often filters narrow vs return empty)
-- End-to-end query latency breakdown
-- KG expansion hit rate (how often KG terms are found)
-
-### 1.6 No Incremental Ingestion
-
-`ingest.py` always does a full re-ingest (`fresh=True` by default, deletes the entire collection). No way to add new documents without re-embedding everything.
-
-### 1.7 No Input Validation at System Boundaries
-
-- `source_filter` and `heading_filter` are passed directly to Weaviate Filter API without validation
-- No validation on `alpha`, `search_limit`, `rerank_top_k` ranges when called programmatically
-- Document file paths not checked for symlinks or path traversal
+This document covers two areas:
+1. **What can be improved** — making the system more robust
+2. **Automated evaluation infrastructure** — weekly regression testing with LLM-as-judge
 
 ---
 

@@ -5,6 +5,8 @@
 # @end-summary
 """Weaviate vector store with hybrid search (BM25 + dense vector)."""
 
+import hashlib
+import logging
 from typing import List, Optional
 from contextlib import contextmanager
 
@@ -18,11 +20,16 @@ from config.settings import (
     HYBRID_SEARCH_ALPHA,
     SEARCH_LIMIT,
 )
+from src.platform.observability.providers import get_tracer
+
+logger = logging.getLogger("rag.vector_store")
+tracer = get_tracer()
 
 
 @contextmanager
 def get_weaviate_client():
     """Context manager for Weaviate embedded client."""
+    span = tracer.start_span("vector_store.get_weaviate_client")
     client = weaviate.connect_to_embedded(
         persistence_data_path=WEAVIATE_DATA_DIR,
     )
@@ -30,11 +37,14 @@ def get_weaviate_client():
         yield client
     finally:
         client.close()
+        span.end(status="ok")
 
 
 def ensure_collection(client: weaviate.WeaviateClient) -> None:
     """Create the document collection if it doesn't exist."""
+    span = tracer.start_span("vector_store.ensure_collection")
     if client.collections.exists(WEAVIATE_COLLECTION_NAME):
+        span.end(status="ok")
         return
 
     client.collections.create(
@@ -54,6 +64,13 @@ def ensure_collection(client: weaviate.WeaviateClient) -> None:
             Property(name="heading_level", data_type=DataType.INT),
         ],
     )
+    span.end(status="ok")
+
+
+def build_chunk_id(source: str, chunk_index: int, text: str) -> str:
+    """Deterministic chunk ID for idempotent upserts."""
+    payload = f"{source}:{chunk_index}:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def add_documents(
@@ -67,6 +84,7 @@ def add_documents(
     Returns:
         Number of documents added.
     """
+    span = tracer.start_span("vector_store.add_documents", {"count": len(texts)})
     collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
 
     if metadatas is None:
@@ -74,9 +92,12 @@ def add_documents(
 
     with collection.batch.dynamic() as batch:
         for text, embedding, metadata in zip(texts, embeddings, metadatas):
+            source = metadata.get("source", "unknown")
+            chunk_index = metadata.get("chunk_index", 0)
+            chunk_id = metadata.get("chunk_id") or build_chunk_id(source, chunk_index, text)
             properties = {
                 "text": text,
-                "source": metadata.get("source", "unknown"),
+                "source": source,
                 "title": metadata.get("title", ""),
                 "author": metadata.get("author", ""),
                 "date": metadata.get("date", ""),
@@ -87,8 +108,9 @@ def add_documents(
                 "heading": metadata.get("heading", ""),
                 "heading_level": metadata.get("heading_level", 0),
             }
-            batch.add_object(properties=properties, vector=embedding)
+            batch.add_object(properties=properties, vector=embedding, uuid=chunk_id)
 
+    span.end(status="ok")
     return len(texts)
 
 
@@ -113,6 +135,10 @@ def hybrid_search(
     Returns:
         List of dicts with 'text', 'metadata', and 'score' keys.
     """
+    span = tracer.start_span(
+        "vector_store.hybrid_search",
+        {"alpha": alpha, "limit": limit, "has_filters": filters is not None},
+    )
     collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
 
     results = collection.query.hybrid(
@@ -143,11 +169,26 @@ def hybrid_search(
             },
             "score": obj.metadata.score if obj.metadata else 0.0,
         })
-
+    span.set_attribute("result_count", len(documents))
+    span.end(status="ok")
     return documents
 
 
 def delete_collection(client: weaviate.WeaviateClient) -> None:
     """Delete the document collection (useful for re-ingestion)."""
+    span = tracer.start_span("vector_store.delete_collection")
     if client.collections.exists(WEAVIATE_COLLECTION_NAME):
         client.collections.delete(WEAVIATE_COLLECTION_NAME)
+    span.end(status="ok")
+
+
+def delete_documents_by_source(client: weaviate.WeaviateClient, source: str) -> int:
+    """Delete chunks by source metadata value."""
+    span = tracer.start_span("vector_store.delete_documents_by_source", {"source": source})
+    collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
+    where = Filter.by_property("source").equal(source)
+    result = collection.data.delete_many(where=where)
+    deleted = getattr(result, "matches", 0) or 0
+    span.set_attribute("deleted_count", deleted)
+    span.end(status="ok")
+    return deleted

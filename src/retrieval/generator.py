@@ -4,6 +4,8 @@
 """Ollama-based LLM generator for RAG answer synthesis."""
 
 import json
+import logging
+import hashlib
 from typing import List, Optional
 from urllib.request import urlopen, Request
 from urllib.error import URLError
@@ -13,7 +15,14 @@ from config.settings import (
     OLLAMA_MODEL,
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,
+    RETRY_BACKOFF_MULTIPLIER,
+    RETRY_INITIAL_BACKOFF_SECONDS,
+    RETRY_MAX_ATTEMPTS,
+    RETRY_MAX_BACKOFF_SECONDS,
 )
+from src.platform.observability.providers import get_tracer
+from src.platform.reliability.providers import get_retry_provider
+from src.platform.schemas.reliability import RetryPolicy
 
 
 _SYSTEM_PROMPT = (
@@ -36,6 +45,8 @@ Question: {question}
 
 Answer:"""
 
+logger = logging.getLogger("rag.generator")
+
 
 class OllamaGenerator:
     """Generate answers using Ollama's HTTP API."""
@@ -51,6 +62,15 @@ class OllamaGenerator:
         self.base_url = base_url.rstrip("/")
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.retry_provider = get_retry_provider()
+        self.tracer = get_tracer()
+        self.retry_policy = RetryPolicy(
+            max_attempts=RETRY_MAX_ATTEMPTS,
+            initial_backoff_seconds=RETRY_INITIAL_BACKOFF_SECONDS,
+            max_backoff_seconds=RETRY_MAX_BACKOFF_SECONDS,
+            backoff_multiplier=RETRY_BACKOFF_MULTIPLIER,
+            retryable_exceptions=(URLError, TimeoutError, ConnectionError),
+        )
 
     def generate(
         self,
@@ -70,6 +90,13 @@ class OllamaGenerator:
         """
         if not context_chunks:
             return None
+        span = self.tracer.start_span(
+            "generator.generate",
+            {
+                "model": self.model,
+                "context_chunk_count": len(context_chunks),
+            },
+        )
 
         if scores:
             context = "\n\n".join(
@@ -102,23 +129,47 @@ class OllamaGenerator:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urlopen(req, timeout=120) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                return result.get("message", {}).get("content")
+
+            def _do_request():
+                with urlopen(req, timeout=120) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+                    return result.get("message", {}).get("content")
+
+            content = self.retry_provider.execute(
+                operation_name="ollama_generate",
+                fn=_do_request,
+                policy=self.retry_policy,
+                idempotency_key=(
+                    f"gen:{self.model}:"
+                    f"{hashlib.sha256(query.encode('utf-8')).hexdigest()[:16]}:"
+                    f"{len(context_chunks)}"
+                ),
+            )
+            span.end(status="ok")
+            return content
         except URLError as e:
-            print(f"Warning: Ollama generation failed: {e}")
+            logger.warning("Ollama generation failed: %s", e)
+            span.end(status="error", error=e)
             return None
         except (json.JSONDecodeError, KeyError) as e:
-            print(f"Warning: Could not parse Ollama response: {e}")
+            logger.warning("Could not parse Ollama response: %s", e)
+            span.end(status="error", error=e)
             return None
 
     def is_available(self) -> bool:
         """Check if Ollama is running and the model is available."""
+        span = self.tracer.start_span(
+            "generator.is_available",
+            {"model": self.model},
+        )
         try:
             req = Request(f"{self.base_url}/api/tags", method="GET")
             with urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 models = [m.get("name", "") for m in data.get("models", [])]
-                return any(self.model in m for m in models)
+                available = any(self.model in m for m in models)
+                span.end(status="ok")
+                return available
         except Exception:
+            span.end(status="error")
             return False

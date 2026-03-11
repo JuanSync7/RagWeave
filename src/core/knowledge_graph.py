@@ -12,12 +12,14 @@ expansion to augment BM25 search with related terms.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
+logger = logging.getLogger("rag.knowledge_graph")
 
 # --- Entity Extraction ---
 
@@ -294,9 +296,9 @@ class KnowledgeGraphBuilder:
         if use_gliner:
             try:
                 self._extractor = GLiNEREntityExtractor()
-                print("Using GLiNER for entity extraction.")
+                logger.info("Using GLiNER for entity extraction.")
             except Exception as e:
-                print(f"Warning: GLiNER unavailable ({e}), falling back to regex.")
+                logger.warning("GLiNER unavailable (%s), falling back to regex.", e)
                 self._extractor = EntityExtractor()
         else:
             self._extractor = EntityExtractor()

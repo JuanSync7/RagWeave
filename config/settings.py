@@ -101,3 +101,27 @@ GENERATION_TEMPERATURE = float(os.environ.get("RAG_GENERATION_TEMPERATURE", "0.3
 # Resolve forward reference: query processing model defaults to generation model
 if QUERY_PROCESSING_MODEL is None:
     QUERY_PROCESSING_MODEL = OLLAMA_MODEL
+
+# --- Reliability / Retry ---
+RETRY_PROVIDER = os.environ.get("RAG_RETRY_PROVIDER", "local")
+RETRY_MAX_ATTEMPTS = int(os.environ.get("RAG_RETRY_MAX_ATTEMPTS", "3"))
+RETRY_INITIAL_BACKOFF_SECONDS = float(
+    os.environ.get("RAG_RETRY_INITIAL_BACKOFF_SECONDS", "0.5")
+)
+RETRY_MAX_BACKOFF_SECONDS = float(
+    os.environ.get("RAG_RETRY_MAX_BACKOFF_SECONDS", "5.0")
+)
+RETRY_BACKOFF_MULTIPLIER = float(
+    os.environ.get("RAG_RETRY_BACKOFF_MULTIPLIER", "2.0")
+)
+
+# --- Temporal (optional) ---
+TEMPORAL_TARGET_HOST = os.environ.get("RAG_TEMPORAL_TARGET_HOST", "localhost:7233")
+TEMPORAL_TASK_QUEUE = os.environ.get("RAG_TEMPORAL_TASK_QUEUE", "rag-reliability")
+
+# --- Observability ---
+OBSERVABILITY_PROVIDER = os.environ.get("RAG_OBSERVABILITY_PROVIDER", "noop")
+OBSERVABILITY_SCHEMA_VERSION = "1.0"
+
+# --- Incremental ingestion ---
+INGESTION_MANIFEST_PATH = PROCESSED_DIR / "ingestion_manifest.json"
