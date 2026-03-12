@@ -25,9 +25,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from temporalio.client import Client
 from temporalio.service import RPCError
 
@@ -64,14 +66,19 @@ from src.platform.security.quota_store import (
 from src.platform.security.rbac import require_role
 from src.platform.security.tenancy import resolve_tenant_id
 from server.schemas import (
+    ApiErrorDetail,
+    ApiErrorResponse,
     ApiKeyRecord,
     CreateApiKeyRequest,
     CreateApiKeyResponse,
     HealthResponse,
     QueryRequest,
     QueryResponse,
+    QuotaSetResponse,
     QuotasResponse,
     QuotaUpdateRequest,
+    RootResponse,
+    StatusResponse,
 )
 from server.workflows import RAGQueryWorkflow, RAG_QUERY_TASK_QUEUE
 
@@ -138,7 +145,93 @@ app.add_middleware(
 )
 
 
-@app.post("/query", response_model=QueryResponse)
+@app.middleware("http")
+async def add_request_id_middleware(request: Request, call_next):
+    """Attach an id to each request for traceability and consistent error payloads."""
+    request_id = request.headers.get("x-request-id") or f"req-{uuid.uuid4().hex[:12]}"
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
+
+
+def _error_payload(
+    request: Request,
+    *,
+    code: str,
+    message: str,
+    details: dict | None = None,
+) -> dict:
+    return ApiErrorResponse(
+        ok=False,
+        error=ApiErrorDetail(code=code, message=message, details=details),
+        request_id=getattr(request.state, "request_id", None),
+    ).model_dump()
+
+
+@app.exception_handler(HTTPException)
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Normalize HTTPException payloads to the API error envelope."""
+    detail = exc.detail
+    if isinstance(detail, str):
+        message = detail
+        details = None
+    elif isinstance(detail, dict):
+        message = str(detail.get("message", "Request failed"))
+        details = detail
+    else:
+        message = str(detail)
+        details = None
+    code = f"HTTP_{exc.status_code}"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_payload(request, code=code, message=message, details=details),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
+    """Normalize request-body/params validation failures."""
+    return JSONResponse(
+        status_code=422,
+        content=_error_payload(
+            request,
+            code="REQUEST_VALIDATION_ERROR",
+            message="Request validation failed",
+            details={"errors": exc.errors()},
+        ),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler to keep server errors schema-consistent."""
+    logger.exception("Unhandled API exception: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content=_error_payload(
+            request,
+            code="INTERNAL_SERVER_ERROR",
+            message="Internal server error",
+        ),
+    )
+
+
+_STANDARD_ERROR_RESPONSES = {
+    401: {"model": ApiErrorResponse},
+    403: {"model": ApiErrorResponse},
+    404: {"model": ApiErrorResponse},
+    422: {"model": ApiErrorResponse},
+    429: {"model": ApiErrorResponse},
+    500: {"model": ApiErrorResponse},
+    503: {"model": ApiErrorResponse},
+}
+
+
+@app.post("/query", response_model=QueryResponse, responses=_STANDARD_ERROR_RESPONSES)
 async def query(request: QueryRequest, principal: Principal = Depends(authenticate_request)):
     """Submit a RAG query.
 
@@ -192,7 +285,7 @@ async def query(request: QueryRequest, principal: Principal = Depends(authentica
     return QueryResponse(**result)
 
 
-@app.post("/query/stream")
+@app.post("/query/stream", responses=_STANDARD_ERROR_RESPONSES)
 async def query_stream(request: QueryRequest, principal: Principal = Depends(authenticate_request)):
     """Stream a RAG query response via Server-Sent Events.
 
@@ -364,7 +457,11 @@ async def metrics():
     return Response(content=payload, media_type=content_type)
 
 
-@app.get("/admin/api-keys", response_model=list[ApiKeyRecord])
+@app.get(
+    "/admin/api-keys",
+    response_model=list[ApiKeyRecord],
+    responses=_STANDARD_ERROR_RESPONSES,
+)
 async def admin_list_api_keys(
     include_revoked: bool = False,
     principal: Principal = Depends(authenticate_request),
@@ -374,7 +471,11 @@ async def admin_list_api_keys(
     return [ApiKeyRecord(**r) for r in records]
 
 
-@app.post("/admin/api-keys", response_model=CreateApiKeyResponse)
+@app.post(
+    "/admin/api-keys",
+    response_model=CreateApiKeyResponse,
+    responses=_STANDARD_ERROR_RESPONSES,
+)
 async def admin_create_api_key(
     request: CreateApiKeyRequest,
     principal: Principal = Depends(authenticate_request),
@@ -389,22 +490,30 @@ async def admin_create_api_key(
     return CreateApiKeyResponse(**created)
 
 
-@app.delete("/admin/api-keys/{key_id}")
+@app.delete(
+    "/admin/api-keys/{key_id}",
+    response_model=StatusResponse,
+    responses=_STANDARD_ERROR_RESPONSES,
+)
 async def admin_revoke_api_key(key_id: str, principal: Principal = Depends(authenticate_request)):
     require_role(principal, "admin")
     ok = revoke_api_key(key_id)
     if not ok:
         raise HTTPException(status_code=404, detail="API key not found")
-    return {"status": "revoked", "key_id": key_id}
+    return StatusResponse(status="revoked", key_id=key_id)
 
 
-@app.get("/admin/quotas", response_model=QuotasResponse)
+@app.get("/admin/quotas", response_model=QuotasResponse, responses=_STANDARD_ERROR_RESPONSES)
 async def admin_list_quotas(principal: Principal = Depends(authenticate_request)):
     require_role(principal, "admin")
     return QuotasResponse(**list_quotas())
 
 
-@app.put("/admin/quotas/{tenant_id}")
+@app.put(
+    "/admin/quotas/{tenant_id}",
+    response_model=QuotaSetResponse,
+    responses=_STANDARD_ERROR_RESPONSES,
+)
 async def admin_set_tenant_quota(
     tenant_id: str,
     request: QuotaUpdateRequest,
@@ -414,14 +523,21 @@ async def admin_set_tenant_quota(
     return set_tenant_quota(tenant_id, request.requests_per_minute)
 
 
-@app.delete("/admin/quotas/{tenant_id}")
+@app.delete(
+    "/admin/quotas/{tenant_id}",
+    response_model=StatusResponse,
+    responses=_STANDARD_ERROR_RESPONSES,
+)
 async def admin_delete_tenant_quota(
     tenant_id: str,
     principal: Principal = Depends(authenticate_request),
 ):
     require_role(principal, "admin")
     existed = delete_tenant_quota(tenant_id)
-    return {"status": "deleted" if existed else "noop", "tenant_id": tenant_id}
+    return StatusResponse(
+        status="deleted" if existed else "noop",
+        tenant_id=tenant_id,
+    )
 
 
 def _sse(event: str, data: dict) -> str:
@@ -569,7 +685,7 @@ def _stream_ollama(
             resp.close()
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse, responses=_STANDARD_ERROR_RESPONSES)
 async def health():
     """Check API and Temporal connectivity."""
     temporal_ok = False
@@ -602,11 +718,11 @@ async def health():
     )
 
 
-@app.get("/")
+@app.get("/", response_model=RootResponse, responses=_STANDARD_ERROR_RESPONSES)
 async def root():
-    return {
-        "service": "RAG Query API",
-        "docs": "/docs",
-        "health": "/health",
-        "query_endpoint": "POST /query",
-    }
+    return RootResponse(
+        service="RAG Query API",
+        docs="/docs",
+        health="/health",
+        query_endpoint="POST /query",
+    )

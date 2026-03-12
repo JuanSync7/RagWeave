@@ -61,6 +61,7 @@ When document refactoring is enabled, retrieval can use refactored text while pr
 - `python -m server.worker`: Temporal worker process.
 - `uvicorn server.api:app --host 0.0.0.0 --port 8000`: API server.
 - `python -m server.cli_client`: Interactive client targeting the API server.
+- `python -m server.mcp_adapter`: MCP tooling adapter over the API (`stdio` transport).
 
 ## Engineering Docs
 

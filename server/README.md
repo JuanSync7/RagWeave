@@ -20,6 +20,7 @@ Users → FastAPI Server → Temporal Server → Temporal Worker(s)
 | Component | File | What it does |
 |-----------|------|--------------|
 | **API Server** | `api.py` | Accepts HTTP requests, dispatches Temporal workflows. No GPU needed. |
+| **MCP Adapter** | `mcp_adapter.py` | Exposes API-backed `health` and `query` tools over MCP (`stdio`). |
 | **Temporal Worker** | `worker.py` | Loads RAGChain at startup, processes query activities from the queue. |
 | **Workflow** | `workflows.py` | Defines `RAGQueryWorkflow` with retry policy and timeouts. |
 | **Activities** | `activities.py` | `execute_rag_query` — runs against the preloaded RAGChain singleton. |
@@ -66,6 +67,27 @@ curl -X POST http://localhost:8000/query \
 # Or browse the API docs
 open http://localhost:8000/docs
 ```
+
+### 5. MCP Tooling Adapter (optional)
+
+Run the MCP adapter for IDE/agent tooling integrations:
+
+```bash
+python -m server.mcp_adapter
+```
+
+Exposed MCP tools:
+
+- `health`, `query`
+- `admin_list_api_keys`, `admin_create_api_key`, `admin_revoke_api_key`
+- `admin_list_quotas`, `admin_set_tenant_quota`, `admin_delete_tenant_quota`
+
+Environment variables for adapter auth forwarding:
+
+- `RAG_API_URL` (default `http://localhost:8000`)
+- `RAG_MCP_API_KEY` (optional, forwarded as `x-api-key`)
+- `RAG_MCP_BEARER_TOKEN` (optional, forwarded as `Authorization: Bearer ...`)
+- `RAG_MCP_ENABLE_ADMIN_TOOLS` (default disabled; set to `1` to allow admin MCP tools)
 
 ## Managed Container Mode (Optional)
 
@@ -181,6 +203,18 @@ These endpoints require an `admin` role:
 - `GET /admin/quotas`
 - `PUT /admin/quotas/{tenant_id}`
 - `DELETE /admin/quotas/{tenant_id}`
+
+## API Schema Contract
+
+The API enforces a standard schema contract:
+
+- request payloads use strict Pydantic models (`extra="forbid"` for query requests),
+- stage budget overrides are validated against known stage keys,
+- non-2xx responses are normalized to:
+  - `ok: false`
+  - `error: { code, message, details? }`
+  - `request_id`
+- each response includes `x-request-id` for correlation across logs and clients.
 
 ## Monitoring
 

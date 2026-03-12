@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       - name: Run tests
-        run: uv run --with pytest --with numpy python -m pytest tests/ingest tests/test_rate_limiter.py tests/test_cache_provider.py tests/test_security_auth.py tests/test_api_key_store.py tests/test_quota_store.py tests/test_query_processor.py tests/test_generator.py tests/test_validation.py tests/test_query_filters.py tests/test_rag_chain_budget.py tests/test_rag_chain_integration.py
+        run: uv run --with pytest --with numpy python -m pytest tests/ingest tests/test_rate_limiter.py tests/test_cache_provider.py tests/test_security_auth.py tests/test_api_key_store.py tests/test_quota_store.py tests/test_query_processor.py tests/test_generator.py tests/test_validation.py tests/test_query_filters.py tests/test_rag_chain_budget.py tests/test_rag_chain_integration.py tests/test_api_schemas.py tests/test_mcp_adapter.py tests/test_api_error_envelope.py
       - name: Compile checks
         run: uv run python -m py_compile server/api.py server/activities.py src/retrieval/rag_chain.py
 
