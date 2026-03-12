@@ -56,7 +56,7 @@ Each requirement follows this structure:
 
 ### 2.1 Pipeline Stages
 
-```
+```text
 User Query (natural language input)
     │
     ▼

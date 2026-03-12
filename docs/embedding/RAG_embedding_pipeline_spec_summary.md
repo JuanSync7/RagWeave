@@ -1,8 +1,10 @@
 # RAG Document Embedding Pipeline — Specification Summary
 
 **Companion document to:** `RAG_embedding_pipeline_spec.md` (v2.0.0)  
-**Purpose:** Requirements-level overview for stakeholders, reviewers, and implementers.  
-**See also:** `RAG_embedding_pipeline_summary.md` for architecture/design-focused summary.
+**Purpose:** Requirements-level overview for stakeholders, reviewers,
+and implementers.  
+**See also:** `RAG_embedding_pipeline_summary.md` for
+architecture/design-focused summary.
 
 > **Note:** This summary reflects specification intent.
 > For implemented ingestion behavior and code navigation, use:
@@ -15,15 +17,20 @@
 
 ## 1) System Intent
 
-The AION RAG Document Embedding Pipeline converts engineering documents into semantically searchable embeddings and optional knowledge graph triples for relationship-aware retrieval.
+The AION RAG Document Embedding Pipeline converts engineering documents into
+semantically searchable embeddings and optional knowledge graph triples for
+relationship-aware retrieval.
 
-It targets mission-critical ASIC knowledge workflows where retrieval errors can propagate to design mistakes. The specification defines pipeline behavior, quality controls, fallback paths, and measurable acceptance criteria.
+It targets mission-critical ASIC knowledge workflows where retrieval errors can
+propagate to design mistakes. The specification defines pipeline behavior,
+quality controls, fallback paths, and measurable acceptance criteria.
 
 ---
 
 ## 2) Scope and Boundaries
 
-**Entry point:** Source document file on local filesystem (`PDF`, `DOCX`, `PPTX`, `XLSX`, `Markdown`, `HTML`, `RST`, plain text).  
+**Entry point:** Source document file on local filesystem (`PDF`, `DOCX`,
+`PPTX`, `XLSX`, `Markdown`, `HTML`, `RST`, plain text).  
 **Exit points:**  
 
 - Vector embeddings + metadata in vector database  
@@ -41,7 +48,8 @@ It targets mission-critical ASIC knowledge workflows where retrieval errors can 
 
 ### Out of scope
 
-- Query processing, reranking, and answer generation (downstream retrieval layer)
+- Query processing, reranking, and answer generation
+  (downstream retrieval layer)
 - User authentication and access control
 - Document authoring or editing
 - Real-time document change detection (push-based ingestion)
@@ -57,13 +65,18 @@ It targets mission-critical ASIC knowledge workflows where retrieval errors can 
 
 ### Key Constraints
 
-The spec defines 7 explicit assumptions (Section 1.6) that bound the operating envelope: Python 3.11+ runtime, LangGraph/LangChain availability, accessible vector database, LLM provider (with fallback to deterministic alternatives), sequential document processing (no concurrent ingestion of the same document), documents ≤ ~100 pages (larger documents should be pre-split), and embedding model token limits accommodating target chunk sizes.
+The spec defines 7 explicit assumptions (Section 1.6) that bound the operating
+envelope: Python 3.11+ runtime, LangGraph/LangChain availability, accessible
+vector database, LLM provider (with fallback to deterministic alternatives),
+sequential document processing (no concurrent ingestion of the same document),
+documents <= ~100 pages (larger documents should be pre-split), and embedding
+model token limits accommodating target chunk sizes.
 
 ---
 
 ## 3) Pipeline Overview (13 Stages)
 
-```
+```text
     Source Document (filesystem path)
               │
               ▼
@@ -90,7 +103,9 @@ The spec defines 7 explicit assumptions (Section 1.6) that bound the operating e
       * = optional / configurable
 ```
 
-All stages share a common state object (`PipelineDocument`), write bounded outputs, and support fail-safe fallback behavior to avoid batch-halting failures.
+All stages share a common state object (`PipelineDocument`), write bounded
+outputs, and support fail-safe fallback behavior to avoid batch-halting
+failures.
 
 ---
 
@@ -99,9 +114,12 @@ All stages share a common state object (`PipelineDocument`), write bounded outpu
 The v2 specification is structured as a formal requirements document:
 
 - **RFC 2119 keywords** for requirement strength (`SHALL`, `SHOULD`, `MAY`)
-- **Requirement families:** `FR-*` (functional), `NFR-*` (non-functional), `SC-*` (security/compliance)
-- **Per-requirement rationale and acceptance criteria** to support implementation and verification
-- **Terminology, assumptions/constraints, and traceability matrix** for auditability
+- **Requirement families:** `FR-*` (functional), `NFR-*` (non-functional),
+  `SC-*` (security/compliance)
+- **Per-requirement rationale and acceptance criteria** to support
+  implementation and verification
+- **Terminology, assumptions/constraints, and traceability matrix** for
+  auditability
 
 ---
 
@@ -112,7 +130,8 @@ Functional requirements cover:
 - Core pipeline stages (`FR-100` to `FR-999`)
 - Data model and deterministic identity (`FR-1030` to `FR-1034`)
 - Quality validation (`FR-1100` to `FR-1199`)
-- Storage schema, hybrid search, and schema versioning (`FR-1120` to `FR-1133`)
+- Storage schema, hybrid search, and schema versioning
+  (`FR-1120` to `FR-1133`)
 - Embedding and storage (`FR-1200` to `FR-1399`)
 - Re-ingestion (`FR-1400`)
 - Review tiers (`FR-1500`)
@@ -158,7 +177,8 @@ Functional requirements cover:
 ## 8) Key Decisions Captured by the Spec
 
 - DAG-style orchestration for stage-level control and conditional routing
-- Deterministic identities (hash-based) for reproducibility and re-ingestion safety
+- Deterministic identities (hash-based) for reproducibility and
+  re-ingestion safety
 - Hybrid retrieval readiness (vector + keyword metadata support)
 - Delete-and-reinsert re-ingestion strategy to avoid partial drift
 - Configurable multimodal/KG/cross-reference paths with optional enablement
@@ -170,8 +190,10 @@ Functional requirements cover:
 The spec defines:
 
 - **System-level acceptance criteria** (pipeline correctness/quality gates)
-- **Evaluation framework requirements** (ground-truth, metrics, repeatable scoring)
-- **Feedback loop requirements** (capture retrieval feedback and support iterative improvements)
+- **Evaluation framework requirements** (ground-truth, metrics, repeatable
+  scoring)
+- **Feedback loop requirements** (capture retrieval feedback and support
+  iterative improvements)
 
 Together, these ensure the pipeline is not only implemented, but measurably effective.
 
@@ -179,9 +201,12 @@ Together, these ensure the pipeline is not only implemented, but measurably effe
 
 ## 10) External Dependencies (High-Level)
 
-**Required:** Vector database (e.g., Weaviate), LLM provider (e.g., OpenAI, Anthropic, Ollama)  
-**Optional:** VLM provider for figure-to-text conversion, dedicated graph database (e.g., Neo4j), observability platform (e.g., Langfuse)  
-**Downstream contract only:** Reranker and answer-generation systems consume pipeline outputs but are outside this spec's scope.
+**Required:** Vector database (e.g., Weaviate), LLM provider
+(e.g., OpenAI, Anthropic, Ollama)  
+**Optional:** VLM provider for figure-to-text conversion, dedicated graph
+database (e.g., Neo4j), observability platform (e.g., Langfuse)  
+**Downstream contract only:** Reranker and answer-generation systems consume
+pipeline outputs but are outside this spec's scope.
 
 ---
 
@@ -189,7 +214,8 @@ Together, these ensure the pipeline is not only implemented, but measurably effe
 
 - `RAG_embedding_pipeline_spec.md`: authoritative requirements baseline (v2)
 - `RAG_embedding_pipeline_arch.md`: implementation and design depth
-- `RAG_embedding_pipeline_spec_summary.md` (this document): concise requirements digest
+- `RAG_embedding_pipeline_spec_summary.md` (this document):
+  concise requirements digest
 
 ---
 

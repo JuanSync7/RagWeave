@@ -179,7 +179,7 @@ The RAG Document Embedding Pipeline is one component of a larger AI-Enabled Know
 
 The system SHALL process documents through a directed acyclic graph (DAG) of processing stages, implemented using a graph-based orchestration framework (LangGraph, which is part of the LangChain ecosystem). Each document SHALL flow through the following stages in order:
 
-```
+```text
 Source Document (filesystem path)
     │
     ▼
