@@ -1,20 +1,28 @@
 <!-- @summary
-This directory contains documentation for evaluating query quality and reformulating queries in a technical knowledge base system.
+Prompt templates used by retrieval query-processing stages, including legacy
+split prompts and the combined reformulate+evaluate prompt.
 @end-summary -->
 
 # prompts
 
 ## Overview
-This directory includes detailed documentation for evaluating the quality of queries and reformulating them within a hybrid search system, aiding in improving user experience by ensuring clear and relevant responses.
+
+This directory contains prompt files consumed by `src/retrieval/query_processor.py`.
+The runtime can use a combined reformulate+evaluate call while retaining split
+prompt templates for compatibility and experimentation.
 
 ## Files
-| File | Purpose | Key Exports |
-|------|---------|--------------|
-| query_evaluator.md | Evaluates query quality with scoring guidelines and input/output structure. | None |
-| query_reformulator.md | Prompts file for reformulating queries in a hybrid search system, exporting the `reformulate_query` function. | reformulate_query |
+
+| File | Purpose |
+| --- | --- |
+| `query_reformulate_and_evaluate.md` | Primary combined prompt for reformulation + evaluation JSON output. |
+| `query_reformulator.md` | Legacy reformulation-only prompt template. |
+| `query_evaluator.md` | Legacy evaluation-only prompt template. |
 
 ## Internal Dependencies
-No internal dependencies are present within this directory.
+
+- Loaded by `src/retrieval/query_processor.py` through prompt loader helpers.
 
 ## Subdirectories
+
 None

@@ -1,21 +1,31 @@
 <!-- @summary
-This directory contains core modules for embedding management, knowledge graph construction, and vector store integration in a project.
+Core runtime primitives for embeddings, vector storage, and knowledge graph
+construction/query expansion used by ingestion and retrieval.
 @end-summary -->
 
 # core
 
 ## Overview
-This directory includes core modules responsible for managing embeddings, constructing knowledge graphs, and integrating vector stores, essential components for text-based data processing and retrieval.
+
+This directory contains foundational components used across the project for:
+
+- embedding generation,
+- vector document storage/retrieval,
+- knowledge graph extraction and expansion.
 
 ## Files
+
 | File | Purpose | Key Exports |
-|------|---------|--------------|
-| embeddings.py | Provides a wrapper for embedding local documents using the BAAI/bge-m3 model compatible with LangChain. | LocalBGEEmbeddings |
-| knowledge_graph.py | Constructs a NetworkX DiGraph from document chunks and exports it as .md files, supporting entity extraction and querying. | KnowledgeGraphBuilder, GraphQueryExpander, export_obsidian |
-| vector_store.py | Manages a Weaviate vector store with hybrid search capabilities (BM25 + dense vectors). Provides functions for client setup, document addition, and retrieval. | get_weaviate_client, ensure_collection, add_documents, hybrid_search |
+| --- | --- | --- |
+| `embeddings.py` | Local embedding wrapper (LangChain-compatible) for BAAI/bge models | `LocalBGEEmbeddings` |
+| `knowledge_graph.py` | Entity/relation extraction, graph build/export, and query-time KG expansion | `KnowledgeGraphBuilder`, `GraphQueryExpander`, `export_obsidian` |
+| `vector_store.py` | Weaviate embedded client helpers for collection management, ingest, and hybrid retrieval | `create_persistent_client`, `get_weaviate_client`, `ensure_collection`, `add_documents`, `hybrid_search`, `delete_collection` |
 
 ## Internal Dependencies
-The files within this directory do not rely on each other directly.
+
+- Retrieval and ingestion depend on this directory.
+- `vector_store.py` and `embeddings.py` use observability provider hooks.
 
 ## Subdirectories
+
 None

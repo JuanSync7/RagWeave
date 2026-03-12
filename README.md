@@ -1,29 +1,58 @@
 <!-- @summary
-This project, named RAG, is designed to integrate and enhance retrieval augmented generation systems using Python. It includes modules for embedding management, knowledge graph construction, and vector store integration, along with directories for configuration settings, technical documentation, logs, processed files, and prompts.
+RAG platform with modular ingestion, retrieval/query serving, and Temporal-based
+multi-user API orchestration. Includes engineering docs, onboarding guides, and
+operations tooling for observability, backup/restore, and scaling.
 @end-summary -->
 
 # RAG
 
 ## Overview
-This project integrates and enhances retrieval augmented generation (RAG) systems using Python. It comprises core modules for embedding management, knowledge graph construction, and vector store integration, alongside directories for configuration settings, technical documentation, logs, processed files, and prompts.
 
-## Architecture
-The architecture of this project includes major components such as the embedding manager, knowledge graph builder, and vector store integrator. These components work together to facilitate efficient data retrieval and generation within a RAG framework.
+This repository contains an end-to-end RAG system with:
+
+- a modular 13-node ingestion workflow (`src/ingest`) for document-to-vector/KG processing,
+- a retrieval and query-serving runtime (`src/retrieval`, `server`) with Temporal orchestration,
+- platform modules for auth, limits, observability, and caching (`src/platform`),
+- operations and architecture documentation (`docs/`).
+
+## Architecture (Runtime)
+
+```text
+Users/CLI -> FastAPI (`server/api.py`) -> Temporal workflow -> Worker activity
+                                                    |
+                                                    v
+                                          `RAGChain` singleton
+                                  (retrieval, reranking, optional generation)
+```
+
+Ingestion runs separately and writes processed content/embeddings consumed by retrieval.
 
 ## Directory Map
 
 | Directory | Purpose |
 | --- | --- |
-| config/ | Contains configuration settings for the RAG system, including paths to directories and models used in operation. |
-| documents/ | Technical documentation files covering Python programming basics, machine learning fundamentals, and an overview of the RAG framework. |
-| logs/ | Logs related to query processing, detailing iterations, results, reformulations, and confidences without exports or imports. |
-| processed/ | Organized into JSON chunks and cleaned markdown formats, containing processed documents for Python, machine learning, and the RAG framework. |
-| prompts/ | Documentation for evaluating query quality and reformulating queries in a technical knowledge base system. |
-| src/ | Core modules for embedding management, knowledge graph construction, and vector store integration, including subdirectories for document ingestion and retrieval functionalities. |
+| `src/ingest/` | Modular ingestion pipeline (node-per-file, shared helpers, LangGraph workflow). |
+| `src/retrieval/` | Query processing, retrieval orchestration, reranking, and generation. |
+| `src/platform/` | Cross-cutting platform services: auth, quotas/rate limits, cache, metrics, observability. |
+| `server/` | FastAPI/Temporal runtime: API, workflows, activities, worker, schemas, and CLI client. |
+| `config/` | Central environment-driven settings (`config/settings.py`). |
+| `docs/` | Engineering guides, specs, operations runbooks, onboarding checklists. |
+| `tests/` | Unit/integration tests, including ingestion-focused tests in `tests/ingest/`. |
+| `scripts/` | Ops helpers (backup/restore, DR drill, tuning signal watcher, smoke test). |
+| `prompts/` | Prompt templates for retrieval query processing. |
 
 ## Entry Points
-- `ingest.py`: Main script for ingesting documents into the RAG system.
-- `query.py`: Script for processing user queries within the RAG framework.
 
-## Key Configuration
-Configuration settings are managed in the `config/` directory, where paths to directories and models used by the system are defined.
+- `ingest.py`: CLI for ingestion runs.
+- `query.py`: Local retrieval query CLI.
+- `python -m server.worker`: Temporal worker process.
+- `uvicorn server.api:app --host 0.0.0.0 --port 8000`: API server.
+- `python -m server.cli_client`: Interactive client targeting the API server.
+
+## Engineering Docs
+
+- Retrieval: `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`
+- Retrieval onboarding: `docs/retrieval/RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
+- Ingestion: `docs/embedding/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
+- Ingestion onboarding: `docs/embedding/INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
+- Server/runtime operations: `server/README.md`

@@ -211,3 +211,38 @@ OBSERVABILITY_SCHEMA_VERSION = "1.0"
 
 # --- Incremental ingestion ---
 INGESTION_MANIFEST_PATH = PROCESSED_DIR / "ingestion_manifest.json"
+
+# --- Ingestion pipeline (LangGraph) ---
+RAG_INGESTION_LLM_ENABLED = os.environ.get("RAG_INGESTION_LLM_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+RAG_INGESTION_LLM_MODEL = os.environ.get("RAG_INGESTION_LLM_MODEL", "qwen2.5:3b")
+RAG_INGESTION_LLM_TEMPERATURE = float(os.environ.get("RAG_INGESTION_LLM_TEMPERATURE", "0.1"))
+RAG_INGESTION_LLM_TIMEOUT_SECONDS = int(
+    os.environ.get("RAG_INGESTION_LLM_TIMEOUT_SECONDS", "45")
+)
+RAG_INGESTION_LLM_MAX_KEYWORDS = int(os.environ.get("RAG_INGESTION_LLM_MAX_KEYWORDS", "12"))
+RAG_INGESTION_EXPORT_EXTENSIONS = os.environ.get(
+    "RAG_INGESTION_EXPORT_EXTENSIONS",
+    ".txt,.md,.markdown,.rst,.html,.htm",
+)
+RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING = os.environ.get(
+    "RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING", "false"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING = os.environ.get(
+    "RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING", "false"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION = os.environ.get(
+    "RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION = os.environ.get(
+    "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_EXTRACTION", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_QUALITY_VALIDATION = os.environ.get(
+    "RAG_INGESTION_ENABLE_QUALITY_VALIDATION", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE = os.environ.get(
+    "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE", "true"
+).lower() in ("true", "1", "yes")
