@@ -187,3 +187,27 @@ These endpoints require an `admin` role:
 - **Temporal UI**: http://localhost:8080 — see all workflows, query history, latencies
 - **FastAPI docs**: http://localhost:8000/docs — interactive API documentation
 - **Health check**: `GET /health` — reports Temporal connectivity and worker status
+
+### Tuning Watch Script
+
+Use the tuning watcher to continuously evaluate scaling/concurrency signals and emit actionable recommendations:
+
+```bash
+# One-time snapshot
+python scripts/watch_tuning_signals.py --once
+
+# Continuous watch (every 30s)
+python scripts/watch_tuning_signals.py --interval-seconds 30
+
+# Send alerts to a webhook (Slack/Teams/etc.)
+python scripts/watch_tuning_signals.py --webhook-url "https://example/webhook"
+```
+
+What it checks:
+
+- Temporal schedule-to-start latency (query overridable via CLI arg)
+- Temporal queue backlog (query overridable via CLI arg)
+- API p95 latency from Prometheus (`rag_api_request_latency_ms`)
+- Retrieval/generation p95 stage latencies (`rag_pipeline_stage_ms`)
+- Worker CPU/memory pressure from `docker stats`
+- GPU memory pressure from `nvidia-smi` (when available)
