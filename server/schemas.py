@@ -19,6 +19,27 @@ class QueryRequest(BaseModel):
     alpha: float = Field(0.5, ge=0.0, le=1.0, description="Hybrid search balance (0=BM25, 1=vector)")
     search_limit: int = Field(10, ge=1, le=100, description="Max results from hybrid search")
     rerank_top_k: int = Field(5, ge=1, le=50, description="Top-K results after reranking")
+    tenant_id: Optional[str] = Field(None, description="Optional tenant override for admins")
+    max_query_iterations: Optional[int] = Field(
+        None,
+        ge=1,
+        le=8,
+        description="Cap for reformulation iterations",
+    )
+    fast_path: Optional[bool] = Field(
+        None,
+        description="Enable fast-path mode to bypass iterative reformulation",
+    )
+    overall_timeout_ms: Optional[int] = Field(
+        None,
+        ge=1000,
+        le=180000,
+        description="Overall retrieval timeout budget",
+    )
+    stage_budget_overrides: dict[str, int] = Field(
+        default_factory=dict,
+        description="Optional per-stage budget overrides in milliseconds",
+    )
 
 
 class ChunkResult(BaseModel):
@@ -42,6 +63,8 @@ class QueryResponse(BaseModel):
     latency_ms: Optional[float] = None
     stage_timings: list[dict] = Field(default_factory=list)
     timing_totals: dict = Field(default_factory=dict)
+    budget_exhausted: bool = False
+    budget_exhausted_stage: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -49,3 +72,34 @@ class HealthResponse(BaseModel):
     status: str
     temporal_connected: bool
     worker_available: bool
+
+
+class CreateApiKeyRequest(BaseModel):
+    subject: str = Field(..., min_length=1, max_length=200)
+    tenant_id: Optional[str] = Field(None, description="Tenant bound to this key")
+    roles: list[str] = Field(default_factory=lambda: ["query"])
+    description: str = Field(default="", max_length=300)
+
+
+class ApiKeyRecord(BaseModel):
+    key_id: str
+    subject: str
+    tenant_id: str
+    roles: list[str]
+    description: str = ""
+    created_at: int
+    revoked_at: Optional[int] = None
+
+
+class CreateApiKeyResponse(ApiKeyRecord):
+    api_key: str
+
+
+class QuotaUpdateRequest(BaseModel):
+    requests_per_minute: int = Field(..., ge=1, le=100000)
+
+
+class QuotasResponse(BaseModel):
+    defaults: dict
+    tenants: dict
+    projects: dict

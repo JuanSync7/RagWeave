@@ -37,7 +37,17 @@ from config.settings import (
     RETRY_INITIAL_BACKOFF_SECONDS,
     RETRY_MAX_ATTEMPTS,
     RETRY_MAX_BACKOFF_SECONDS,
+    MAX_SANITIZATION_ITERATIONS,
+    RAG_DEFAULT_FAST_PATH,
+    RAG_RETRIEVAL_TIMEOUT_MS,
+    RAG_STAGE_BUDGET_QUERY_PROCESSING_MS,
+    RAG_STAGE_BUDGET_KG_EXPANSION_MS,
+    RAG_STAGE_BUDGET_EMBEDDING_MS,
+    RAG_STAGE_BUDGET_HYBRID_SEARCH_MS,
+    RAG_STAGE_BUDGET_RERANKING_MS,
+    RAG_STAGE_BUDGET_GENERATION_MS,
 )
+from src.platform.metrics import PIPELINE_STAGE_MS
 
 logger = logging.getLogger("rag.rag_chain")
 
@@ -55,6 +65,8 @@ class RAGResponse:
     generated_answer: Optional[str] = None
     stage_timings: List[Dict[str, Any]] = field(default_factory=list)
     timing_totals: Dict[str, float] = field(default_factory=dict)
+    budget_exhausted: bool = False
+    budget_exhausted_stage: Optional[str] = None
 
 
 class RAGChain:
@@ -170,6 +182,11 @@ class RAGChain:
         source_filter: Optional[str] = None,
         heading_filter: Optional[str] = None,
         skip_generation: bool = False,
+        tenant_id: Optional[str] = None,
+        max_query_iterations: int = MAX_SANITIZATION_ITERATIONS,
+        fast_path: Optional[bool] = None,
+        overall_timeout_ms: int = RAG_RETRIEVAL_TIMEOUT_MS,
+        stage_budget_overrides: Optional[Dict[str, int]] = None,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -188,18 +205,33 @@ class RAGChain:
         """
         pipeline_start = time.perf_counter()
         stage_timings: List[Dict[str, Any]] = []
+        stage_budget_overrides = stage_budget_overrides or {}
+        stage_budgets = {
+            "query_processing": int(stage_budget_overrides.get("query_processing", RAG_STAGE_BUDGET_QUERY_PROCESSING_MS)),
+            "kg_expansion": int(stage_budget_overrides.get("kg_expansion", RAG_STAGE_BUDGET_KG_EXPANSION_MS)),
+            "embedding": int(stage_budget_overrides.get("embedding", RAG_STAGE_BUDGET_EMBEDDING_MS)),
+            "hybrid_search": int(stage_budget_overrides.get("hybrid_search", RAG_STAGE_BUDGET_HYBRID_SEARCH_MS)),
+            "reranking": int(stage_budget_overrides.get("reranking", RAG_STAGE_BUDGET_RERANKING_MS)),
+            "generation": int(stage_budget_overrides.get("generation", RAG_STAGE_BUDGET_GENERATION_MS)),
+        }
         root_span = self.tracer.start_span("rag_chain.run", {"query_length": len(query)})
         span_status = "ok"
         span_error: Optional[Exception] = None
+        budget_exhausted = False
+        budget_exhausted_stage: Optional[str] = None
 
         def _record_stage(stage: str, bucket: str, started_at: float) -> None:
+            ms = round((time.perf_counter() - started_at) * 1000, 1)
             stage_timings.append(
                 {
                     "stage": stage,
                     "bucket": bucket,
-                    "ms": round((time.perf_counter() - started_at) * 1000, 1),
+                    "ms": ms,
+                    "budget_ms": stage_budgets.get(stage),
+                    "within_budget": ms <= float(stage_budgets.get(stage, 10**9)),
                 }
             )
+            PIPELINE_STAGE_MS.labels(stage=stage, bucket=bucket).observe(ms)
 
         def _compute_totals() -> Dict[str, float]:
             retrieval_ms = sum(
@@ -214,6 +246,15 @@ class RAGChain:
                 "total_ms": round(retrieval_ms + generation_ms, 1),
             }
 
+        def _is_overall_budget_exhausted() -> bool:
+            elapsed = (time.perf_counter() - pipeline_start) * 1000
+            return elapsed > float(overall_timeout_ms)
+
+        def _mark_budget_exhausted(stage: str) -> None:
+            nonlocal budget_exhausted, budget_exhausted_stage
+            budget_exhausted = True
+            budget_exhausted_stage = stage
+
         try:
             alpha = validate_alpha(alpha)
             search_limit = validate_positive_int("search_limit", search_limit)
@@ -224,9 +265,15 @@ class RAGChain:
             # Stage 1: Query processing
             t0 = time.perf_counter()
             query_span = self.tracer.start_span("rag_chain.process_query", parent=root_span)
-            query_result: QueryResult = process_query(query)
+            query_result: QueryResult = process_query(
+                query,
+                max_iterations=max_query_iterations,
+                fast_path=RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
+            )
             query_span.end(status="ok")
             _record_stage("query_processing", "retrieval", t0)
+            if stage_timings[-1]["ms"] > stage_budgets["query_processing"] or _is_overall_budget_exhausted():
+                _mark_budget_exhausted("query_processing")
 
             if query_result.action == QueryAction.ASK_USER:
                 return RAGResponse(
@@ -237,6 +284,8 @@ class RAGChain:
                     clarification_message=query_result.clarification_message,
                     stage_timings=stage_timings,
                     timing_totals=_compute_totals(),
+                    budget_exhausted=budget_exhausted,
+                    budget_exhausted_stage=budget_exhausted_stage,
                 )
 
             processed_query = query_result.processed_query
@@ -250,6 +299,8 @@ class RAGChain:
             kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
             kg_span.end(status="ok")
             _record_stage("kg_expansion", "retrieval", t0)
+            if stage_timings[-1]["ms"] > stage_budgets["kg_expansion"] or _is_overall_budget_exhausted():
+                _mark_budget_exhausted("kg_expansion")
 
             if kg_expanded_terms:
                 bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:3])
@@ -262,6 +313,8 @@ class RAGChain:
             query_embedding = self.embeddings.embed_query(processed_query)
             embed_span.end(status="ok")
             _record_stage("embedding", "retrieval", t0)
+            if stage_timings[-1]["ms"] > stage_budgets["embedding"] or _is_overall_budget_exhausted():
+                _mark_budget_exhausted("embedding")
 
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
@@ -271,6 +324,9 @@ class RAGChain:
             if heading_filter:
                 hf = Filter.by_property("heading").equal(heading_filter)
                 wv_filter = wv_filter & hf if wv_filter else hf
+            if tenant_id:
+                tf = Filter.by_property("tenant_id").equal(tenant_id)
+                wv_filter = wv_filter & tf if wv_filter else tf
 
             search_span = self.tracer.start_span("rag_chain.hybrid_search", parent=root_span)
 
@@ -285,6 +341,8 @@ class RAGChain:
             search_span.set_attribute("search_result_count", len(search_results))
             search_span.end(status="ok")
             _record_stage("hybrid_search", "retrieval", t0)
+            if stage_timings[-1]["ms"] > stage_budgets["hybrid_search"] or _is_overall_budget_exhausted():
+                _mark_budget_exhausted("hybrid_search")
 
             if not search_results:
                 timing_totals = _compute_totals()
@@ -298,6 +356,8 @@ class RAGChain:
                     kg_expanded_terms=kg_expanded_terms or None,
                     stage_timings=stage_timings,
                     timing_totals=timing_totals,
+                    budget_exhausted=budget_exhausted,
+                    budget_exhausted_stage=budget_exhausted_stage,
                 )
 
             # Stage 5: Reranking
@@ -315,10 +375,12 @@ class RAGChain:
                 rerank_span.set_attribute("rerank_score_mean", statistics.mean(scores))
             rerank_span.end(status="ok")
             _record_stage("reranking", "retrieval", t0)
+            if stage_timings[-1]["ms"] > stage_budgets["reranking"] or _is_overall_budget_exhausted():
+                _mark_budget_exhausted("reranking")
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
-            if not skip_generation and self._generator and reranked:
+            if not skip_generation and self._generator and reranked and not budget_exhausted:
                 t0 = time.perf_counter()
                 generate_span = self.tracer.start_span("rag_chain.generate", parent=root_span)
                 context_chunks = [r.text for r in reranked]
@@ -331,6 +393,8 @@ class RAGChain:
                 generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 generate_span.end(status="ok")
                 _record_stage("generation", "generation", t0)
+                if stage_timings[-1]["ms"] > stage_budgets["generation"] or _is_overall_budget_exhausted():
+                    _mark_budget_exhausted("generation")
 
             timing_totals = _compute_totals()
             self._log_timings(stage_timings, timing_totals)
@@ -345,6 +409,8 @@ class RAGChain:
                 generated_answer=generated_answer,
                 stage_timings=stage_timings,
                 timing_totals=timing_totals,
+                budget_exhausted=budget_exhausted,
+                budget_exhausted_stage=budget_exhausted_stage,
             )
         except Exception as exc:
             span_status = "error"

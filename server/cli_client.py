@@ -62,6 +62,8 @@ _BG_SEL = "\033[48;5;237m"
 
 
 DEFAULT_SERVER = os.environ.get("RAG_API_URL", "http://localhost:8000")
+API_KEY = os.environ.get("RAG_API_KEY", "").strip()
+BEARER_TOKEN = os.environ.get("RAG_BEARER_TOKEN", "").strip()
 _FILTER_PAT = re.compile(r"\b(source|section):(\S+)\s*", re.IGNORECASE)
 _CURRENT_SERVER = DEFAULT_SERVER
 _verbose_mode = False
@@ -282,10 +284,15 @@ def send_query(server: str, query: str, filters: dict) -> dict:
     """Send a non-streaming query to the RAG API."""
     payload = {"query": query, **filters}
     data = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    elif BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {BEARER_TOKEN}"
     req = urllib.request.Request(
         f"{server}/query",
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
@@ -296,13 +303,18 @@ def send_query_stream(server: str, query: str, filters: dict):
     """Stream a query via SSE. Yields (event_type, data_dict) tuples."""
     payload = {"query": query, **filters}
     data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    elif BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {BEARER_TOKEN}"
     req = urllib.request.Request(
         f"{server}/query/stream",
         data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-        },
+        headers=headers,
         method="POST",
     )
     resp = urllib.request.urlopen(req, timeout=120)
@@ -327,6 +339,10 @@ def check_server(server: str, retries: int = 5, backoff: float = 1.0) -> dict | 
     for attempt in range(retries):
         try:
             req = urllib.request.Request(f"{server}/health", method="GET")
+            if API_KEY:
+                req.add_header("X-API-Key", API_KEY)
+            elif BEARER_TOKEN:
+                req.add_header("Authorization", f"Bearer {BEARER_TOKEN}")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 logger.info(
@@ -411,6 +427,10 @@ def _display_stage_timings(done_data: dict | None, retrieval_data: dict | None) 
         stage_timings = retrieval_data.get("stage_timings", [])
 
     if not stage_timings:
+        print()
+        print(f"  {B_YELLOW}Stage timings (verbose){RESET}")
+        print(f"  {DIM}No per-stage timing data returned by backend for this query.{RESET}")
+        print(f"  {DIM}Tip: restart API/worker processes to ensure latest code is running.{RESET}")
         return
 
     print()
@@ -426,6 +446,13 @@ def _display_stage_timings(done_data: dict | None, retrieval_data: dict | None) 
     totals = {}
     if done_data and done_data.get("timing_totals"):
         totals = done_data.get("timing_totals", {})
+    if not totals:
+        bucket_totals: dict[str, float] = {}
+        for stage in stage_timings:
+            bucket = str(stage.get("bucket", "other"))
+            bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + float(stage.get("ms", 0.0))
+        totals = {f"{bucket}_ms": round(ms, 1) for bucket, ms in bucket_totals.items()}
+        totals["total_ms"] = round(sum(bucket_totals.values()), 1)
     if totals:
         retrieval_total = float(totals.get("retrieval_ms", 0.0))
         generation_total = float(totals.get("generation_ms", 0.0))

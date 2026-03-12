@@ -86,6 +86,29 @@ No user session concept exists. `RAGChain` is stateless per call — there's no 
 
 This only becomes critical if the system moves beyond the CLI to an API or web interface, but the groundwork should be laid now to avoid a larger refactor later.
 
+### 2.12 Ops Notes (Current Compose Setup)
+
+Recent operational changes made to stabilize local observability and container startup:
+- Added self-hosted Langfuse stack in `docker-compose.yml` (`langfuse-web`, `langfuse-worker`, `langfuse-postgres`, `langfuse-redis`, `langfuse-clickhouse`, `langfuse-minio`) under the `observability` profile.
+- Added environment wiring for `rag-api` and `rag-worker` to send traces when `RAG_OBSERVABILITY_PROVIDER=langfuse`.
+- Fixed Langfuse startup failures by setting:
+  - `CLICKHOUSE_CLUSTER_ENABLED=false` (single-node local ClickHouse)
+  - valid init email default (`admin@example.com`)
+  - explicit secrets (`LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_SALT`, `LANGFUSE_ENCRYPTION_KEY`) via `.env`.
+- Stabilized `rag-api` startup by making API host port configurable (`RAG_API_HOST_PORT`) and routing container-to-host access through `host.docker.internal`.
+
+**Brute-force fixes (works locally, may not scale):**
+- Using `host.docker.internal` to bypass intermittent Docker DNS resolution is a pragmatic local workaround, but fragile for production and multi-host deployments.
+- Forcing `CLICKHOUSE_CLUSTER_ENABLED=false` is correct for a single-node dev setup, but not suitable for distributed/high-throughput Langfuse at scale.
+- Hardcoded/default local credentials and bootstrap values in compose are convenient for dev, but must be replaced with secret management + rotation in production.
+- Running all observability components in one compose project is good for local testing, but production should split storage/compute, add backups, and apply resource/retention controls.
+
+**Scale-ready direction:**
+- Use stable service discovery (Kubernetes DNS, ECS service discovery, Consul, or managed load balancers) instead of host-gateway shortcuts.
+- Use managed Postgres/ClickHouse/Redis/object storage with HA and backup policies.
+- Move secrets to a secret manager (Vault, AWS/GCP/Azure secrets), avoid plaintext `.env` in shared environments.
+- Add SLO monitoring and alerting on API health, worker queue depth, and Langfuse ingestion lag.
+
 ---
 
 ## Part 3: Automated Evaluation Infrastructure

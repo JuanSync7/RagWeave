@@ -23,11 +23,11 @@ class LangfuseSpan(Span):
 
     def end(self, status: str = "ok", error: Optional[Exception] = None) -> None:
         try:
-            payload = {"status": status}
             if error:
-                payload["level"] = "ERROR"
-                payload["statusMessage"] = str(error)
-            self._inner.end(**payload)
+                self._inner.update(level="ERROR", status_message=str(error))
+            elif status != "ok":
+                self._inner.update(level="WARNING", status_message=status)
+            self._inner.end()
         except Exception as exc:  # pragma: no cover
             logger.warning("Langfuse span end failed: %s", exc)
 
@@ -37,12 +37,12 @@ class LangfuseTracer(Tracer):
 
     def __init__(self):
         try:
-            from langfuse import Langfuse
+            from langfuse import get_client
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
                 "Langfuse SDK not installed. Install `langfuse` to enable tracing."
             ) from exc
-        self._client = Langfuse()
+        self._client = get_client()
 
     def start_span(
         self, name: str, attributes: Optional[Attributes] = None, parent: Optional[Span] = None
@@ -50,9 +50,17 @@ class LangfuseTracer(Tracer):
         try:
             metadata = attributes or {}
             if isinstance(parent, LangfuseSpan):
-                span = parent._inner.span(name=name, metadata=metadata)
+                span = parent._inner.start_observation(
+                    as_type="span",
+                    name=name,
+                    metadata=metadata,
+                )
             else:
-                span = self._client.trace(name=name, metadata=metadata)
+                span = self._client.start_observation(
+                    as_type="span",
+                    name=name,
+                    metadata=metadata,
+                )
             return LangfuseSpan(span)
         except Exception as exc:  # pragma: no cover
             logger.warning("Langfuse start_span failed: %s", exc)

@@ -106,6 +106,8 @@ docker compose --profile observability up -d
 
 Open:
 - **Langfuse UI**: http://localhost:3000
+- **Prometheus**: http://localhost:9091
+- **Grafana**: http://localhost:3001
 
 Then point API/worker traces to this local Langfuse deployment:
 
@@ -144,7 +146,7 @@ docker compose up -d
 
 ```
                     ┌──── Worker 1 (GPU 0) ────┐
-Users → LB → API → │──── Worker 2 (GPU 1) ────│ ← Temporal routes to available workers
+Users → LB → API →  │──── Worker 2 (GPU 1) ────│ ← Temporal routes to available workers
                     └──── Worker 3 (GPU 2) ────┘
 ```
 
@@ -160,6 +162,25 @@ Users → LB → API → │──── Worker 2 (GPU 1) ────│ ← Te
 | `RAG_API_PORT` | `8000` | API server port |
 | `RAG_API_URL` | `http://localhost:8000` | CLI client target (for `cli_client.py`) |
 | `RAG_WORKER_CONCURRENCY` | `4` | Max concurrent activities per worker |
+| `RAG_AUTH_API_KEYS_REQUIRED` | `false` | Enforce API-key/JWT auth at API boundary |
+| `RAG_AUTH_API_KEYS_JSON` | `{}` | API-key map (`token_id -> {key, tenant_id, roles}`) |
+| `RAG_AUTH_OIDC_ENABLED` | `false` | Enable OIDC bearer token validation (issuer/audience/JWKS) |
+| `RAG_AUTH_OIDC_ISSUER` | `""` | Expected OIDC token issuer |
+| `RAG_AUTH_OIDC_AUDIENCE` | `""` | Expected OIDC token audience |
+| `RAG_AUTH_OIDC_JWKS_URL` | `""` | JWKS URL used to verify JWT signatures |
+| `RAG_RATE_LIMIT_REQUESTS_PER_MINUTE` | `60` | Per-principal fixed-window rate limit |
+| `RAG_CACHE_PROVIDER` | `memory` | Cache backend (`memory` or `redis`) |
+
+## Admin API
+
+These endpoints require an `admin` role:
+
+- `GET /admin/api-keys`
+- `POST /admin/api-keys`
+- `DELETE /admin/api-keys/{key_id}`
+- `GET /admin/quotas`
+- `PUT /admin/quotas/{tenant_id}`
+- `DELETE /admin/quotas/{tenant_id}`
 
 ## Monitoring
 

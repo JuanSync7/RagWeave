@@ -61,20 +61,34 @@ services:
     profiles: ["app"]
     build:
       context: .
-      dockerfile: docker/Dockerfile.runtime
+      dockerfile: docker/Dockerfile.api
     container_name: rag-api
     command: uvicorn server.api:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "${RAG_API_HOST_PORT:-8000}:8000"
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
+      - RAG_TEMPORAL_TARGET_HOST=host.docker.internal:7233
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse-web:3000}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3000}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - RAG_CACHE_PROVIDER=redis
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
+      - RAG_RATE_LIMIT_ENABLED=true
+      - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
+      - RAG_AUTH_OIDC_ISSUER=${RAG_AUTH_OIDC_ISSUER:-}
+      - RAG_AUTH_OIDC_AUDIENCE=${RAG_AUTH_OIDC_AUDIENCE:-}
+      - RAG_AUTH_OIDC_JWKS_URL=${RAG_AUTH_OIDC_JWKS_URL:-}
+      - RAG_AUTH_API_KEYS_STORE_PATH=/app/.runtime/security/api_keys.json
+      - RAG_AUTH_QUOTAS_STORE_PATH=/app/.runtime/security/quotas.json
     depends_on:
       - temporal
+      - rag-redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    volumes:
+      - ./.runtime:/app/.runtime
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health >/dev/null || exit 1"]
       interval: 10s
@@ -96,22 +110,29 @@ services:
       python -m server.worker
       '
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
+      - RAG_TEMPORAL_TARGET_HOST=host.docker.internal:7233
       # Ollama is expected to run on the host in this setup.
       - RAG_OLLAMA_URL=http://host.docker.internal:11434
+      - RAG_EMBEDDING_MODEL=/models/baai/bge-m3
+      - RAG_RERANKER_MODEL=/models/baai/bge-reranker-v2-m3
       - RAG_WORKER_CONCURRENCY=4
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse-web:3000}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3000}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - RAG_CACHE_PROVIDER=redis
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
     depends_on:
       - temporal
+      - rag-redis
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       # Seed embedded Weaviate data from local ingestion output (read-only).
       - ./.weaviate_data:/seed_weaviate:ro
+      # Host model cache (read-only) for containerized worker startup.
+      - ${RAG_MODEL_ROOT:-/home/juansync7/models}:/models:ro
     # GPU note: if needed, run with NVIDIA container runtime enabled.
     # Example: set `gpus: all` here when your Docker setup supports it.
 
@@ -123,6 +144,61 @@ services:
       - "9999:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  rag-redis:
+    profiles: ["app", "workers", "monitoring"]
+    image: redis:7-alpine
+    container_name: rag-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - rag-redis-data:/data
+    restart: unless-stopped
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:latest
+    container_name: rag-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - rag-api
+    restart: unless-stopped
+
+  alertmanager:
+    profiles: ["monitoring"]
+    image: prom/alertmanager:latest
+    container_name: rag-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:latest
+    container_name: rag-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
   langfuse-postgres:
@@ -222,6 +298,7 @@ services:
       - CLICKHOUSE_URL=http://langfuse-clickhouse:8123
       - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
       - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_CLUSTER_ENABLED=false
       - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${LANGFUSE_S3_BUCKET:-langfuse}
       - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
       - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_MINIO_USER:-minio}
@@ -258,7 +335,7 @@ services:
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-mysecret}
       - LANGFUSE_INIT_ORG_NAME=${LANGFUSE_INIT_ORG_NAME:-RAG Local}
       - LANGFUSE_INIT_PROJECT_NAME=${LANGFUSE_INIT_PROJECT_NAME:-rag-observability}
-      - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@localhost}
+      - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
       - LANGFUSE_INIT_USER_NAME=${LANGFUSE_INIT_USER_NAME:-admin}
       - LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_INIT_USER_PASSWORD:-admin1234}
       - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
@@ -273,6 +350,7 @@ services:
       - CLICKHOUSE_URL=http://langfuse-clickhouse:8123
       - CLICKHOUSE_USER=${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
       - CLICKHOUSE_PASSWORD=${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_CLUSTER_ENABLED=false
       - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${LANGFUSE_S3_BUCKET:-langfuse}
       - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
       - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_MINIO_USER:-minio}
@@ -296,8 +374,11 @@ services:
 
 volumes:
   temporal-db-data:
+  rag-redis-data:
   langfuse-postgres-data:
   langfuse-redis-data:
   langfuse-clickhouse-data:
   langfuse-clickhouse-logs:
   langfuse-minio-data:
+  prometheus-data:
+  grafana-data:

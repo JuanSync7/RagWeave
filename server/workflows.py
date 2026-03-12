@@ -7,6 +7,7 @@
 """Temporal workflow definitions for RAG query processing."""
 
 from datetime import timedelta
+import math
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -31,10 +32,14 @@ class RAGQueryWorkflow:
 
     @workflow.run
     async def run(self, request: dict) -> dict:
+        timeout_ms = int(request.get("overall_timeout_ms", 120000))
+        # Honor client timeout budgets by rounding up milliseconds to seconds.
+        timeout_seconds = max(1, math.ceil(timeout_ms / 1000))
         return await workflow.execute_activity(
             execute_rag_query,
             request,
-            start_to_close_timeout=timedelta(seconds=120),
+            start_to_close_timeout=timedelta(seconds=timeout_seconds),
+            schedule_to_close_timeout=timedelta(seconds=timeout_seconds),
             retry_policy=RetryPolicy(
                 initial_interval=timedelta(seconds=1),
                 maximum_interval=timedelta(seconds=10),

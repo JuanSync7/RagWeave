@@ -12,14 +12,19 @@ inference against models already in memory — no per-request init cost.
 
 import logging
 import time
+import hashlib
+import json
 from dataclasses import asdict
 from typing import Optional
 
 from temporalio import activity
+from src.platform.cache.provider import get_cache
+from src.platform.metrics import CACHE_HITS, CACHE_MISSES
 
 logger = logging.getLogger("rag.server.activities")
 
 _rag_chain = None
+_cache = get_cache()
 
 
 def init_rag_chain() -> None:
@@ -70,6 +75,35 @@ def execute_rag_query(request: dict) -> dict:
     search_limit: int = request.get("search_limit", 10)
     rerank_top_k: int = request.get("rerank_top_k", 5)
     skip_generation: bool = request.get("skip_generation", False)
+    tenant_id: Optional[str] = request.get("tenant_id")
+    max_query_iterations: int = int(request.get("max_query_iterations", 3))
+    fast_path: Optional[bool] = request.get("fast_path")
+    overall_timeout_ms: int = int(request.get("overall_timeout_ms", 30000))
+    stage_budget_overrides: dict = request.get("stage_budget_overrides", {}) or {}
+
+    cache_payload = {
+        "query": query,
+        "source_filter": source_filter,
+        "heading_filter": heading_filter,
+        "alpha": alpha,
+        "search_limit": search_limit,
+        "rerank_top_k": rerank_top_k,
+        "skip_generation": skip_generation,
+        "tenant_id": tenant_id,
+        "max_query_iterations": max_query_iterations,
+        "fast_path": fast_path,
+        "overall_timeout_ms": overall_timeout_ms,
+        "stage_budget_overrides": stage_budget_overrides,
+    }
+    cache_key = "rag:query:" + hashlib.sha256(
+        json.dumps(cache_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    cached = _cache.get(cache_key)
+    if isinstance(cached, dict):
+        CACHE_HITS.labels(layer="activity_result").inc()
+        return cached
+    CACHE_MISSES.labels(layer="activity_result").inc()
 
     activity.logger.info("Processing query: %s", query[:80])
 
@@ -82,6 +116,11 @@ def execute_rag_query(request: dict) -> dict:
         source_filter=source_filter,
         heading_filter=heading_filter,
         skip_generation=skip_generation,
+        tenant_id=tenant_id,
+        max_query_iterations=max_query_iterations,
+        fast_path=fast_path,
+        overall_timeout_ms=overall_timeout_ms,
+        stage_budget_overrides=stage_budget_overrides,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -95,4 +134,5 @@ def execute_rag_query(request: dict) -> dict:
         response.action,
         "skipped" if skip_generation else "included",
     )
+    _cache.set(cache_key, result)
     return result

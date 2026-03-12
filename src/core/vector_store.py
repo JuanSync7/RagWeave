@@ -80,6 +80,7 @@ def ensure_collection(client: weaviate.WeaviateClient) -> None:
             Property(name="section_path", data_type=DataType.TEXT),
             Property(name="heading", data_type=DataType.TEXT),
             Property(name="heading_level", data_type=DataType.INT),
+            Property(name="tenant_id", data_type=DataType.TEXT),
         ],
     )
     span.end(status="ok")
@@ -125,6 +126,7 @@ def add_documents(
                 "section_path": metadata.get("section_path", ""),
                 "heading": metadata.get("heading", ""),
                 "heading_level": metadata.get("heading_level", 0),
+                "tenant_id": metadata.get("tenant_id", "default"),
             }
             batch.add_object(properties=properties, vector=embedding, uuid=chunk_id)
 
@@ -184,6 +186,7 @@ def hybrid_search(
                 "section_path": obj.properties.get("section_path", ""),
                 "heading": obj.properties.get("heading", ""),
                 "heading_level": obj.properties.get("heading_level", 0),
+                "tenant_id": obj.properties.get("tenant_id", "default"),
             },
             "score": obj.metadata.score if obj.metadata else 0.0,
         })

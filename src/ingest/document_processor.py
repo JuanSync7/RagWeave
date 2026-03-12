@@ -18,7 +18,7 @@ from typing import List, Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config.settings import CHUNK_SIZE, CHUNK_OVERLAP
+from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, DEFAULT_TENANT_ID
 
 
 @dataclass
@@ -232,7 +232,7 @@ def extract_metadata(raw_text: str, source: str) -> DocumentMetadata:
 
 def metadata_to_dict(meta: DocumentMetadata) -> dict:
     """Convert DocumentMetadata to a flat dict for storage."""
-    d = {"source": meta.source}
+    d = {"source": meta.source, "tenant_id": DEFAULT_TENANT_ID}
     if meta.title:
         d["title"] = meta.title
     if meta.author:

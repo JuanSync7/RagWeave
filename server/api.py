@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from temporalio.client import Client
@@ -37,9 +37,42 @@ from config.settings import (
     OLLAMA_MODEL,
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,
+    RATE_LIMIT_ENABLED,
+    RATE_LIMIT_REQUESTS_PER_MINUTE,
+    RATE_LIMIT_WINDOW_SECONDS,
+)
+from src.platform.limits.provider import InMemoryRateLimiter
+from src.platform.metrics import (
+    RATE_LIMIT_REJECTS,
+    REQUESTS_TOTAL,
+    REQUEST_LATENCY_MS,
+    render_metrics,
 )
 from src.platform.observability.providers import get_tracer
-from server.schemas import QueryRequest, QueryResponse, HealthResponse
+from src.platform.security.auth import Principal, authenticate_request
+from src.platform.security.api_key_store import (
+    create_api_key,
+    list_api_keys,
+    revoke_api_key,
+)
+from src.platform.security.quota_store import (
+    delete_tenant_quota,
+    get_tenant_quota,
+    list_quotas,
+    set_tenant_quota,
+)
+from src.platform.security.rbac import require_role
+from src.platform.security.tenancy import resolve_tenant_id
+from server.schemas import (
+    ApiKeyRecord,
+    CreateApiKeyRequest,
+    CreateApiKeyResponse,
+    HealthResponse,
+    QueryRequest,
+    QueryResponse,
+    QuotasResponse,
+    QuotaUpdateRequest,
+)
 from server.workflows import RAGQueryWorkflow, RAG_QUERY_TASK_QUEUE
 
 # Use uvicorn's logger/formatter so API logs match server output
@@ -48,8 +81,30 @@ logger = logging.getLogger("uvicorn.error").getChild("rag.server.api")
 
 _temporal_client: Client | None = None
 _obs_tracer = get_tracer()
+_rate_limiter = InMemoryRateLimiter(
+    limit=RATE_LIMIT_REQUESTS_PER_MINUTE,
+    window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+)
 
 API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
+
+
+def _enforce_rate_limit(principal: Principal, endpoint: str) -> None:
+    if not RATE_LIMIT_ENABLED:
+        return
+    tenant_quota = get_tenant_quota(principal.tenant_id)
+    scope_key = principal.project_id or principal.subject
+    limit_result = _rate_limiter.check(
+        key=f"{principal.tenant_id}:{scope_key}",
+        limit=tenant_quota,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if not limit_result.allowed:
+        RATE_LIMIT_REJECTS.labels(endpoint=endpoint).inc()
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Retry in {limit_result.retry_after_seconds}s",
+        )
 
 
 @asynccontextmanager
@@ -84,7 +139,7 @@ app.add_middleware(
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest):
+async def query(request: QueryRequest, principal: Principal = Depends(authenticate_request)):
     """Submit a RAG query.
 
     The query is dispatched as a Temporal workflow to a worker where embedding
@@ -93,9 +148,12 @@ async def query(request: QueryRequest):
     """
     if _temporal_client is None:
         raise HTTPException(status_code=503, detail="Temporal client not connected")
+    require_role(principal, "query")
+    _enforce_rate_limit(principal, "/query")
 
     workflow_id = f"rag-query-{uuid.uuid4().hex[:12]}"
     payload = request.model_dump(exclude_none=True)
+    payload["tenant_id"] = resolve_tenant_id(principal, request.tenant_id)
 
     start = time.perf_counter()
     try:
@@ -106,12 +164,14 @@ async def query(request: QueryRequest):
             task_queue=RAG_QUERY_TASK_QUEUE,
         )
     except RPCError as exc:
+        REQUESTS_TOTAL.labels(endpoint="/query", method="POST", status="503").inc()
         logger.error("Temporal RPC error: %s", exc)
         raise HTTPException(
             status_code=503,
             detail=f"Temporal unavailable: {exc}. Is the worker running?",
         )
     except Exception as exc:
+        REQUESTS_TOTAL.labels(endpoint="/query", method="POST", status="500").inc()
         logger.error("Workflow execution failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -127,11 +187,13 @@ async def query(request: QueryRequest):
         workflow_id,
         request.query[:60],
     )
+    REQUESTS_TOTAL.labels(endpoint="/query", method="POST", status="200").inc()
+    REQUEST_LATENCY_MS.labels(endpoint="/query", method="POST").observe(total_ms)
     return QueryResponse(**result)
 
 
 @app.post("/query/stream")
-async def query_stream(request: QueryRequest):
+async def query_stream(request: QueryRequest, principal: Principal = Depends(authenticate_request)):
     """Stream a RAG query response via Server-Sent Events.
 
     Retrieval (stages 1-5) runs through Temporal for durability.
@@ -146,10 +208,13 @@ async def query_stream(request: QueryRequest):
     """
     if _temporal_client is None:
         raise HTTPException(status_code=503, detail="Temporal client not connected")
+    require_role(principal, "query")
+    _enforce_rate_limit(principal, "/query/stream")
 
     workflow_id = f"rag-stream-{uuid.uuid4().hex[:12]}"
     payload = request.model_dump(exclude_none=True)
     payload["skip_generation"] = True
+    payload["tenant_id"] = resolve_tenant_id(principal, request.tenant_id)
 
     async def event_generator():
         start = time.perf_counter()
@@ -163,6 +228,7 @@ async def query_stream(request: QueryRequest):
                 task_queue=RAG_QUERY_TASK_QUEUE,
             )
         except RPCError as exc:
+            REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="503").inc()
             stream_error_message = f"Retrieval failed: {exc}"
             yield _sse("error", {"message": stream_error_message})
             _emit_stream_observability_async(
@@ -179,6 +245,7 @@ async def query_stream(request: QueryRequest):
             )
             return
         except Exception as exc:
+            REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="500").inc()
             stream_error_message = str(exc)
             yield _sse("error", {"message": stream_error_message})
             _emit_stream_observability_async(
@@ -258,6 +325,8 @@ async def query_stream(request: QueryRequest):
             "Streamed %d tokens in %.0fms (retrieval: %.0fms, generation: %.0fms) — %s",
             token_count, total_ms, retrieval_ms, gen_ms, request.query[:60],
         )
+        REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="200").inc()
+        REQUEST_LATENCY_MS.labels(endpoint="/query/stream", method="POST").observe(total_ms)
         all_stages = retrieval_stages + generation_stages
         stage_totals = _aggregate_stage_totals(all_stages)
         done_payload = {
@@ -287,6 +356,72 @@ async def query_stream(request: QueryRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/metrics")
+async def metrics():
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
+
+
+@app.get("/admin/api-keys", response_model=list[ApiKeyRecord])
+async def admin_list_api_keys(
+    include_revoked: bool = False,
+    principal: Principal = Depends(authenticate_request),
+):
+    require_role(principal, "admin")
+    records = list_api_keys(include_revoked=include_revoked)
+    return [ApiKeyRecord(**r) for r in records]
+
+
+@app.post("/admin/api-keys", response_model=CreateApiKeyResponse)
+async def admin_create_api_key(
+    request: CreateApiKeyRequest,
+    principal: Principal = Depends(authenticate_request),
+):
+    require_role(principal, "admin")
+    created = create_api_key(
+        subject=request.subject,
+        tenant_id=request.tenant_id,
+        roles=request.roles,
+        description=request.description,
+    )
+    return CreateApiKeyResponse(**created)
+
+
+@app.delete("/admin/api-keys/{key_id}")
+async def admin_revoke_api_key(key_id: str, principal: Principal = Depends(authenticate_request)):
+    require_role(principal, "admin")
+    ok = revoke_api_key(key_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"status": "revoked", "key_id": key_id}
+
+
+@app.get("/admin/quotas", response_model=QuotasResponse)
+async def admin_list_quotas(principal: Principal = Depends(authenticate_request)):
+    require_role(principal, "admin")
+    return QuotasResponse(**list_quotas())
+
+
+@app.put("/admin/quotas/{tenant_id}")
+async def admin_set_tenant_quota(
+    tenant_id: str,
+    request: QuotaUpdateRequest,
+    principal: Principal = Depends(authenticate_request),
+):
+    require_role(principal, "admin")
+    return set_tenant_quota(tenant_id, request.requests_per_minute)
+
+
+@app.delete("/admin/quotas/{tenant_id}")
+async def admin_delete_tenant_quota(
+    tenant_id: str,
+    principal: Principal = Depends(authenticate_request),
+):
+    require_role(principal, "admin")
+    existed = delete_tenant_quota(tenant_id)
+    return {"status": "deleted" if existed else "noop", "tenant_id": tenant_id}
 
 
 def _sse(event: str, data: dict) -> str:

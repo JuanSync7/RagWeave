@@ -12,6 +12,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 DOCUMENTS_DIR = PROJECT_ROOT / "documents"
 PROCESSED_DIR = PROJECT_ROOT / "processed"
+RUNTIME_DIR = PROJECT_ROOT / ".runtime"
 
 # --- Model Paths (Local BAAI Models) ---
 EMBEDDING_MODEL_PATH = os.environ.get(
@@ -126,6 +127,83 @@ TEMPORAL_TASK_QUEUE = os.environ.get("RAG_TEMPORAL_TASK_QUEUE", "rag-reliability
 RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
 RAG_API_URL = os.environ.get("RAG_API_URL", "http://localhost:8000")
 RAG_WORKER_CONCURRENCY = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
+
+# --- Auth / tenancy ---
+AUTH_API_KEYS_REQUIRED = os.environ.get("RAG_AUTH_API_KEYS_REQUIRED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+AUTH_API_KEYS_JSON = os.environ.get("RAG_AUTH_API_KEYS_JSON", "{}")
+AUTH_JWT_ENABLED = os.environ.get("RAG_AUTH_JWT_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+AUTH_JWT_HS256_SECRET = os.environ.get("RAG_AUTH_JWT_HS256_SECRET", "")
+DEFAULT_TENANT_ID = os.environ.get("RAG_DEFAULT_TENANT_ID", "default")
+AUTH_OIDC_ENABLED = os.environ.get("RAG_AUTH_OIDC_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+AUTH_OIDC_ISSUER = os.environ.get("RAG_AUTH_OIDC_ISSUER", "")
+AUTH_OIDC_AUDIENCE = os.environ.get("RAG_AUTH_OIDC_AUDIENCE", "")
+AUTH_OIDC_JWKS_URL = os.environ.get("RAG_AUTH_OIDC_JWKS_URL", "")
+AUTH_OIDC_ROLES_CLAIM = os.environ.get("RAG_AUTH_OIDC_ROLES_CLAIM", "roles")
+AUTH_OIDC_TENANT_CLAIM = os.environ.get("RAG_AUTH_OIDC_TENANT_CLAIM", "tenant_id")
+AUTH_OIDC_SUBJECT_CLAIM = os.environ.get("RAG_AUTH_OIDC_SUBJECT_CLAIM", "sub")
+
+# --- Rate limit / quotas ---
+RATE_LIMIT_ENABLED = os.environ.get("RAG_RATE_LIMIT_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+RATE_LIMIT_REQUESTS_PER_MINUTE = int(
+    os.environ.get("RAG_RATE_LIMIT_REQUESTS_PER_MINUTE", "60")
+)
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RAG_RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_DEFAULT_TENANT_RPM = int(
+    os.environ.get("RAG_RATE_LIMIT_DEFAULT_TENANT_RPM", str(RATE_LIMIT_REQUESTS_PER_MINUTE))
+)
+RATE_LIMIT_DEFAULT_PROJECT_RPM = int(
+    os.environ.get("RAG_RATE_LIMIT_DEFAULT_PROJECT_RPM", str(RATE_LIMIT_REQUESTS_PER_MINUTE))
+)
+
+# --- API key + quota persistence ---
+AUTH_API_KEYS_STORE_PATH = Path(
+    os.environ.get("RAG_AUTH_API_KEYS_STORE_PATH", str(RUNTIME_DIR / "security" / "api_keys.json"))
+)
+AUTH_QUOTAS_STORE_PATH = Path(
+    os.environ.get("RAG_AUTH_QUOTAS_STORE_PATH", str(RUNTIME_DIR / "security" / "quotas.json"))
+)
+
+# --- Caching ---
+CACHE_ENABLED = os.environ.get("RAG_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+CACHE_PROVIDER = os.environ.get("RAG_CACHE_PROVIDER", "memory")
+CACHE_TTL_SECONDS = int(os.environ.get("RAG_CACHE_TTL_SECONDS", "120"))
+CACHE_REDIS_URL = os.environ.get("RAG_CACHE_REDIS_URL", "redis://localhost:6379/0")
+
+# --- Retrieval controls ---
+RAG_DEFAULT_FAST_PATH = os.environ.get("RAG_DEFAULT_FAST_PATH", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+RAG_RETRIEVAL_TIMEOUT_MS = int(os.environ.get("RAG_RETRIEVAL_TIMEOUT_MS", "30000"))
+RAG_STAGE_BUDGET_QUERY_PROCESSING_MS = int(
+    os.environ.get("RAG_STAGE_BUDGET_QUERY_PROCESSING_MS", "12000")
+)
+RAG_STAGE_BUDGET_KG_EXPANSION_MS = int(
+    os.environ.get("RAG_STAGE_BUDGET_KG_EXPANSION_MS", "1000")
+)
+RAG_STAGE_BUDGET_EMBEDDING_MS = int(os.environ.get("RAG_STAGE_BUDGET_EMBEDDING_MS", "1500"))
+RAG_STAGE_BUDGET_HYBRID_SEARCH_MS = int(
+    os.environ.get("RAG_STAGE_BUDGET_HYBRID_SEARCH_MS", "5000")
+)
+RAG_STAGE_BUDGET_RERANKING_MS = int(os.environ.get("RAG_STAGE_BUDGET_RERANKING_MS", "5000"))
+RAG_STAGE_BUDGET_GENERATION_MS = int(os.environ.get("RAG_STAGE_BUDGET_GENERATION_MS", "60000"))
 
 # --- Observability ---
 OBSERVABILITY_PROVIDER = os.environ.get("RAG_OBSERVABILITY_PROVIDER", "noop")

@@ -117,6 +117,7 @@ class QueryState(TypedDict):
     action: str  # "search" | "ask_user" | ""
     clarification_message: str
     ollama_available: bool
+    fast_path: bool
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +365,13 @@ def sanitize_node(state: QueryState) -> dict:
             ),
         }
 
+    if state.get("fast_path", False):
+        return {
+            "current_query": query,
+            "confidence": 1.0,
+            "reasoning": "fast_path enabled",
+        }
+
     return {"current_query": query}
 
 
@@ -595,6 +603,7 @@ def process_query(
     raw_query: str,
     confidence_threshold: float = QUERY_CONFIDENCE_THRESHOLD,
     max_iterations: int = MAX_SANITIZATION_ITERATIONS,
+    fast_path: bool = False,
 ) -> QueryResult:
     """Query processing loop with confidence-based routing.
 
@@ -631,6 +640,7 @@ def process_query(
             "action": "",
             "clarification_message": "",
             "ollama_available": ollama_available,
+            "fast_path": fast_path,
         }
 
         logger.info("Processing query: '%s'", raw_query[:100])
