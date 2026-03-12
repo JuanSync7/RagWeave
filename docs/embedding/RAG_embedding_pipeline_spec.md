@@ -522,6 +522,21 @@ Each processing stage SHALL:
 > **Rationale:** A completeness score below 80% indicates significant content loss, making the refactored text unreliable. The 80% threshold provides a concrete, measurable safety net.
 > **Acceptance Criteria:** Given a completeness score of 0.75 (75%), the system rejects the refactored text and returns the original. Given a completeness score of 0.85 (85%), the system accepts the refactored text. The completeness score and accept/reject decision are logged.
 
+> **FR-509** | Priority: MUST
+> **Description:** Refactoring MUST NOT mutate source-of-truth documents. The pipeline MUST persist original and refactored mirror artifacts as separate representations.
+> **Rationale:** Refactoring improves retrieval utility but can introduce representation drift. Keeping immutable source plus derived mirror prevents accidental overwrite of authoritative content while preserving auditability.
+> **Acceptance Criteria:** Given a source document and refactoring enabled, ingestion writes a mirror pair (original representation and refactored representation) without modifying the source file. Given refactoring disabled, only original representation is required.
+
+> **FR-510** | Priority: MUST
+> **Description:** Every stored chunk produced from refactored text MUST include provenance mapping back to source-of-truth location (URI plus positional mapping or equivalent).
+> **Rationale:** Retrieval from derived text must still cite original evidence. Without provenance mapping, generated answers can become ungrounded even if retrieval quality is high.
+> **Acceptance Criteria:** Given a retrieved chunk from refactored text, metadata includes source URI and source span mapping fields. If exact span mapping fails, metadata records fallback method and confidence score.
+
+> **FR-511** | Priority: MUST
+> **Description:** Citation outputs MUST resolve to original source references, not only refactored chunk text.
+> **Rationale:** Engineering decisions require traceability to authoritative source material. Derived text may improve retrieval but cannot replace source provenance in citations.
+> **Acceptance Criteria:** Given an answer citing information from a refactored chunk, the citation payload includes original source URI and mapped source location. UI/CLI presentation can optionally show that retrieval text origin was refactored.
+
 ### 3.6 Chunking (FR-600)
 
 > **FR-601** | Priority: MUST
@@ -767,7 +782,7 @@ Each processing stage SHALL:
 > **FR-1204** | Priority: MUST
 > **Description:** The system MUST store chunks with their embeddings, metadata (32+ properties), and pre-computed vectors in the vector database.
 > **Rationale:** Rich metadata stored alongside embeddings enables hybrid retrieval (vector + metadata filtering) without requiring separate lookups, which is essential for scoping queries to specific domains, document types, review tiers, or technology nodes in a semiconductor engineering context.
-> **Acceptance Criteria:** Given a chunk from a 5nm standard cell library specification, the stored vector database object includes: the embedding vector, the chunk text, and at least 32 metadata properties including document_id, chunk_id, section_hierarchy, domain, document_type, review_tier, quality_score, keywords, named_entities, source_file, and content_hash. All 32+ properties are queryable as filters.
+> **Acceptance Criteria:** Given a chunk from a 5nm standard cell library specification, the stored vector database object includes: the embedding vector, the chunk text, and at least 32 metadata properties including document_id, chunk_id, section_hierarchy, domain, document_type, review_tier, quality_score, keywords, named_entities, source_file, and content_hash. For refactored retrieval text, metadata also includes provenance fields (source URI plus source/refactored span mapping and confidence). All filterable properties remain queryable.
 
 > **FR-1205** | Priority: MUST
 > **Description:** The system MUST use Bring Your Own Model (BYOM) mode, computing embeddings externally and passing pre-computed vectors to the vector store.
@@ -823,9 +838,9 @@ Each processing stage SHALL:
 ## 4. Re-ingestion Requirements (FR-1400)
 
 > **FR-1401** | Priority: MUST
-> **Description:** The system MUST detect when a document has been previously ingested by querying the vector store for existing chunks with the same document ID.
-> **Rationale:** Re-ingestion detection is the prerequisite for idempotent document updates. Without it, the system would blindly insert duplicate chunks on every run, inflating the vector store and returning duplicate results for every query.
-> **Acceptance Criteria:** Given a document "SPEC-CLK-001" that was previously ingested (45 chunks in the vector store), the system queries the vector store by document_id, detects the existing 45 chunks, and flags the document as "previously ingested" in the pipeline state. For a never-ingested document "SPEC-NEW-001", the query returns zero results and the document is flagged as "new".
+> **Description:** The system MUST detect prior ingestion using persisted ingestion state keyed by stable source identity (for example, manifest keyed by `source_key`), with vector-store verification optional.
+> **Rationale:** Manifest-based identity lookup is deterministic and fast for incremental ingestion, and avoids mandatory pre-query overhead against vector storage for every source.
+> **Acceptance Criteria:** Given a source whose `source_key` exists in ingestion state, the source is flagged as previously ingested and participates in hash/version comparison. Given a source with no matching identity in ingestion state, it is flagged as new. Implementations MAY additionally verify vector-store presence for reconciliation.
 
 > **FR-1402** | Priority: MUST
 > **Description:** The system MUST compare content hashes to determine whether the document has changed since last ingestion.
@@ -1175,9 +1190,9 @@ The system MUST define the following key data entities:
 > **Acceptance Criteria:** Given the same document file processed twice, when chunk IDs are compared, then they are identical. Given two different documents, when their document IDs are compared, then they are different. Negative: no identifier contains random components (e.g., UUIDs, timestamps).
 
 > **FR-1031** | Priority: MUST
-> **Description:** Document IDs MUST be derived from the source file path (stable across re-ingestion).
-> **Rationale:** Path-based IDs ensure the same file always maps to the same document ID, enabling the system to detect re-ingestion and perform cleanup of previous versions (idempotency-by-construction).
-> **Acceptance Criteria:** Given a file at `/docs/specs/power_spec_7nm.pdf`, when ingested twice (even with different content), then the document ID is identical both times. Given a file moved to `/docs/archive/power_spec_7nm.pdf`, then it receives a different document ID.
+> **Description:** Document IDs MUST be derived from stable source identity (`source_id`) and connector namespace, not filename alone.
+> **Rationale:** Filename/path-only identity fails for rename/move and multi-connector ingestion. Connector-scoped stable identity enables reliable re-ingestion cleanup and duplicate avoidance across directories/systems.
+> **Acceptance Criteria:** Given the same connector document identity ingested twice, the document ID is identical both times. Given two different source identities with the same filename, the IDs differ. For local filesystem connectors, file identity may be derived from stable filesystem identity metadata (for example, device+inode).
 
 > **FR-1032** | Priority: MUST
 > **Description:** Chunk IDs MUST be derived from parent document ID, chunk position, and content hash.

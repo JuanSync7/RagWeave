@@ -28,8 +28,10 @@ import tty
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.platform.cli_interactive import get_input_with_menu, setup_tab_completion
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
@@ -67,26 +69,44 @@ BEARER_TOKEN = os.environ.get("RAG_BEARER_TOKEN", "").strip()
 _FILTER_PAT = re.compile(r"\b(source|section):(\S+)\s*", re.IGNORECASE)
 _CURRENT_SERVER = DEFAULT_SERVER
 _verbose_mode = False
+_ALLOW_LOCAL_ADMIN_COMMANDS = False
 
 # Command registry for parity with cli.py UX
-_COMMANDS: dict[str, tuple] = {}
+# tuple layout: (handler, description, hidden, admin_only)
+_COMMANDS: dict[str, tuple[Callable[[str], None], str, bool, bool]] = {}
 
 
-def _register_command(name: str, description: str):
+def _register_command(
+    name: str,
+    description: str,
+    *,
+    hidden: bool = False,
+    admin_only: bool = False,
+):
     def decorator(func):
-        _COMMANDS[name] = (func, description)
+        _COMMANDS[name] = (func, description, hidden, admin_only)
         return func
     return decorator
+
+
+def _visible_registry() -> dict[str, tuple]:
+    """Commands shown in / menu and tab completion."""
+    return {
+        name: (handler, description)
+        for name, (handler, description, hidden, admin_only) in _COMMANDS.items()
+        if not hidden and (not admin_only or _ALLOW_LOCAL_ADMIN_COMMANDS)
+    }
 
 
 _BOX_W = 50
 
 
 def _get_menu_items(filter_text: str = "") -> list[tuple[str, str]]:
+    visible = _visible_registry()
     ft = filter_text.lower()
     return [
         (name, desc)
-        for name, (_, desc) in _COMMANDS.items()
+        for name, (_, desc) in visible.items()
         if name.lower().startswith(ft)
     ]
 
@@ -207,55 +227,19 @@ def _interactive_command_select(prompt: str) -> str | None:
 
 
 def _get_input(prompt: str) -> str:
-    if not sys.stdin.isatty():
-        return input(prompt)
-
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    sys.stdout.write(prompt)
-    sys.stdout.flush()
-
-    try:
-        tty.setcbreak(fd)
-        first = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-    if first == "/":
-        cmd = _interactive_command_select(prompt)
-        return f"/{cmd}" if cmd else ""
-    if first == "\x03":
-        raise KeyboardInterrupt
-    if first == "\x04":
-        raise EOFError
-    if first in ("\r", "\n"):
-        sys.stdout.write("\n")
-        return ""
-    if not first.isprintable():
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
-        return _get_input(prompt)
-
-    sys.stdout.write("\r\033[K")
-    sys.stdout.flush()
-    readline.set_startup_hook(lambda: readline.insert_text(first))
-    try:
-        return input(prompt)
-    finally:
-        readline.set_startup_hook(None)
+    return get_input_with_menu(
+        prompt,
+        _visible_registry(),
+        box_width=_BOX_W,
+        dim=DIM,
+        reset=RESET,
+        bold_cyan=B_CYAN,
+        bg_sel=_BG_SEL,
+    )
 
 
 def _setup_tab_completion():
-    def completer(text, state):
-        if text.startswith("/"):
-            options = [f"/{name}" for name in _COMMANDS if f"/{name}".startswith(text)]
-        else:
-            options = []
-        return options[state] if state < len(options) else None
-
-    readline.set_completer(completer)
-    readline.set_completer_delims(" \t\n")
-    readline.parse_and_bind("tab: complete")
+    setup_tab_completion(_visible_registry())
 
 
 def parse_filters(raw_query: str) -> tuple[str, dict]:
@@ -408,6 +392,15 @@ def display_retrieval(response: dict) -> None:
         sc = B_GREEN if score >= 0.5 else (B_YELLOW if score >= 0.2 else DIM)
         source = r.get("metadata", {}).get("source", "unknown")
         print(f"  {B_CYAN}#{i}{RESET}  {sc}score: {score:.4f}{RESET}  {DIM}│{RESET}  {B_MAGENTA}{source}{RESET}")
+        source_uri = (
+            r.get("metadata", {}).get("citation_source_uri")
+            or r.get("metadata", {}).get("source_uri", "")
+        )
+        if source_uri:
+            print(f"      {DIM}location:{RESET} {source_uri}")
+        origin = r.get("metadata", {}).get("retrieval_text_origin", "")
+        if origin:
+            print(f"      {DIM}retrieval_text:{RESET} {origin}")
         section = r.get("metadata", {}).get("section_path", "")
         if section:
             print(f"      {DIM}section:{RESET} {section}")
@@ -525,9 +518,11 @@ def print_help():
     print(f"""
 {B_WHITE}  Commands:{RESET}  {DIM}(type {RESET}{B_WHITE}/{RESET}{DIM} to open menu){RESET}
 """)
-    for name, (_, desc) in _COMMANDS.items():
+    for name, (_, desc) in _visible_registry().items():
         padded = f"/{name}".ljust(14)
         print(f"    {B_CYAN}{padded}{RESET} {DIM}{desc}{RESET}")
+    if _ALLOW_LOCAL_ADMIN_COMMANDS:
+        print(f"\n  {B_YELLOW}Local Admin Commands Enabled{RESET} {DIM}(debug/maintenance){RESET}")
     print(f"""
 {B_WHITE}  Filter Syntax:{RESET}
     {B_YELLOW}source:<file>{RESET}      Filter by source document
@@ -544,18 +539,36 @@ def print_help():
 """)
 
 
+def _print_health_summary(server: str, health: dict | None) -> None:
+    """Render compact server health status."""
+    if health is None:
+        print(f"  {B_RED}✗{RESET} Server unreachable: {B_WHITE}{server}{RESET}")
+        print(f"    {DIM}Tip: /set-server <url> to switch endpoint, /health to retry.{RESET}\n")
+        return
+    temporal_ok = health.get("temporal_connected", False)
+    worker_ok = health.get("worker_available", False)
+    status = health.get("status", "unknown")
+    temporal = f"{B_GREEN}ok{RESET}" if temporal_ok else f"{B_YELLOW}starting{RESET}"
+    worker = f"{B_GREEN}ok{RESET}" if worker_ok else f"{B_YELLOW}warming{RESET}"
+    print(
+        f"  {B_WHITE}{server}{RESET} {DIM}|{RESET} status {B_CYAN}{status}{RESET} "
+        f"{DIM}|{RESET} temporal {temporal} {DIM}|{RESET} worker {worker}"
+    )
+    print()
+
+
 @_register_command("help", "Show help message")
-def _cmd_help():
+def _cmd_help(_: str = ""):
     print_help()
 
 
 @_register_command("clear", "Clear screen and show banner")
-def _cmd_clear():
+def _cmd_clear(_: str = ""):
     print_banner(_CURRENT_SERVER)
 
 
 @_register_command("verbose", "Toggle verbose client logging")
-def _cmd_verbose():
+def _cmd_verbose(_: str = ""):
     global _verbose_mode
     _verbose_mode = not _verbose_mode
     state = f"{B_GREEN}ON{RESET}" if _verbose_mode else f"{DIM}OFF{RESET}"
@@ -563,23 +576,101 @@ def _cmd_verbose():
     print()
 
 
+@_register_command("health", "Show backend health/worker status")
+def _cmd_health(_: str = ""):
+    health = check_server(_CURRENT_SERVER, retries=2, backoff=0.5)
+    _print_health_summary(_CURRENT_SERVER, health)
+
+
+@_register_command("server", "Show current API server")
+def _cmd_server(_: str = ""):
+    print(f"  {B_WHITE}Current server:{RESET} {_CURRENT_SERVER}\n")
+
+
+@_register_command(
+    "set-server",
+    "Switch API server URL",
+    hidden=True,
+    admin_only=True,
+)
+def _cmd_set_server(arg: str = ""):
+    global _CURRENT_SERVER
+    if not arg:
+        print(f"  {B_YELLOW}⚠{RESET} Usage: /set-server http://host:port\n")
+        return
+    candidate = arg.strip().rstrip("/")
+    if not (candidate.startswith("http://") or candidate.startswith("https://")):
+        print(f"  {B_YELLOW}⚠{RESET} Server URL must start with http:// or https://\n")
+        return
+    _CURRENT_SERVER = candidate
+    print(f"  {B_GREEN}✓{RESET} Server updated to {_CURRENT_SERVER}")
+    health = check_server(_CURRENT_SERVER, retries=2, backoff=0.5)
+    _print_health_summary(_CURRENT_SERVER, health)
+
+
+@_register_command("auth", "Show configured auth mode (masked)")
+def _cmd_auth(_: str = ""):
+    if API_KEY:
+        masked = f"{API_KEY[:4]}...{API_KEY[-4:]}" if len(API_KEY) >= 8 else "***"
+        print(f"  {B_WHITE}Auth:{RESET} API key {DIM}({masked}){RESET}\n")
+        return
+    if BEARER_TOKEN:
+        masked = (
+            f"{BEARER_TOKEN[:6]}...{BEARER_TOKEN[-6:]}"
+            if len(BEARER_TOKEN) >= 12
+            else "***"
+        )
+        print(f"  {B_WHITE}Auth:{RESET} Bearer token {DIM}({masked}){RESET}\n")
+        return
+    print(f"  {B_WHITE}Auth:{RESET} none configured {DIM}(public mode){RESET}\n")
+
+
+@_register_command(
+    "_raw-health",
+    "Dump full health JSON payload",
+    hidden=True,
+    admin_only=True,
+)
+def _cmd_raw_health(_: str = ""):
+    health = check_server(_CURRENT_SERVER, retries=1, backoff=0.2)
+    if health is None:
+        print(f"  {B_RED}✗{RESET} No health payload available (server unreachable)\n")
+        return
+    print(json.dumps(health, indent=2))
+    print()
+
+
 @_register_command("quit", "Exit the query engine")
-def _cmd_quit():
+def _cmd_quit(_: str = ""):
     print(f"\n  {DIM}Goodbye! 👋{RESET}\n")
     os._exit(0)
 
 
 def main() -> None:
     import argparse
-    global _CURRENT_SERVER
+    global _CURRENT_SERVER, _ALLOW_LOCAL_ADMIN_COMMANDS
     parser = argparse.ArgumentParser(description="RAG CLI client (server mode)")
     parser.add_argument("--server", default=DEFAULT_SERVER, help="API server URL")
+    parser.add_argument(
+        "--allow-local-admin-commands",
+        action="store_true",
+        help="Enable hidden local admin commands (/set-server, /_raw-health)",
+    )
     args = parser.parse_args()
 
     server = args.server.rstrip("/")
     _CURRENT_SERVER = server
+    _ALLOW_LOCAL_ADMIN_COMMANDS = args.allow_local_admin_commands or (
+        os.environ.get("RAG_CLI_LOCAL_ADMIN", "").strip().lower() in {"1", "true", "yes", "on"}
+    )
     _setup_tab_completion()
     print_banner(server)
+    if _ALLOW_LOCAL_ADMIN_COMMANDS:
+        print(
+            f"  {B_YELLOW}⚠{RESET} {DIM}Local admin commands enabled "
+            f"(/set-server, /_raw-health).{RESET}"
+        )
+        print()
 
     print(f"  {B_CYAN}⟡{RESET} {DIM}Connecting to {server}...{RESET}", end="", flush=True)
     health = check_server(server, retries=6, backoff=1.5)
@@ -620,10 +711,22 @@ def main() -> None:
             continue
 
         if raw_input_str.startswith("/"):
-            cmd_name = raw_input_str[1:].lower()
+            cmd_parts = raw_input_str[1:].split(maxsplit=1)
+            cmd_name = cmd_parts[0].lower()
+            cmd_arg = cmd_parts[1] if len(cmd_parts) > 1 else ""
             if cmd_name in _COMMANDS:
-                handler, _ = _COMMANDS[cmd_name]
-                handler()
+                handler, _, _, admin_only = _COMMANDS[cmd_name]
+                if admin_only and not _ALLOW_LOCAL_ADMIN_COMMANDS:
+                    print(
+                        f"  {B_YELLOW}⚠{RESET} Command /{cmd_name} is local-admin only."
+                    )
+                    print(
+                        f"    {DIM}Run with --allow-local-admin-commands or "
+                        f"RAG_CLI_LOCAL_ADMIN=1 to enable it.{RESET}"
+                    )
+                    print()
+                    continue
+                handler(cmd_arg)
             else:
                 print(f"  {B_YELLOW}⚠{RESET} Unknown command: {B_WHITE}{raw_input_str}{RESET}")
                 print(f"    {DIM}Type{RESET} {B_WHITE}/{RESET} {DIM}to see available commands{RESET}")

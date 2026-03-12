@@ -246,3 +246,10 @@ RAG_INGESTION_ENABLE_QUALITY_VALIDATION = os.environ.get(
 RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE = os.environ.get(
     "RAG_INGESTION_ENABLE_KNOWLEDGE_GRAPH_STORAGE", "true"
 ).lower() in ("true", "1", "yes")
+RAG_INGESTION_VERBOSE_STAGE_LOGS = os.environ.get(
+    "RAG_INGESTION_VERBOSE_STAGE_LOGS", "false"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_PERSIST_REFACTOR_MIRROR = os.environ.get(
+    "RAG_INGESTION_PERSIST_REFACTOR_MIRROR", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_MIRROR_DIR = PROCESSED_DIR / "refactor_mirror"

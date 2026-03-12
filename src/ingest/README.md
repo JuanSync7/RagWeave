@@ -41,3 +41,21 @@ This package powers embedding ingestion for the RAG system. The workflow is orga
 
 - `docs/embedding/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`: implementation-oriented walkthrough of architecture, stage contracts, config/routing decisions, extension steps, and troubleshooting.
 - `docs/embedding/INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`: one-page onboarding checklist for first-day setup, first change workflow, and common gotchas.
+
+## Runtime Controls
+
+- `RAG_INGESTION_VERBOSE_STAGE_LOGS=true` enables per-stage progress logs for every document.
+- `ingest.py --verbose-stages` forces per-stage logs on for that run.
+- `ingest.py --no-verbose-stages` forces per-stage logs off for that run.
+- Omitting both flags keeps the config default (`RAG_INGESTION_VERBOSE_STAGE_LOGS`).
+- `RAG_INGESTION_PERSIST_REFACTOR_MIRROR=true` persists original/refactored mirror files plus chunk provenance mappings.
+- Source identity is tracked with `source_key`, `source_id`, and `source_uri` metadata so files remain unique across directories/connectors and retrieval can reference original location.
+
+## Source Identity Notes
+
+- `source_key` is the stable ingestion identity used for update cleanup and manifest indexing.
+- `source_uri` is the canonical retrieval location shown to users/operators.
+- Chunk metadata always carries both `source` (human-readable display/filter field) and `source_key` (stable identity field for idempotent chunk IDs).
+- Filename equality does not imply identity equality; files with the same name in different directories are treated as distinct sources.
+- Refactoring never mutates original source files; mirror artifacts are written under `processed/refactor_mirror/`.
+- Chunk metadata stores provenance (`original_char_*`, `refactored_char_*`, `provenance_*`) to map retrieval chunks back to source text.

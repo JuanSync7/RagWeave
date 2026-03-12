@@ -16,6 +16,11 @@ from pathlib import Path
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.platform.cli_log_formatting import (
+    build_level_badges,
+    build_logger_style,
+    style_log_message,
+)
 from src.platform.validation import validate_filter_value
 
 # ── ANSI colors ──────────────────────────────────────────────────────────────
@@ -43,23 +48,26 @@ LOG_DIR = Path(__file__).parent / "logs"
 LOG_FILE = LOG_DIR / "rag_query.log"
 _verbose_mode = False
 
-# Icons and colors for each rag.* sub-logger
-_LOGGER_STYLE = {
-    "rag.query_processor": (f"{B_MAGENTA}⟡ Query{RESET}", MAGENTA),
-    "rag.rag_chain":       (f"{B_CYAN}⟡ Chain{RESET}", CYAN),
-    "rag.vector_store":    (f"{B_BLUE}⟡ Store{RESET}", BLUE),
-    "rag.generator":       (f"{B_GREEN}⟡ Gen{RESET}", GREEN),
-    "rag.knowledge_graph": (f"{B_YELLOW}⟡ KG{RESET}", YELLOW),
-    "rag.query_cli":       (f"{B_WHITE}⟡ CLI{RESET}", WHITE),
+_PALETTE = {
+    "RESET": RESET,
+    "DIM": DIM,
+    "CYAN": CYAN,
+    "GREEN": GREEN,
+    "YELLOW": YELLOW,
+    "BLUE": BLUE,
+    "MAGENTA": MAGENTA,
+    "RED": RED,
+    "WHITE": WHITE,
+    "B_CYAN": B_CYAN,
+    "B_GREEN": B_GREEN,
+    "B_YELLOW": B_YELLOW,
+    "B_BLUE": B_BLUE,
+    "B_MAGENTA": B_MAGENTA,
+    "B_RED": B_RED,
+    "B_WHITE": B_WHITE,
 }
-
-_LEVEL_BADGE = {
-    "DEBUG":    f"{DIM}DBG{RESET}",
-    "INFO":     f"{B_CYAN}ℹ{RESET}",
-    "WARNING":  f"{B_YELLOW}⚠{RESET}",
-    "ERROR":    f"{B_RED}✗{RESET}",
-    "CRITICAL": f"{B_RED}✗✗{RESET}",
-}
+_LOGGER_STYLE = build_logger_style(_PALETTE)
+_LEVEL_BADGE = build_level_badges(_PALETTE)
 
 
 class StyledConsoleHandler(logging.Handler):
@@ -80,8 +88,7 @@ class StyledConsoleHandler(logging.Handler):
         msg = record.getMessage()
 
         # Parse out useful info for common patterns
-        if record.name == "rag.query_processor":
-            msg = _style_query_processor_msg(msg, color)
+        msg = style_log_message(record.name, msg, _PALETTE)
 
         print(f"    {badge}  {label}  {DIM}{msg}{RESET}")
 
@@ -90,39 +97,6 @@ class StyledConsoleHandler(logging.Handler):
         badge = _LEVEL_BADGE.get(record.levelname, f"{DIM}?{RESET}")
         msg = record.getMessage()
         print(f"    {badge}  {DIM}{record.name}{RESET}  {msg}")
-
-
-def _style_query_processor_msg(msg: str, color: str) -> str:
-    """Make query processor messages more readable."""
-    # "Iteration 1: reformulated 'x' -> 'y'"
-    m = re.match(r"Iteration (\d+): reformulated '(.+)' -> '(.+)'", msg)
-    if m:
-        return f"Reformulation #{m.group(1)}: {RESET}{m.group(3)}"
-
-    # "Iteration 1: confidence=0.45 reasoning='...'"
-    m = re.match(r"Iteration (\d+): confidence=([\d.]+) reasoning='(.+)'", msg)
-    if m:
-        conf = float(m.group(2))
-        if conf >= 0.7:
-            cc = B_GREEN
-        elif conf >= 0.4:
-            cc = B_YELLOW
-        else:
-            cc = B_RED
-        return f"Confidence: {cc}{conf:.0%}{RESET}  {DIM}{m.group(3)}{RESET}"
-
-    # "Query processing complete: action=search confidence=0.70 ..."
-    m = re.match(r"Query processing complete: action=(\w+) confidence=([\d.]+) iterations=(\d+) query='(.+)'", msg)
-    if m:
-        return f"Final: {RESET}{B_WHITE}{m.group(4)}{RESET} {DIM}({m.group(1)}, {m.group(3)} iters){RESET}"
-
-    # "Processing query: '...'"
-    m = re.match(r"Processing query: '(.+)'", msg)
-    if m:
-        return f"Processing: {RESET}{m.group(1)}"
-
-    return msg
-
 
 def _setup_logging():
     """Configure logging: file gets everything, console gets styled rag.* only."""
@@ -324,6 +298,12 @@ def display_results(response, elapsed: float) -> None:
     for i, result in enumerate(response.results, 1):
         score_color = B_GREEN if result.score >= 0.5 else (B_YELLOW if result.score >= 0.2 else DIM)
         print(f"  {B_CYAN}#{i}{RESET}  {score_color}score: {result.score:.4f}{RESET}  {DIM}│{RESET}  {B_MAGENTA}{result.metadata.get('source', 'unknown')}{RESET}")
+        source_uri = result.metadata.get("citation_source_uri") or result.metadata.get("source_uri", "")
+        if source_uri:
+            print(f"      {DIM}location:{RESET} {source_uri}")
+        origin = result.metadata.get("retrieval_text_origin", "")
+        if origin:
+            print(f"      {DIM}retrieval_text:{RESET} {origin}")
         section = result.metadata.get("section_path", "")
         if section:
             print(f"      {DIM}section:{RESET} {section}")

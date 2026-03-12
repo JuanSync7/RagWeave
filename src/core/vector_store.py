@@ -7,6 +7,7 @@
 
 import hashlib
 import logging
+import uuid
 from typing import List, Optional
 from contextlib import contextmanager
 
@@ -71,6 +72,19 @@ def ensure_collection(client: weaviate.WeaviateClient) -> None:
         properties=[
             Property(name="text", data_type=DataType.TEXT),
             Property(name="source", data_type=DataType.TEXT),
+            Property(name="source_uri", data_type=DataType.TEXT),
+            Property(name="source_key", data_type=DataType.TEXT),
+            Property(name="source_id", data_type=DataType.TEXT),
+            Property(name="connector", data_type=DataType.TEXT),
+            Property(name="source_version", data_type=DataType.TEXT),
+            Property(name="retrieval_text_origin", data_type=DataType.TEXT),
+            Property(name="citation_source_uri", data_type=DataType.TEXT),
+            Property(name="provenance_method", data_type=DataType.TEXT),
+            Property(name="provenance_confidence", data_type=DataType.NUMBER),
+            Property(name="original_char_start", data_type=DataType.INT),
+            Property(name="original_char_end", data_type=DataType.INT),
+            Property(name="refactored_char_start", data_type=DataType.INT),
+            Property(name="refactored_char_end", data_type=DataType.INT),
             Property(name="title", data_type=DataType.TEXT),
             Property(name="author", data_type=DataType.TEXT),
             Property(name="date", data_type=DataType.TEXT),
@@ -87,9 +101,22 @@ def ensure_collection(client: weaviate.WeaviateClient) -> None:
 
 
 def build_chunk_id(source: str, chunk_index: int, text: str) -> str:
-    """Deterministic chunk ID for idempotent upserts."""
+    """Deterministic UUID chunk ID for idempotent upserts."""
     payload = f"{source}:{chunk_index}:{hashlib.sha256(text.encode('utf-8')).hexdigest()}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, payload))
+
+
+def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text: str) -> str:
+    """Return a valid UUID string for Weaviate object insertion."""
+    if candidate is not None:
+        raw_value = str(candidate).strip()
+        if raw_value:
+            try:
+                return str(uuid.UUID(raw_value))
+            except ValueError:
+                # Preserve deterministic behavior for legacy non-UUID IDs.
+                return str(uuid.uuid5(uuid.NAMESPACE_URL, raw_value))
+    return build_chunk_id(source, chunk_index, text)
 
 
 def add_documents(
@@ -105,15 +132,31 @@ def add_documents(
     """
     span = tracer.start_span("vector_store.add_documents", {"count": len(texts)})
     collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
+    try:
+        config = collection.config.get()
+        raw_props = getattr(config, "properties", []) or []
+        collection_props = {
+            getattr(prop, "name", "")
+            for prop in raw_props
+            if getattr(prop, "name", "")
+        }
+    except Exception:
+        collection_props = set()
 
     if metadatas is None:
         metadatas = [{}] * len(texts)
 
     with collection.batch.dynamic() as batch:
         for text, embedding, metadata in zip(texts, embeddings, metadatas):
-            source = metadata.get("source", "unknown")
+            source = str(metadata.get("source") or "").strip() or "unknown"
+            source_identity = str(metadata.get("source_key") or "").strip() or source
             chunk_index = metadata.get("chunk_index", 0)
-            chunk_id = metadata.get("chunk_id") or build_chunk_id(source, chunk_index, text)
+            chunk_id = _normalize_chunk_uuid(
+                metadata.get("chunk_id"),
+                source_identity,
+                chunk_index,
+                text,
+            )
             properties = {
                 "text": text,
                 "source": source,
@@ -128,6 +171,32 @@ def add_documents(
                 "heading_level": metadata.get("heading_level", 0),
                 "tenant_id": metadata.get("tenant_id", "default"),
             }
+            if "source_uri" in collection_props:
+                properties["source_uri"] = metadata.get("source_uri", "")
+            if "source_key" in collection_props:
+                properties["source_key"] = metadata.get("source_key", "")
+            if "source_id" in collection_props:
+                properties["source_id"] = metadata.get("source_id", "")
+            if "connector" in collection_props:
+                properties["connector"] = metadata.get("connector", "local_fs")
+            if "source_version" in collection_props:
+                properties["source_version"] = metadata.get("source_version", "")
+            if "retrieval_text_origin" in collection_props:
+                properties["retrieval_text_origin"] = metadata.get("retrieval_text_origin", "original")
+            if "citation_source_uri" in collection_props:
+                properties["citation_source_uri"] = metadata.get("citation_source_uri", "")
+            if "provenance_method" in collection_props:
+                properties["provenance_method"] = metadata.get("provenance_method", "")
+            if "provenance_confidence" in collection_props:
+                properties["provenance_confidence"] = float(metadata.get("provenance_confidence", 0.0))
+            if "original_char_start" in collection_props:
+                properties["original_char_start"] = int(metadata.get("original_char_start", -1))
+            if "original_char_end" in collection_props:
+                properties["original_char_end"] = int(metadata.get("original_char_end", -1))
+            if "refactored_char_start" in collection_props:
+                properties["refactored_char_start"] = int(metadata.get("refactored_char_start", -1))
+            if "refactored_char_end" in collection_props:
+                properties["refactored_char_end"] = int(metadata.get("refactored_char_end", -1))
             batch.add_object(properties=properties, vector=embedding, uuid=chunk_id)
 
     span.end(status="ok")
@@ -177,6 +246,19 @@ def hybrid_search(
             "text": obj.properties.get("text", ""),
             "metadata": {
                 "source": obj.properties.get("source", "unknown"),
+                "source_uri": obj.properties.get("source_uri", ""),
+                "source_key": obj.properties.get("source_key", ""),
+                "source_id": obj.properties.get("source_id", ""),
+                "connector": obj.properties.get("connector", "local_fs"),
+                "source_version": obj.properties.get("source_version", ""),
+                "retrieval_text_origin": obj.properties.get("retrieval_text_origin", "original"),
+                "citation_source_uri": obj.properties.get("citation_source_uri", ""),
+                "provenance_method": obj.properties.get("provenance_method", ""),
+                "provenance_confidence": obj.properties.get("provenance_confidence", 0.0),
+                "original_char_start": obj.properties.get("original_char_start", -1),
+                "original_char_end": obj.properties.get("original_char_end", -1),
+                "refactored_char_start": obj.properties.get("refactored_char_start", -1),
+                "refactored_char_end": obj.properties.get("refactored_char_end", -1),
                 "title": obj.properties.get("title", ""),
                 "author": obj.properties.get("author", ""),
                 "date": obj.properties.get("date", ""),
@@ -209,6 +291,33 @@ def delete_documents_by_source(client: weaviate.WeaviateClient, source: str) -> 
     collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
     where = Filter.by_property("source").equal(source)
     result = collection.data.delete_many(where=where)
+    deleted = getattr(result, "matches", 0) or 0
+    span.set_attribute("deleted_count", deleted)
+    span.end(status="ok")
+    return deleted
+
+
+def delete_documents_by_source_key(
+    client: weaviate.WeaviateClient,
+    source_key: str,
+    legacy_source: Optional[str] = None,
+) -> int:
+    """Delete chunks by stable source_key metadata value."""
+    span = tracer.start_span(
+        "vector_store.delete_documents_by_source_key",
+        {"source_key": source_key},
+    )
+    collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
+    try:
+        where = Filter.by_property("source_key").equal(source_key)
+        result = collection.data.delete_many(where=where)
+    except Exception:
+        # Backward-compat fallback for collections created before source_key existed.
+        if not legacy_source:
+            span.end(status="ok")
+            return 0
+        where = Filter.by_property("source").equal(legacy_source)
+        result = collection.data.delete_many(where=where)
     deleted = getattr(result, "matches", 0) or 0
     span.set_attribute("deleted_count", deleted)
     span.end(status="ok")

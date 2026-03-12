@@ -179,9 +179,26 @@ Functional requirements cover:
 - DAG-style orchestration for stage-level control and conditional routing
 - Deterministic identities (hash-based) for reproducibility and
   re-ingestion safety
+- Provenance-aware refactoring: refactored retrieval text with mandatory
+  source-linked citation mapping
 - Hybrid retrieval readiness (vector + keyword metadata support)
 - Delete-and-reinsert re-ingestion strategy to avoid partial drift
 - Configurable multimodal/KG/cross-reference paths with optional enablement
+
+---
+
+## 8.1) Refactor-Provenance Contract (Normative Intent)
+
+When document refactoring is enabled, the pipeline still treats the original
+document as source-of-truth:
+
+- original source remains immutable,
+- refactored text is treated as a derived retrieval representation,
+- chunk metadata must include mapping back to original source spans,
+- citations must resolve to original source URI/location, not only derived text.
+
+This preserves retrieval quality gains from refactoring while preventing
+citation drift.
 
 ---
 
@@ -221,4 +238,5 @@ pipeline outputs but are outside this spec's scope.
 
 ## 12) Sync Status
 
-Aligned to `RAG_embedding_pipeline_spec.md` v2.0.0 as of 2026-03-10.
+Aligned to `RAG_embedding_pipeline_spec.md` v2.0.0 with provenance/citation
+clarifications as of 2026-03-11.

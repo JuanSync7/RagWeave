@@ -27,6 +27,18 @@ Users/CLI -> FastAPI (`server/api.py`) -> Temporal workflow -> Worker activity
 
 Ingestion runs separately and writes processed content/embeddings consumed by retrieval.
 
+## Ingestion Source Identity
+
+The ingestion pipeline uses stable source identity metadata instead of filename-only matching:
+
+- `source_key`: stable ingestion identity for manifest and update cleanup.
+- `source_id`: immutable connector-native document identifier.
+- `source_uri`: canonical source location used for retrieval trace-back.
+
+This prevents collisions when different directories contain the same filename, improves rename/move handling in update mode, and allows query results to point back to original file locations.
+
+When document refactoring is enabled, retrieval can use refactored text while provenance metadata and mirror artifacts (`processed/refactor_mirror/`) keep citations anchored to original source locations.
+
 ## Directory Map
 
 | Directory | Purpose |
@@ -45,6 +57,7 @@ Ingestion runs separately and writes processed content/embeddings consumed by re
 
 - `ingest.py`: CLI for ingestion runs.
 - `query.py`: Local retrieval query CLI.
+- `cli.py [query|ingest]`: Unified interactive CLI for query and ingestion modes.
 - `python -m server.worker`: Temporal worker process.
 - `uvicorn server.api:app --host 0.0.0.0 --port 8000`: API server.
 - `python -m server.cli_client`: Interactive client targeting the API server.
