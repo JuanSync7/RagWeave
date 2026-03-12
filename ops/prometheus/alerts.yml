@@ -1,0 +1,19 @@
+groups:
+  - name: rag-api-alerts
+    rules:
+      - alert: RagApiHighErrorRate
+        expr: sum(rate(rag_api_requests_total{status="500"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG API error rate is elevated"
+
+      - alert: RagApiLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(rag_api_request_latency_ms_bucket[5m])) by (le, endpoint, method)) > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG API p95 latency above 5s"
+
