@@ -2,6 +2,14 @@
 
 ## Document Information
 
+> **Document intent:** This is a formal specification (requirements and acceptance criteria).
+> It defines the desired contract and architecture boundaries.
+> For current implementation details, use:
+>
+> - `docs/embedding/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
+> - `docs/embedding/INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
+> - `src/ingest/README.md`
+
 | Field | Value |
 |-------|-------|
 | System | AION RAG Document Embedding Pipeline |
@@ -40,6 +48,7 @@ The system is designed for a mission-critical engineering environment where inco
 **Exit point:** Vector embeddings + metadata stored in vector database; knowledge graph triples stored in graph store.
 
 **In scope:**
+
 - Document ingestion, processing, and embedding
 - Vector storage with hybrid search capability (vector + keyword)
 - Knowledge graph construction and storage
@@ -145,6 +154,7 @@ The following principles SHALL guide all design and implementation decisions:
 ### 1.8 Out of Scope
 
 **Out of scope:**
+
 - Query processing, reranking, and answer generation (downstream retrieval layer)
 - User authentication and access control
 - Document authoring or editing
@@ -288,11 +298,13 @@ Stages marked with `[optional]` or `[opt]` are conditional and may be skipped ba
 ### 2.3 Processing Stage Independence
 
 Each processing stage SHALL:
+
 - Operate on a shared document state object
 - Read only from fields populated by upstream stages
 - Write only to its own designated output fields
 - Be individually replaceable without affecting other stages
 - Handle its own errors without crashing the pipeline
+
 ## 3. Functional Requirements
 
 ### 3.1 Document Ingestion (FR-100)
@@ -593,6 +605,7 @@ Each processing stage SHALL:
 > **Description:** The raw chunk content MUST be preserved separately from the enriched embedding input for display in retrieval results.
 > **Rationale:** Users viewing retrieval results should see the original chunk text, not text polluted with boundary context from adjacent chunks. Separating raw and enriched versions serves both embedding quality and user experience.
 > **Acceptance Criteria:** Given a chunk with raw content "The VDD_CORE supply is 1.0V nominal" and enriched content that includes boundary context prepended, both versions are stored. The retrieval API returns the raw content for display. The enriched content is used only for generating the embedding vector. Modifying the boundary context configuration and re-ingesting does not alter the stored raw content.
+>
 ### 3.8 Metadata Generation (FR-800)
 
 > **FR-801** | Priority: MUST
@@ -853,6 +866,7 @@ Each processing stage SHALL:
 > **Description:** KG cleanup for shared graph nodes MUST use a two-phase approach: delete edges owned by the document first, then garbage-collect nodes only referenced by that document. Shared nodes referenced by other documents MUST be preserved.
 > **Rationale:** Knowledge graph nodes may be shared across documents (e.g., the entity "TSMC N5" appears in many specifications). Naively deleting all nodes associated with a re-ingested document would destroy shared entities and break triples from other documents, corrupting the knowledge graph.
 > **Acceptance Criteria:** Given documents A and B that both reference entity "TSMC N5", re-ingesting document A: (1) deletes all edges owned by document A (e.g., ("SPEC-A", "targets", "TSMC N5")), (2) checks whether "TSMC N5" is referenced by any other document, (3) finds that document B still references "TSMC N5" and preserves the node. If document B is subsequently deleted and "TSMC N5" has no remaining references, the garbage collector removes the orphaned node. The node reference count is verified before and after cleanup.
+>
 ## 5. Review Tier Requirements (FR-1500)
 
 ### 5.1 Tier Definitions
@@ -976,7 +990,7 @@ Each processing stage SHALL:
 
 > **FR-1705** | Priority: MUST
 > **Description:** LLM responses expected to be structured (JSON) MUST be parsed through a defensive parser that handles common LLM response formatting issues (code fences, leading/trailing text).
-> **Rationale:** LLMs frequently wrap JSON in markdown code fences (```json ... ```) or prepend conversational text. A rigid JSON parser would fail on valid content due to formatting artifacts (fail-safe-over-fail-fast).
+> **Rationale:** LLMs frequently wrap JSON in markdown code fences (```json ...```) or prepend conversational text. A rigid JSON parser would fail on valid content due to formatting artifacts (fail-safe-over-fail-fast).
 > **Acceptance Criteria:** Given an LLM response containing `"```json\n{\"keywords\": [\"PVT\", \"corner\"]}\n```"`, when parsed, then the JSON object is extracted successfully. Given an LLM response containing `"Here is the result: {\"keywords\": [\"LVS\"]}"`, when parsed, then the JSON object is extracted. Negative: given a response containing no valid JSON, then the parser returns a parse failure (not a crash).
 
 > **FR-1706** | Priority: MUST
@@ -1243,6 +1257,7 @@ The vector store collection MUST support the following property categories:
 > **Description:** The system MUST support a migration strategy for breaking changes: create new collection → batch re-ingest → validate → swap active collection → delete old collection.
 > **Rationale:** A structured migration strategy prevents data loss during schema transitions and enables rollback if validation fails. Swapping only after validation ensures zero-downtime migration (fail-safe-over-fail-fast).
 > **Acceptance Criteria:** Given a breaking schema change, when the migration is executed, then: (1) a new collection is created, (2) all documents are re-ingested into the new collection, (3) validation confirms chunk counts and search quality meet thresholds, (4) the active collection pointer is swapped, (5) the old collection is deleted only after successful swap. Negative: if validation fails at step 3, the old collection remains active and the new collection is discarded.
+>
 ## 12. Non-Functional Requirements
 
 ### 12.1 Performance (NFR-100)
@@ -1871,6 +1886,7 @@ The following questions SHALL be resolved before finalising this specification:
 | FR-2104 | 15 | MUST | Feedback |
 
 **Total Requirements: 200**
+
 - MUST: 198
 - SHOULD: 2
 - MAY: 0

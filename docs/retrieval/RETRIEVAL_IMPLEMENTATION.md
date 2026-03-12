@@ -3,6 +3,10 @@
 **AION Knowledge Management Platform**
 Version: 1.0 | Status: Draft | Domain: Retrieval Pipeline
 
+> **Document intent:** This file is a phased implementation plan tied to `RETRIEVAL_SPEC.md`.  
+> It is not the source of truth for current runtime behavior.  
+> For as-built behavior, refer to `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`, `src/retrieval/README.md`, and `server/README.md`.
+
 This document provides a phased implementation plan and detailed code appendix for the retrieval pipeline specified in `RETRIEVAL_SPEC.md`. Every task references the requirements it satisfies.
 
 ---
@@ -24,6 +28,7 @@ Foundation work: guardrails, validation, and resilience. These tasks make the pi
 **Complexity:** M
 
 **Subtasks:**
+
 1. Define a `GuardrailResult` data structure (pass/reject, risk level, sanitized query, PII detections)
 2. Implement input validation (query length, parameter ranges, filter sanitization)
 3. Load injection patterns from external YAML config file
@@ -44,6 +49,7 @@ Foundation work: guardrails, validation, and resilience. These tasks make the pi
 **Complexity:** L
 
 **Subtasks:**
+
 1. Define a `PostGuardrailResult` data structure (action: return/re-retrieve/flag, redacted answer, confidence breakdown)
 2. Implement PII detection on generated answer (regex + optional NER)
 3. Implement output sanitization (system prompt leak detection, artifact stripping)
@@ -64,6 +70,7 @@ Foundation work: guardrails, validation, and resilience. These tasks make the pi
 **Complexity:** S
 
 **Subtasks:**
+
 1. Implement a generic retry decorator/wrapper with configurable max retries, base interval, and max backoff
 2. Apply to query processing LLM calls (reformulation, evaluation)
 3. Apply to generation LLM call
@@ -83,6 +90,7 @@ Foundation work: guardrails, validation, and resilience. These tasks make the pi
 **Complexity:** S
 
 **Subtasks:**
+
 1. Define valid ranges for `alpha` (0.0–1.0), `search_limit` (1–100), `rerank_top_k` (1–50)
 2. Sanitize metadata filter values (prevent Weaviate query language injection)
 3. Validate query length (min/max configurable)
@@ -105,6 +113,7 @@ The intelligence layer: composite scoring, risk-aware routing, and full-pipeline
 **Complexity:** M
 
 **Subtasks:**
+
 1. Implement retrieval confidence calculation (top-3 reranker score average)
 2. Implement LLM confidence extraction and parsing (high/medium/low → numerical with downward correction)
 3. Implement citation coverage calculation (sentence-level grounding check)
@@ -124,6 +133,7 @@ The intelligence layer: composite scoring, risk-aware routing, and full-pipeline
 **Complexity:** L
 
 **Subtasks:**
+
 1. Define `RAGPipelineState` TypedDict covering all pipeline stages (query, transformed query, retrieved docs, ranked docs, formatted context, answer, confidence, risk level, retry count)
 2. Define graph nodes for each pipeline stage (transform → guardrail → retrieve → rerank → format → generate → evaluate → route)
 3. Implement conditional edges from evaluate node (return / re-retrieve / flag)
@@ -144,6 +154,7 @@ The intelligence layer: composite scoring, risk-aware routing, and full-pipeline
 **Complexity:** S
 
 **Subtasks:**
+
 1. Define risk taxonomy (HIGH/MEDIUM/LOW keyword lists) in external config file
 2. Implement classifier: scan query for keyword matches, return highest matching level
 3. Attach risk level to pipeline state for downstream use
@@ -166,6 +177,7 @@ Improve the quality of what gets retrieved and how it's presented to the LLM.
 **Complexity:** S
 
 **Subtasks:**
+
 1. Define the formatted chunk template (metadata header + content body)
 2. Implement formatter function that maps document metadata to the template
 3. Handle missing metadata fields (default to "unknown")
@@ -185,6 +197,7 @@ Improve the quality of what gets retrieved and how it's presented to the LLM.
 **Complexity:** M
 
 **Subtasks:**
+
 1. Group retrieved documents by spec_id or filename stem
 2. Within each group, detect version mismatches
 3. Build conflict records (spec, version A, version B, dates)
@@ -204,6 +217,7 @@ Improve the quality of what gets retrieved and how it's presented to the LLM.
 **Complexity:** S
 
 **Subtasks:**
+
 1. Store system prompt in a separate markdown file (no variables — static rules only)
 2. Store human turn template in a separate file with named placeholders (`{documents}`, `{question}`)
 3. Use a template engine (e.g., LangChain ChatPromptTemplate) that only substitutes declared variables
@@ -223,6 +237,7 @@ Improve the quality of what gets retrieved and how it's presented to the LLM.
 **Complexity:** M
 
 **Subtasks:**
+
 1. Define a conversation buffer (last N turns, configurable)
 2. Thread conversation history through the pipeline state
 3. Modify the query reformulation prompt to include recent conversation context
@@ -246,6 +261,7 @@ Make the pipeline fast and debuggable.
 **Complexity:** S
 
 **Subtasks:**
+
 1. Create a connection pool manager (singleton or module-level)
 2. Support external vector database via URL configuration (not just embedded)
 3. Implement startup health check (fail-fast if DB is unreachable)
@@ -265,6 +281,7 @@ Make the pipeline fast and debuggable.
 **Complexity:** S
 
 **Subtasks:**
+
 1. Wrap the embed_query function with an LRU cache (configurable max size)
 2. Use the raw query string as cache key (normalize whitespace)
 3. Ensure cache is thread-safe if concurrent queries are supported
@@ -284,6 +301,7 @@ Make the pipeline fast and debuggable.
 **Complexity:** S
 
 **Subtasks:**
+
 1. Define cache key: normalized `(processed_query, source_filter, heading_filter, alpha)` tuple
 2. Implement TTL-based cache (dict + timestamps, or `cachetools.TTLCache`)
 3. On cache hit, return cached response immediately
@@ -304,6 +322,7 @@ Make the pipeline fast and debuggable.
 **Complexity:** M
 
 **Subtasks:**
+
 1. Choose observability backend (e.g., Langfuse, OpenTelemetry, or structured JSON logging)
 2. Generate unique trace ID per query
 3. Implement trace decorator/wrapper for each pipeline stage
@@ -328,6 +347,7 @@ Harden the pipeline against data leakage and injection.
 **Complexity:** S
 
 **Subtasks:**
+
 1. Create a YAML/JSON config file for injection patterns
 2. Migrate existing hardcoded patterns to the config file
 3. Load patterns at startup, compile to regex
@@ -347,6 +367,7 @@ Harden the pipeline against data leakage and injection.
 **Complexity:** M
 
 **Subtasks:**
+
 1. Implement regex-based PII detection (email, phone, SSN/employee ID patterns)
 2. Implement NER-based person name detection (optional, using existing entity extraction or a lightweight model)
 3. Replace detected PII with typed placeholders (`[PERSON]`, `[EMAIL]`, `[PHONE]`)
@@ -367,6 +388,7 @@ Harden the pipeline against data leakage and injection.
 **Complexity:** M
 
 **Subtasks:**
+
 1. Reuse PII detection logic from Task 5.2 (shared module)
 2. Apply to the generated answer text
 3. Replace PII with typed placeholders

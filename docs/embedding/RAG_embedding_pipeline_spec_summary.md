@@ -4,6 +4,13 @@
 **Purpose:** Requirements-level overview for stakeholders, reviewers, and implementers.  
 **See also:** `RAG_embedding_pipeline_summary.md` for architecture/design-focused summary.
 
+> **Note:** This summary reflects specification intent.
+> For implemented ingestion behavior and code navigation, use:
+>
+> - `docs/embedding/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
+> - `docs/embedding/INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
+> - `src/ingest/README.md`
+
 ---
 
 ## 1) System Intent

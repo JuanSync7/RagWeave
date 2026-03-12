@@ -3,6 +3,9 @@
 **AION Knowledge Management Platform**
 Version: 1.0 | Status: Draft | Domain: Retrieval Pipeline
 
+> **Document intent:** This is a normative requirements/specification document (target-state + conformance language).  
+> For currently implemented runtime behavior, refer to `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`, `docs/retrieval/RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`, and `src/retrieval/README.md`.
+
 ---
 
 ## 1. Scope & Definitions
@@ -162,6 +165,7 @@ User Query (natural language input)
 
 > **REQ-201** | Priority: MUST
 > **Description:** The system MUST validate all query inputs before retrieval. Validation MUST include:
+>
 > - Query length within configurable bounds (min and max characters)
 > - Search parameters (`alpha`, `search_limit`, `rerank_top_k`) within valid ranges
 > - Metadata filter values (`source_filter`, `heading_filter`) sanitized against injection
@@ -204,6 +208,7 @@ User Query (natural language input)
 
 > **REQ-303** | Priority: MUST
 > **Description:** The system MUST combine vector search and BM25 results using a hybrid fusion strategy. The fusion weight (alpha) MUST be configurable:
+>
 > - alpha = 0.0: pure BM25
 > - alpha = 1.0: pure vector search
 > - alpha = 0.5: equal weight (default)
@@ -214,6 +219,7 @@ User Query (natural language input)
 
 > **REQ-304** | Priority: MAY
 > **Description:** The system MAY expand queries using a knowledge graph before retrieval. When enabled, KG expansion MUST:
+>
 > - Match entities in the query against the KG
 > - Traverse up to a configurable depth (default 1 hop)
 > - Append related terms to the BM25 query (not the vector query)
@@ -277,6 +283,7 @@ User Query (natural language input)
 
 > **REQ-501** | Priority: MUST
 > **Description:** Every document chunk injected into the LLM context MUST carry structured metadata. The metadata MUST include at minimum:
+>
 > - Filename (source document name)
 > - Version (document version identifier)
 > - Date (document date, ISO format)
@@ -290,6 +297,7 @@ User Query (natural language input)
 
 > **REQ-502** | Priority: MUST
 > **Description:** The system MUST detect version conflicts before generation. When two or more retrieved documents share the same specification ID (or filename stem) but differ in version, the system MUST:
+>
 > 1. Flag the conflict in the pipeline state
 > 2. Include the conflict information in the LLM prompt
 > 3. Surface the conflict to the user in the final response
@@ -309,6 +317,7 @@ User Query (natural language input)
 
 > **REQ-601** | Priority: MUST
 > **Description:** The system MUST use an anti-hallucination system prompt that instructs the LLM to:
+>
 > 1. Answer ONLY from the provided retrieved documents
 > 2. Never use training data or prior knowledge
 > 3. Cite sources using a specified format (e.g., `[Filename, Version, Section]`)
@@ -334,6 +343,7 @@ User Query (natural language input)
 
 > **REQ-605** | Priority: MUST
 > **Description:** The system MUST implement retry logic with exponential backoff for all external LLM calls (generation and query processing). The retry configuration MUST include:
+>
 > - Maximum number of retries (configurable, default 3)
 > - Base backoff interval (configurable)
 > - Maximum backoff cap
@@ -365,6 +375,7 @@ User Query (natural language input)
 
 > **REQ-703** | Priority: MUST
 > **Description:** The system MUST detect and redact PII from generated answers before they reach the user. PII detection MUST cover at minimum:
+>
 > - Email addresses (regex)
 > - Phone numbers (regex)
 > - Social security numbers / employee IDs (regex)
@@ -372,10 +383,11 @@ User Query (natural language input)
 >
 > Detected PII MUST be replaced with typed placeholders (e.g., `[EMAIL]`, `[PHONE]`, `[PERSON]`).
 > **Rationale:** Retrieved documents may contain PII (author names, contact information, employee references). The LLM may surface this PII in generated answers. PII in answers is a data handling violation regardless of whether the source documents are internal.
-> **Acceptance Criteria:** An answer containing "Contact john.smith@company.com for details" is redacted to "Contact [EMAIL] for details". PII detection runs on every generated answer. Redactions are logged for audit.
+> **Acceptance Criteria:** An answer containing "Contact <john.smith@company.com> for details" is redacted to "Contact [EMAIL] for details". PII detection runs on every generated answer. Redactions are logged for audit.
 
 > **REQ-704** | Priority: MUST
 > **Description:** The system MUST sanitize generated output to remove:
+>
 > - Leaked system prompt fragments
 > - Internal metadata or formatting artifacts
 > - Template variable names or placeholders that were not substituted
@@ -385,6 +397,7 @@ User Query (natural language input)
 
 > **REQ-705** | Priority: SHOULD
 > **Description:** For queries classified as HIGH risk (per REQ-203), the system SHOULD apply additional output filtering:
+>
 > - Numerical values (voltages, frequencies, temperatures, timing values) that do not have an exact quote match in a retrieved document SHOULD be flagged or suppressed
 > - The answer SHOULD include a verification warning (e.g., "VERIFY BEFORE IMPLEMENTATION")
 > **Rationale:** In HIGH risk domains (electrical specifications, safety compliance), an incorrect number is not a UX problem — it is a design risk. Requiring exact quote matches for numerical claims adds a safety margin.
@@ -431,6 +444,7 @@ User Query (natural language input)
 
 > **REQ-803** | Priority: SHOULD
 > **Description:** The system SHOULD define alerting thresholds for key metrics and trigger alerts when thresholds are breached:
+>
 > - Average composite confidence drops below 0.60
 > - End-to-end latency exceeds configurable target
 > - PII detection rate exceeds baseline (potential data quality issue)
@@ -478,6 +492,7 @@ User Query (natural language input)
 > **Description:** All configurable thresholds, weights, patterns, and parameters MUST be externalized to configuration files (not hardcoded in source code). Changes to configuration MUST take effect on restart without code changes.
 >
 > Configuration categories:
+>
 > - Search parameters (alpha, search_limit, rerank_top_k)
 > - Confidence thresholds and weights
 > - Risk classification taxonomy
@@ -537,6 +552,7 @@ User Query (natural language input)
 | REQ-903 | 11 | MUST | Non-Functional |
 
 **Total Requirements: 39**
+
 - MUST: 28
 - SHOULD: 9
 - MAY: 1
