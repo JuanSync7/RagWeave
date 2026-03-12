@@ -198,9 +198,14 @@ def _detect_vector_backend() -> str:
 
 # ── Filter parsing ───────────────────────────────────────────────────────────
 
-# Filter prefix patterns: "source:filename.txt" or "section:Heading"
+# Filter prefix patterns:
+# - source:filename.txt
+# - section:Heading
+# - source:"path with spaces/file.md"
+# - section:"Clock Domain Crossing"
 _FILTER_PAT = re.compile(
-    r"\b(source|section):(\S+)\s*", re.IGNORECASE
+    r'\b(source|section):(?:"([^"]+)"|(\S+))\s*',
+    re.IGNORECASE,
 )
 
 
@@ -216,9 +221,10 @@ def parse_filters(raw_query: str) -> tuple:
         → ("what is RAG?", {"source_filter": "sample_doc_3.txt"})
     """
     filters = {}
+
     def _replace(m):
         key = m.group(1).lower()
-        value = m.group(2)
+        value = m.group(2) if m.group(2) is not None else m.group(3)
         if key == "source":
             filters["source_filter"] = value
         elif key == "section":

@@ -197,7 +197,20 @@ def chunk_markdown(
 
 def _build_section_metadata(header_meta: dict) -> dict:
     """Convert header metadata from MarkdownHeaderTextSplitter to flat fields."""
-    path_parts = [header_meta[k] for k in ("h1", "h2", "h3", "h4") if k in header_meta]
+    # LangChain versions vary between "h1"..."h4" and "Header 1"..."Header 4".
+    levels = [
+        ("h1", "Header 1"),
+        ("h2", "Header 2"),
+        ("h3", "Header 3"),
+        ("h4", "Header 4"),
+    ]
+    path_parts = []
+    for compact_key, long_key in levels:
+        value = header_meta.get(compact_key)
+        if value is None:
+            value = header_meta.get(long_key)
+        if value:
+            path_parts.append(value)
     heading = path_parts[-1] if path_parts else ""
     heading_level = len(path_parts)
     return {

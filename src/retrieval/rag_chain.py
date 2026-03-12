@@ -173,6 +173,20 @@ class RAGChain:
                 filters=wv_filter,
             )
 
+    @staticmethod
+    def _ranked_from_search_results(search_results: List[dict], top_k: int) -> List[RankedResult]:
+        """Convert hybrid-search dict rows into RankedResult list."""
+        ranked = [
+            RankedResult(
+                text=str(item.get("text", "")),
+                score=float(item.get("score", 0.0)),
+                metadata=dict(item.get("metadata", {})),
+            )
+            for item in search_results
+        ]
+        ranked.sort(key=lambda result: result.score, reverse=True)
+        return ranked[:top_k]
+
     def run(
         self,
         query: str,
@@ -255,6 +269,12 @@ class RAGChain:
             budget_exhausted = True
             budget_exhausted_stage = stage
 
+        def _budget_clarification(stage: str) -> str:
+            return (
+                "This request reached the retrieval timeout budget during "
+                f"{stage}. Please narrow the query or try again."
+            )
+
         try:
             alpha = validate_alpha(alpha)
             search_limit = validate_positive_int("search_limit", search_limit)
@@ -287,6 +307,20 @@ class RAGChain:
                     budget_exhausted=budget_exhausted,
                     budget_exhausted_stage=budget_exhausted_stage,
                 )
+            if budget_exhausted:
+                timing_totals = _compute_totals()
+                self._log_timings(stage_timings, timing_totals)
+                return RAGResponse(
+                    query=query,
+                    processed_query=query_result.processed_query,
+                    query_confidence=query_result.confidence,
+                    action="ask_user",
+                    clarification_message=_budget_clarification("query processing"),
+                    stage_timings=stage_timings,
+                    timing_totals=timing_totals,
+                    budget_exhausted=True,
+                    budget_exhausted_stage=budget_exhausted_stage,
+                )
 
             processed_query = query_result.processed_query
 
@@ -301,6 +335,21 @@ class RAGChain:
             _record_stage("kg_expansion", "retrieval", t0)
             if stage_timings[-1]["ms"] > stage_budgets["kg_expansion"] or _is_overall_budget_exhausted():
                 _mark_budget_exhausted("kg_expansion")
+            if budget_exhausted:
+                timing_totals = _compute_totals()
+                self._log_timings(stage_timings, timing_totals)
+                return RAGResponse(
+                    query=query,
+                    processed_query=processed_query,
+                    query_confidence=query_result.confidence,
+                    action="ask_user",
+                    clarification_message=_budget_clarification("KG expansion"),
+                    kg_expanded_terms=kg_expanded_terms or None,
+                    stage_timings=stage_timings,
+                    timing_totals=timing_totals,
+                    budget_exhausted=True,
+                    budget_exhausted_stage=budget_exhausted_stage,
+                )
 
             if kg_expanded_terms:
                 bm25_query = processed_query + " " + " ".join(kg_expanded_terms[:3])
@@ -315,6 +364,21 @@ class RAGChain:
             _record_stage("embedding", "retrieval", t0)
             if stage_timings[-1]["ms"] > stage_budgets["embedding"] or _is_overall_budget_exhausted():
                 _mark_budget_exhausted("embedding")
+            if budget_exhausted:
+                timing_totals = _compute_totals()
+                self._log_timings(stage_timings, timing_totals)
+                return RAGResponse(
+                    query=query,
+                    processed_query=processed_query,
+                    query_confidence=query_result.confidence,
+                    action="ask_user",
+                    clarification_message=_budget_clarification("embedding"),
+                    kg_expanded_terms=kg_expanded_terms or None,
+                    stage_timings=stage_timings,
+                    timing_totals=timing_totals,
+                    budget_exhausted=True,
+                    budget_exhausted_stage=budget_exhausted_stage,
+                )
 
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
@@ -343,6 +407,21 @@ class RAGChain:
             _record_stage("hybrid_search", "retrieval", t0)
             if stage_timings[-1]["ms"] > stage_budgets["hybrid_search"] or _is_overall_budget_exhausted():
                 _mark_budget_exhausted("hybrid_search")
+            if budget_exhausted:
+                timing_totals = _compute_totals()
+                self._log_timings(stage_timings, timing_totals)
+                return RAGResponse(
+                    query=query,
+                    processed_query=processed_query,
+                    query_confidence=query_result.confidence,
+                    action="search",
+                    results=self._ranked_from_search_results(search_results, rerank_top_k),
+                    kg_expanded_terms=kg_expanded_terms or None,
+                    stage_timings=stage_timings,
+                    timing_totals=timing_totals,
+                    budget_exhausted=True,
+                    budget_exhausted_stage=budget_exhausted_stage,
+                )
 
             if not search_results:
                 timing_totals = _compute_totals()
@@ -377,6 +456,21 @@ class RAGChain:
             _record_stage("reranking", "retrieval", t0)
             if stage_timings[-1]["ms"] > stage_budgets["reranking"] or _is_overall_budget_exhausted():
                 _mark_budget_exhausted("reranking")
+            if budget_exhausted:
+                timing_totals = _compute_totals()
+                self._log_timings(stage_timings, timing_totals)
+                return RAGResponse(
+                    query=query,
+                    processed_query=processed_query,
+                    query_confidence=query_result.confidence,
+                    action="search",
+                    results=reranked,
+                    kg_expanded_terms=kg_expanded_terms or None,
+                    stage_timings=stage_timings,
+                    timing_totals=timing_totals,
+                    budget_exhausted=True,
+                    budget_exhausted_stage=budget_exhausted_stage,
+                )
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None

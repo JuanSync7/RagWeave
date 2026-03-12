@@ -1,0 +1,14 @@
+name: deploy-gates
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Run smoke script
+        run: bash scripts/smoke_test.sh
+

@@ -57,5 +57,6 @@ This package powers embedding ingestion for the RAG system. The workflow is orga
 - `source_uri` is the canonical retrieval location shown to users/operators.
 - Chunk metadata always carries both `source` (human-readable display/filter field) and `source_key` (stable identity field for idempotent chunk IDs).
 - Filename equality does not imply identity equality; files with the same name in different directories are treated as distinct sources.
+- Manifest persistence is atomic (`.tmp` then replace), and corrupted manifest JSON is moved aside as `manifest.json.corrupt.<timestamp>` before continuing with an empty manifest.
 - Refactoring never mutates original source files; mirror artifacts are written under `processed/refactor_mirror/`.
 - Chunk metadata stores provenance (`original_char_*`, `refactored_char_*`, `provenance_*`) to map retrieval chunks back to source text.
