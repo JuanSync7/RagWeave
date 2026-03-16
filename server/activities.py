@@ -80,6 +80,9 @@ def execute_rag_query(request: dict) -> dict:
     fast_path: Optional[bool] = request.get("fast_path")
     overall_timeout_ms: int = int(request.get("overall_timeout_ms", 30000))
     stage_budget_overrides: dict = request.get("stage_budget_overrides", {}) or {}
+    conversation_id: Optional[str] = request.get("conversation_id")
+    memory_context: Optional[str] = request.get("memory_context")
+    memory_recent_turns: list[dict] = request.get("memory_recent_turns", []) or []
 
     cache_payload = {
         "query": query,
@@ -94,6 +97,9 @@ def execute_rag_query(request: dict) -> dict:
         "fast_path": fast_path,
         "overall_timeout_ms": overall_timeout_ms,
         "stage_budget_overrides": stage_budget_overrides,
+        "conversation_id": conversation_id,
+        "memory_context": memory_context,
+        "memory_recent_turns": memory_recent_turns,
     }
     cache_key = "rag:query:" + hashlib.sha256(
         json.dumps(cache_payload, sort_keys=True).encode("utf-8")
@@ -121,6 +127,9 @@ def execute_rag_query(request: dict) -> dict:
         fast_path=fast_path,
         overall_timeout_ms=overall_timeout_ms,
         stage_budget_overrides=stage_budget_overrides,
+        conversation_id=conversation_id,
+        memory_context=memory_context,
+        memory_recent_turns=memory_recent_turns,
     )
     elapsed_ms = (time.perf_counter() - start) * 1000
 

@@ -9,5 +9,6 @@ langgraph
 numpy
 temporalio
 langfuse
+docling
 pytest
 pytest-mock

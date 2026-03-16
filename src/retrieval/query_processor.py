@@ -22,10 +22,8 @@ import logging
 import os
 import re
 import hashlib
-from dataclasses import dataclass
-from enum import Enum
 from collections import defaultdict
-from typing import Dict, List, Optional, TypedDict
+from typing import Dict, List, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -51,6 +49,8 @@ from config.settings import (
 from src.platform.observability.providers import get_tracer
 from src.platform.reliability.providers import get_retry_provider
 from src.platform.schemas.reliability import RetryPolicy
+from src.retrieval.schemas import QueryAction, QueryResult, QueryState
+from src.retrieval.utils import parse_json_object
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -81,43 +81,6 @@ _retry_policy = RetryPolicy(
 # ---------------------------------------------------------------------------
 # Public API — backward-compatible with rag_chain.py
 # ---------------------------------------------------------------------------
-
-
-class QueryAction(Enum):
-    """Action to take after query processing."""
-
-    SEARCH = "search"
-    ASK_USER = "ask_user"
-
-
-@dataclass
-class QueryResult:
-    """Result of the query processing pipeline."""
-
-    processed_query: str
-    confidence: float
-    action: QueryAction
-    clarification_message: Optional[str] = None
-    iterations: int = 0
-
-
-# ---------------------------------------------------------------------------
-# LangGraph state
-# ---------------------------------------------------------------------------
-
-
-class QueryState(TypedDict):
-    original_query: str
-    current_query: str
-    confidence: float
-    reasoning: str
-    iteration: int
-    max_iterations: int
-    confidence_threshold: float
-    action: str  # "search" | "ask_user" | ""
-    clarification_message: str
-    ollama_available: bool
-    fast_path: bool
 
 
 # ---------------------------------------------------------------------------
@@ -452,8 +415,7 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
 
     if result:
         try:
-            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", result.strip())
-            parsed = json.loads(cleaned)
+            parsed = parse_json_object(result)
             reformulated = str(parsed.get("reformulated_query", "")).strip()
             confidence = float(parsed.get("confidence", 0.0))
             confidence = max(0.0, min(1.0, confidence))
@@ -677,3 +639,12 @@ def process_query(
         raise
     finally:
         root_span.end(status=span_status, error=span_error)
+
+
+__all__ = [
+    "QueryAction",
+    "QueryResult",
+    "QueryState",
+    "process_query",
+    "warm_up_ollama",
+]

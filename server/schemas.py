@@ -7,8 +7,12 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional
+
+from server.common.schemas import ApiErrorDetail, ApiErrorResponse, ConsoleEnvelope
 
 
 class QueryRequest(BaseModel):
@@ -41,6 +45,26 @@ class QueryRequest(BaseModel):
     stage_budget_overrides: dict[str, int] = Field(
         default_factory=dict,
         description="Optional per-stage budget overrides in milliseconds",
+    )
+    conversation_id: Optional[str] = Field(
+        None,
+        min_length=3,
+        max_length=128,
+        description="Conversation identifier for multi-turn memory",
+    )
+    memory_enabled: bool = Field(
+        default=True,
+        description="Whether conversation memory should be applied",
+    )
+    memory_turn_window: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=40,
+        description="Optional override for number of recent turns injected as context",
+    )
+    compact_now: bool = Field(
+        default=False,
+        description="Force a summary compaction pass for the conversation after this turn",
     )
 
     @model_validator(mode="after")
@@ -88,6 +112,7 @@ class QueryResponse(BaseModel):
     timing_totals: dict = Field(default_factory=dict)
     budget_exhausted: bool = False
     budget_exhausted_stage: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -149,15 +174,118 @@ class RootResponse(BaseModel):
     query_endpoint: str
 
 
-class ApiErrorDetail(BaseModel):
-    """Structured error detail payload."""
-    code: str
-    message: str
-    details: Optional[dict] = None
+class ConsoleQueryRequest(BaseModel):
+    """Console query request supporting both stream and non-stream modes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(..., min_length=1, max_length=2000)
+    stream: bool = Field(default=True)
+    source_filter: Optional[str] = None
+    heading_filter: Optional[str] = None
+    alpha: float = Field(default=0.5, ge=0.0, le=1.0)
+    search_limit: int = Field(default=10, ge=1, le=100)
+    rerank_top_k: int = Field(default=5, ge=1, le=50)
+    tenant_id: Optional[str] = None
+    max_query_iterations: Optional[int] = Field(default=None, ge=1, le=8)
+    fast_path: Optional[bool] = None
+    overall_timeout_ms: Optional[int] = Field(default=None, ge=1000, le=180000)
+    stage_budget_overrides: dict[str, int] = Field(default_factory=dict)
+    conversation_id: Optional[str] = Field(default=None, min_length=3, max_length=128)
+    memory_enabled: bool = Field(default=True)
+    memory_turn_window: Optional[int] = Field(default=None, ge=1, le=40)
+    compact_now: bool = Field(default=False)
 
 
-class ApiErrorResponse(BaseModel):
-    """Standardized API error envelope for all non-2xx responses."""
-    ok: bool = False
-    error: ApiErrorDetail
-    request_id: Optional[str] = None
+class ConsoleIngestionRequest(BaseModel):
+    """Console ingestion request for file, directory, or full documents ingestion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["single_file", "directory", "all_documents"] = Field(
+        default="all_documents"
+    )
+    target_path: Optional[str] = Field(
+        default=None,
+        description="Required for single_file and directory modes",
+    )
+    update_mode: bool = Field(default=True)
+    build_kg: bool = Field(default=True)
+    export_obsidian: bool = Field(default=False)
+    semantic_chunking: bool = Field(default=True)
+    export_processed: bool = Field(default=False)
+    verbose_stages: Optional[bool] = None
+    persist_refactor_mirror: Optional[bool] = None
+    docling_enabled: Optional[bool] = None
+    docling_model: Optional[str] = None
+    docling_artifacts_path: Optional[str] = None
+    docling_strict: Optional[bool] = None
+    docling_auto_download: Optional[bool] = None
+    vision_enabled: Optional[bool] = None
+    vision_provider: Optional[Literal["ollama", "openai_compatible"]] = None
+    vision_model: Optional[str] = None
+    vision_api_base_url: Optional[str] = None
+    vision_timeout_seconds: Optional[int] = Field(default=None, ge=5, le=600)
+    vision_max_figures: Optional[int] = Field(default=None, ge=1, le=32)
+    vision_auto_pull: Optional[bool] = None
+    vision_strict: Optional[bool] = None
+
+
+class ConsoleCommandRequest(BaseModel):
+    """Unified slash-command request for console query/ingest surfaces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["query", "ingest"] = Field(default="query")
+    command: str = Field(..., min_length=1, max_length=100)
+    arg: Optional[str] = Field(default=None, max_length=2000)
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConsoleLogsResponse(BaseModel):
+    """Log snapshot payload for the console."""
+
+    files: list[str] = Field(default_factory=list)
+    lines: list[str] = Field(default_factory=list)
+
+
+class ConsoleHealthSummary(BaseModel):
+    """Extended health payload used in console panel."""
+
+    status: str
+    temporal_connected: bool
+    worker_available: bool
+    ollama_reachable: bool
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str = Field(default="New conversation", max_length=200)
+    conversation_id: Optional[str] = Field(default=None, min_length=3, max_length=128)
+
+
+class ConversationMetaResponse(BaseModel):
+    conversation_id: str
+    tenant_id: str
+    subject: str
+    project_id: str = ""
+    title: str = ""
+    created_at_ms: int
+    updated_at_ms: int
+    message_count: int
+    summary: dict = Field(default_factory=dict)
+
+
+class ConversationTurnResponse(BaseModel):
+    role: str
+    content: str
+    timestamp_ms: int
+    query_id: str = ""
+
+
+class ConversationHistoryResponse(BaseModel):
+    conversation_id: str
+    turns: list[ConversationTurnResponse] = Field(default_factory=list)
+
+
+class ConversationCompactRequest(BaseModel):
+    conversation_id: str = Field(..., min_length=3, max_length=128)

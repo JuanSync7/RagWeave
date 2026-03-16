@@ -9,7 +9,6 @@ Uses transformers directly instead of FlagEmbedding to avoid compatibility
 issues with transformers >= 5.x.
 """
 
-from dataclasses import dataclass
 from typing import List
 
 import torch
@@ -17,14 +16,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config.settings import RERANKER_MODEL_PATH, RERANK_TOP_K
 from src.platform.observability.providers import get_tracer
-
-
-@dataclass
-class RankedResult:
-    """A search result with its reranking score."""
-    text: str
-    score: float
-    metadata: dict
+from src.retrieval.schemas import RankedResult
 
 
 class LocalBGEReranker:
@@ -100,3 +92,6 @@ class LocalBGEReranker:
             span.set_attribute("score_max", max(values))
         span.end(status="ok")
         return top_results
+
+
+__all__ = ["LocalBGEReranker", "RankedResult"]

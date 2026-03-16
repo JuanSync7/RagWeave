@@ -35,7 +35,10 @@ _SYSTEM_PROMPT = (
     "Every claim should have at least one citation. "
     "Each context chunk has a relevance score (0-100%). "
     "Prioritize information from higher-scoring chunks. "
-    "Treat chunks below 10% relevance with caution — they may not be directly relevant."
+    "Treat chunks below 10% relevance with caution — they may not be directly relevant. "
+    "Return only the final answer body in markdown (no wrapper sections). "
+    "Do NOT include headings such as 'Output', 'Inputs', 'Outputs', "
+    "'Comprehensive Overview', or 'Top reranked original documents'."
 )
 
 _USER_TEMPLATE = """Context:
@@ -77,6 +80,8 @@ class OllamaGenerator:
         query: str,
         context_chunks: List[str],
         scores: Optional[List[float]] = None,
+        memory_context: Optional[str] = None,
+        recent_turns: Optional[List[dict]] = None,
     ) -> list[dict]:
         if scores:
             context = "\n\n".join(
@@ -88,16 +93,35 @@ class OllamaGenerator:
                 f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
             )
         user_message = _USER_TEMPLATE.format(context=context, question=query)
-        return [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ]
+        messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        if memory_context:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Use the conversation context below only as supporting context for follow-up intent.\n"
+                        + memory_context
+                    ),
+                }
+            )
+        for turn in recent_turns or []:
+            role = str(turn.get("role", "user"))
+            if role not in {"user", "assistant", "system"}:
+                continue
+            content = str(turn.get("content", "")).strip()
+            if not content:
+                continue
+            messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_message})
+        return messages
 
     def generate(
         self,
         query: str,
         context_chunks: List[str],
         scores: Optional[List[float]] = None,
+        memory_context: Optional[str] = None,
+        recent_turns: Optional[List[dict]] = None,
     ) -> Optional[str]:
         """Generate an answer using retrieved context chunks.
 
@@ -119,7 +143,13 @@ class OllamaGenerator:
             },
         )
 
-        messages = self._build_messages(query, context_chunks, scores)
+        messages = self._build_messages(
+            query,
+            context_chunks,
+            scores,
+            memory_context=memory_context,
+            recent_turns=recent_turns,
+        )
         payload = {
             "model": self.model,
             "messages": messages,
@@ -169,6 +199,8 @@ class OllamaGenerator:
         query: str,
         context_chunks: List[str],
         scores: Optional[List[float]] = None,
+        memory_context: Optional[str] = None,
+        recent_turns: Optional[List[dict]] = None,
     ):
         """Stream tokens from Ollama. Yields content strings as they arrive.
 
@@ -178,7 +210,13 @@ class OllamaGenerator:
         if not context_chunks:
             return
 
-        messages = self._build_messages(query, context_chunks, scores)
+        messages = self._build_messages(
+            query,
+            context_chunks,
+            scores,
+            memory_context=memory_context,
+            recent_turns=recent_turns,
+        )
         payload = {
             "model": self.model,
             "messages": messages,

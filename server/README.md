@@ -25,7 +25,13 @@ Users → FastAPI Server → Temporal Server → Temporal Worker(s)
 | **Workflow** | `workflows.py` | Defines `RAGQueryWorkflow` with retry policy and timeouts. |
 | **Activities** | `activities.py` | `execute_rag_query` — runs against the preloaded RAGChain singleton. |
 | **CLI Client** | `cli_client.py` | Same REPL as `cli.py`, but talks to the API. Starts instantly. |
+| **Web Console Module** | `console/` | Dedicated console package for web UX routes and console service helpers. |
+| **Web Console UI Asset** | `console/static/console.html` | Lightweight browser console frontend loaded by `server/console/routes.py` with legacy fallback path support. |
+| **Web Console TypeScript Source** | `console/web/` | TypeScript source/build config compiled to static assets served by the API. |
 | **Schemas** | `schemas.py` | Pydantic models for API request/response validation. |
+| **Route Modules** | `routes/` | Domain-split API routers (`query`, `admin`, `system`) included by `api.py`. |
+| **Shared Server Common** | `common/` | Shared envelope schemas + request helper utilities reused by API surfaces. |
+| **Server Utils Facade** | `utils.py` | Stable import facade for shared request/envelope helper functions. |
 
 ## Quick Start
 
@@ -66,6 +72,9 @@ curl -X POST http://localhost:8000/query \
 
 # Or browse the API docs
 open http://localhost:8000/docs
+
+# Or use the lightweight operator web console
+open http://localhost:8000/console
 ```
 
 ### 5. MCP Tooling Adapter (optional)
@@ -183,6 +192,8 @@ Users → LB → API →  │──── Worker 2 (GPU 1) ────│ ← T
 | `RAG_TEMPORAL_TARGET_HOST` | `localhost:7233` | Temporal server address |
 | `RAG_API_PORT` | `8000` | API server port |
 | `RAG_API_URL` | `http://localhost:8000` | CLI client target (for `cli_client.py`) |
+| `RAG_API_MAX_INFLIGHT_REQUESTS` | `64` | Max concurrent in-flight API requests before overload protection applies |
+| `RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS` | `250` | Max time to wait for in-flight slot before returning 503 |
 | `RAG_WORKER_CONCURRENCY` | `4` | Max concurrent activities per worker |
 | `RAG_AUTH_API_KEYS_REQUIRED` | `false` | Enforce API-key/JWT auth at API boundary |
 | `RAG_AUTH_API_KEYS_JSON` | `{}` | API-key map (`token_id -> {key, tenant_id, roles}`) |
@@ -192,6 +203,10 @@ Users → LB → API →  │──── Worker 2 (GPU 1) ────│ ← T
 | `RAG_AUTH_OIDC_JWKS_URL` | `""` | JWKS URL used to verify JWT signatures |
 | `RAG_RATE_LIMIT_REQUESTS_PER_MINUTE` | `60` | Per-principal fixed-window rate limit |
 | `RAG_CACHE_PROVIDER` | `memory` | Cache backend (`memory` or `redis`) |
+| `RAG_MEMORY_PROVIDER` | `redis` | Conversation memory backend (canonical: Redis) |
+| `RAG_MEMORY_REDIS_URL` | `redis://localhost:6379/0` | Redis connection for conversation memory |
+| `RAG_MEMORY_MAX_RECENT_TURNS` | `8` | Sliding window size for recent turns |
+| `RAG_MEMORY_SUMMARY_TRIGGER_TURNS` | `12` | Trigger threshold for rolling summary updates |
 
 ## Admin API
 
@@ -216,11 +231,55 @@ The API enforces a standard schema contract:
   - `request_id`
 - each response includes `x-request-id` for correlation across logs and clients.
 
+## Conversation Memory
+
+Conversation memory is tenant-aware and persistent (Redis canonical backend).
+
+- request fields: `conversation_id`, `memory_enabled`, `memory_turn_window`, `compact_now`,
+- response includes `conversation_id`,
+- context management uses rolling summary + recent-turn window (bounded token estimate),
+- `compact_now=true` or `/compact` forces summary refresh.
+
+Conversation APIs:
+
+- `GET /conversations`
+- `POST /conversations/new`
+- `GET /conversations/{conversation_id}/history`
+- `POST /conversations/{conversation_id}/compact`
+- `DELETE /conversations/{conversation_id}`
+
+Server CLI memory commands:
+
+- `/new-chat`
+- `/conversations`
+- `/switch <conversation_id>`
+- `/history [limit]`
+- `/compact`
+- `/delete [conversation_id]`
+
 ## Monitoring
 
 - **Temporal UI**: http://localhost:8080 — see all workflows, query history, latencies
 - **FastAPI docs**: http://localhost:8000/docs — interactive API documentation
 - **Health check**: `GET /health` — reports Temporal connectivity and worker status
+- **Overload signals**:
+  - `rag_api_inflight_requests`
+  - `rag_api_overload_rejections_total{endpoint=...}`
+
+### Practical 100-user load check
+
+Run a simple concurrency test with built-in SLO checks:
+
+```bash
+python scripts/load_test_api.py \
+  --url http://localhost:8000 \
+  --total-requests 1000 \
+  --concurrency 100 \
+  --max-error-rate 2.0 \
+  --max-p95-ms 2500
+```
+
+Operational plan: `docs/operations/RAG_100_USER_EXECUTION_PLAN.md`
 
 ### Tuning Watch Script
 
@@ -245,3 +304,24 @@ What it checks:
 - Retrieval/generation p95 stage latencies (`rag_pipeline_stage_ms`)
 - Worker CPU/memory pressure from `docker stats`
 - GPU memory pressure from `nvidia-smi` (when available)
+
+### Auto-Scale Worker Replicas
+
+Use the autoscaler script to scale `rag-worker` replicas up when saturation is sustained and scale down after sustained idle periods.
+
+```bash
+# Preview decisions without changing replica count
+python scripts/auto_scale_workers.py --dry-run
+
+# Enable live scaling loop (conservative defaults)
+python scripts/auto_scale_workers.py \
+  --min-replicas 1 \
+  --max-replicas 6 \
+  --interval-seconds 30
+```
+
+Default behavior:
+
+- scale up when backlog/schedule-to-start/API p95 signals stay hot for 2 intervals,
+- scale down only after 5 cool intervals and a longer cooldown window,
+- keep scale-down thresholds lower than scale-up thresholds to prevent oscillation.

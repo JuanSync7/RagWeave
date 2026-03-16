@@ -32,6 +32,8 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.platform.cli_interactive import get_input_with_menu, setup_tab_completion
+from src.platform.command_catalog import MODE_SERVER_CLI, list_command_specs
+from src.platform.command_runtime import dispatch_slash_command
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
@@ -70,10 +72,20 @@ _FILTER_PAT = re.compile(r"\b(source|section):(\S+)\s*", re.IGNORECASE)
 _CURRENT_SERVER = DEFAULT_SERVER
 _verbose_mode = False
 _ALLOW_LOCAL_ADMIN_COMMANDS = False
+_CURRENT_CONVERSATION_ID: str | None = None
+_MEMORY_ENABLED = True
 
 # Command registry for parity with cli.py UX
 # tuple layout: (handler, description, hidden, admin_only)
 _COMMANDS: dict[str, tuple[Callable[[str], None], str, bool, bool]] = {}
+_SERVER_SPECS = {
+    spec.name: spec
+    for spec in list_command_specs(
+        MODE_SERVER_CLI,
+        include_hidden=True,
+        allow_admin=True,
+    )
+}
 
 
 def _register_command(
@@ -242,6 +254,15 @@ def _setup_tab_completion():
     setup_tab_completion(_visible_registry())
 
 
+def _server_command_handlers() -> dict[str, Callable[[str], None]]:
+    """Expose server CLI command handlers for shared dispatch."""
+    return {
+        name: handler
+        for name, (handler, _, _, admin_only) in _COMMANDS.items()
+        if not admin_only or _ALLOW_LOCAL_ADMIN_COMMANDS
+    }
+
+
 def parse_filters(raw_query: str) -> tuple[str, dict]:
     """Extract source:/section: filters from query text."""
     filters = {}
@@ -266,7 +287,12 @@ def _truncate(text: str, max_len: int) -> str:
 
 def send_query(server: str, query: str, filters: dict) -> dict:
     """Send a non-streaming query to the RAG API."""
-    payload = {"query": query, **filters}
+    payload = {
+        "query": query,
+        **filters,
+        "conversation_id": _CURRENT_CONVERSATION_ID,
+        "memory_enabled": _MEMORY_ENABLED,
+    }
     data = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if API_KEY:
@@ -285,7 +311,12 @@ def send_query(server: str, query: str, filters: dict) -> dict:
 
 def send_query_stream(server: str, query: str, filters: dict):
     """Stream a query via SSE. Yields (event_type, data_dict) tuples."""
-    payload = {"query": query, **filters}
+    payload = {
+        "query": query,
+        **filters,
+        "conversation_id": _CURRENT_CONVERSATION_ID,
+        "memory_enabled": _MEMORY_ENABLED,
+    }
     data = json.dumps(payload).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
@@ -343,6 +374,57 @@ def check_server(server: str, retries: int = 5, backoff: float = 1.0) -> dict | 
     return None
 
 
+def _request_server_json(server: str, method: str, path: str, payload: dict | None = None) -> dict:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    elif BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {BEARER_TOKEN}"
+    req = urllib.request.Request(
+        f"{server.rstrip('/')}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw.strip() else {}
+
+
+def _list_conversations(server: str, limit: int = 20) -> list[dict]:
+    return _request_server_json(server, "GET", f"/conversations?limit={max(1, min(limit, 100))}")
+
+
+def _new_conversation(server: str, title: str = "New conversation") -> dict:
+    return _request_server_json(server, "POST", "/conversations/new", {"title": title})
+
+
+def _conversation_history(server: str, conversation_id: str, limit: int = 20) -> dict:
+    return _request_server_json(
+        server,
+        "GET",
+        f"/conversations/{conversation_id}/history?limit={max(1, min(limit, 200))}",
+    )
+
+
+def _compact_conversation(server: str, conversation_id: str) -> dict:
+    return _request_server_json(
+        server,
+        "POST",
+        f"/conversations/{conversation_id}/compact",
+        {"conversation_id": conversation_id},
+    )
+
+
+def _delete_conversation(server: str, conversation_id: str) -> dict:
+    return _request_server_json(
+        server,
+        "DELETE",
+        f"/conversations/{conversation_id}",
+    )
+
+
 def display_retrieval(response: dict) -> None:
     """Display retrieval metadata and chunks (no generated answer — that streams separately)."""
     print()
@@ -374,6 +456,9 @@ def display_retrieval(response: dict) -> None:
     wf_id = response.get("workflow_id")
     if wf_id:
         logger.debug("Query handled by workflow %s", wf_id)
+    conv_id = response.get("conversation_id")
+    if conv_id:
+        print(f"  {DIM}Conversation{RESET}  {conv_id}")
 
     print(f"  {DIM}{'─' * 72}{RESET}")
 
@@ -557,17 +642,17 @@ def _print_health_summary(server: str, health: dict | None) -> None:
     print()
 
 
-@_register_command("help", "Show help message")
+@_register_command("help", _SERVER_SPECS["help"].description)
 def _cmd_help(_: str = ""):
     print_help()
 
 
-@_register_command("clear", "Clear screen and show banner")
+@_register_command("clear", _SERVER_SPECS["clear"].description)
 def _cmd_clear(_: str = ""):
     print_banner(_CURRENT_SERVER)
 
 
-@_register_command("verbose", "Toggle verbose client logging")
+@_register_command("verbose", _SERVER_SPECS["verbose"].description)
 def _cmd_verbose(_: str = ""):
     global _verbose_mode
     _verbose_mode = not _verbose_mode
@@ -576,20 +661,20 @@ def _cmd_verbose(_: str = ""):
     print()
 
 
-@_register_command("health", "Show backend health/worker status")
+@_register_command("health", _SERVER_SPECS["health"].description)
 def _cmd_health(_: str = ""):
     health = check_server(_CURRENT_SERVER, retries=2, backoff=0.5)
     _print_health_summary(_CURRENT_SERVER, health)
 
 
-@_register_command("server", "Show current API server")
+@_register_command("server", _SERVER_SPECS["server"].description)
 def _cmd_server(_: str = ""):
     print(f"  {B_WHITE}Current server:{RESET} {_CURRENT_SERVER}\n")
 
 
 @_register_command(
     "set-server",
-    "Switch API server URL",
+    _SERVER_SPECS["set-server"].description,
     hidden=True,
     admin_only=True,
 )
@@ -608,7 +693,7 @@ def _cmd_set_server(arg: str = ""):
     _print_health_summary(_CURRENT_SERVER, health)
 
 
-@_register_command("auth", "Show configured auth mode (masked)")
+@_register_command("auth", _SERVER_SPECS["auth"].description)
 def _cmd_auth(_: str = ""):
     if API_KEY:
         masked = f"{API_KEY[:4]}...{API_KEY[-4:]}" if len(API_KEY) >= 8 else "***"
@@ -627,7 +712,7 @@ def _cmd_auth(_: str = ""):
 
 @_register_command(
     "_raw-health",
-    "Dump full health JSON payload",
+    _SERVER_SPECS["_raw-health"].description,
     hidden=True,
     admin_only=True,
 )
@@ -640,15 +725,130 @@ def _cmd_raw_health(_: str = ""):
     print()
 
 
-@_register_command("quit", "Exit the query engine")
+@_register_command("quit", _SERVER_SPECS["quit"].description)
 def _cmd_quit(_: str = ""):
     print(f"\n  {DIM}Goodbye! 👋{RESET}\n")
     os._exit(0)
 
 
+@_register_command("status", _SERVER_SPECS["status"].description)
+def _cmd_status(_: str = ""):
+    conv = _CURRENT_CONVERSATION_ID or "(auto/new on first query)"
+    mem = "on" if _MEMORY_ENABLED else "off"
+    print(f"  {B_WHITE}Server:{RESET} {_CURRENT_SERVER}")
+    print(f"  {B_WHITE}Conversation:{RESET} {conv}")
+    print(f"  {B_WHITE}Memory:{RESET} {mem}\n")
+
+
+@_register_command("new-chat", _SERVER_SPECS["new-chat"].description)
+def _cmd_new_chat(arg: str = ""):
+    global _CURRENT_CONVERSATION_ID
+    title = arg.strip() or "New conversation"
+    try:
+        created = _new_conversation(_CURRENT_SERVER, title=title)
+        _CURRENT_CONVERSATION_ID = created.get("conversation_id")
+        print(f"  {B_GREEN}✓{RESET} New conversation: {_CURRENT_CONVERSATION_ID}\n")
+    except Exception as exc:
+        print(f"  {B_RED}✗{RESET} Could not create conversation: {exc}\n")
+
+
+@_register_command("conversations", _SERVER_SPECS["conversations"].description)
+def _cmd_conversations(_: str = ""):
+    try:
+        items = _list_conversations(_CURRENT_SERVER, limit=20)
+    except Exception as exc:
+        print(f"  {B_RED}✗{RESET} Could not load conversations: {exc}\n")
+        return
+    if not items:
+        print(f"  {DIM}No conversations yet.{RESET}\n")
+        return
+    print(f"  {B_WHITE}Recent Conversations{RESET}")
+    for item in items:
+        cid = item.get("conversation_id", "")
+        title = item.get("title", "New conversation")
+        updated = item.get("updated_at_ms", 0)
+        marker = "*" if cid == _CURRENT_CONVERSATION_ID else " "
+        print(f"  {marker} {B_CYAN}{cid}{RESET}  {DIM}{title}{RESET}  {DIM}(updated {updated}){RESET}")
+    print()
+
+
+@_register_command("switch", _SERVER_SPECS["switch"].description)
+def _cmd_switch(arg: str = ""):
+    global _CURRENT_CONVERSATION_ID
+    cid = arg.strip()
+    if not cid:
+        print(f"  {B_YELLOW}⚠{RESET} Usage: /switch <conversation_id>\n")
+        return
+    _CURRENT_CONVERSATION_ID = cid
+    print(f"  {B_GREEN}✓{RESET} Active conversation set to {cid}\n")
+
+
+@_register_command("history", _SERVER_SPECS["history"].description)
+def _cmd_history(arg: str = ""):
+    if not _CURRENT_CONVERSATION_ID:
+        print(f"  {B_YELLOW}⚠{RESET} No active conversation. Run /new-chat first.\n")
+        return
+    limit = 12
+    if arg.strip().isdigit():
+        limit = int(arg.strip())
+    try:
+        payload = _conversation_history(_CURRENT_SERVER, _CURRENT_CONVERSATION_ID, limit=limit)
+    except Exception as exc:
+        print(f"  {B_RED}✗{RESET} Could not load history: {exc}\n")
+        return
+    turns = payload.get("turns", [])
+    if not turns:
+        print(f"  {DIM}No turns yet in this conversation.{RESET}\n")
+        return
+    print(f"  {B_WHITE}Conversation History{RESET} {DIM}({_CURRENT_CONVERSATION_ID}){RESET}")
+    for turn in turns:
+        role = str(turn.get("role", "user"))
+        content = _truncate(str(turn.get("content", "")), 180)
+        role_color = B_CYAN if role == "user" else B_GREEN
+        print(f"  {role_color}{role:9}{RESET} {content}")
+    print()
+
+
+@_register_command("compact", _SERVER_SPECS["compact"].description)
+def _cmd_compact(_: str = ""):
+    if not _CURRENT_CONVERSATION_ID:
+        print(f"  {B_YELLOW}⚠{RESET} No active conversation. Run /new-chat first.\n")
+        return
+    try:
+        payload = _compact_conversation(_CURRENT_SERVER, _CURRENT_CONVERSATION_ID)
+        summary = str(payload.get("summary", "")).strip()
+        if summary:
+            print(f"  {B_GREEN}✓{RESET} Conversation compacted.")
+            print(f"  {DIM}{_truncate(summary, 260)}{RESET}\n")
+        else:
+            print(f"  {B_GREEN}✓{RESET} Conversation compacted.\n")
+    except Exception as exc:
+        print(f"  {B_RED}✗{RESET} Could not compact conversation: {exc}\n")
+
+
+@_register_command("delete", _SERVER_SPECS["delete"].description)
+def _cmd_delete(arg: str = ""):
+    global _CURRENT_CONVERSATION_ID
+    target = arg.strip() or (_CURRENT_CONVERSATION_ID or "")
+    if not target:
+        print(f"  {B_YELLOW}⚠{RESET} No conversation to delete. Use /delete <conversation_id> or /switch first.\n")
+        return
+    try:
+        payload = _delete_conversation(_CURRENT_SERVER, target)
+        deleted = payload.get("deleted", False)
+        if deleted:
+            if _CURRENT_CONVERSATION_ID == target:
+                _CURRENT_CONVERSATION_ID = None
+            print(f"  {B_GREEN}✓{RESET} Conversation {target} deleted.\n")
+        else:
+            print(f"  {B_YELLOW}⚠{RESET} Conversation {target} not found (may already be deleted).\n")
+    except Exception as exc:
+        print(f"  {B_RED}✗{RESET} Could not delete conversation: {exc}\n")
+
+
 def main() -> None:
     import argparse
-    global _CURRENT_SERVER, _ALLOW_LOCAL_ADMIN_COMMANDS
+    global _CURRENT_SERVER, _ALLOW_LOCAL_ADMIN_COMMANDS, _CURRENT_CONVERSATION_ID
     parser = argparse.ArgumentParser(description="RAG CLI client (server mode)")
     parser.add_argument("--server", default=DEFAULT_SERVER, help="API server URL")
     parser.add_argument(
@@ -710,26 +910,31 @@ def main() -> None:
         if not raw_input_str:
             continue
 
-        if raw_input_str.startswith("/"):
-            cmd_parts = raw_input_str[1:].split(maxsplit=1)
-            cmd_name = cmd_parts[0].lower()
-            cmd_arg = cmd_parts[1] if len(cmd_parts) > 1 else ""
-            if cmd_name in _COMMANDS:
-                handler, _, _, admin_only = _COMMANDS[cmd_name]
-                if admin_only and not _ALLOW_LOCAL_ADMIN_COMMANDS:
-                    print(
-                        f"  {B_YELLOW}⚠{RESET} Command /{cmd_name} is local-admin only."
-                    )
-                    print(
-                        f"    {DIM}Run with --allow-local-admin-commands or "
-                        f"RAG_CLI_LOCAL_ADMIN=1 to enable it.{RESET}"
-                    )
-                    print()
-                    continue
-                handler(cmd_arg)
-            else:
+        handled, error = dispatch_slash_command(
+            raw=raw_input_str,
+            mode=MODE_SERVER_CLI,
+            handlers=_server_command_handlers(),
+            allow_admin=_ALLOW_LOCAL_ADMIN_COMMANDS,
+        )
+        if handled:
+            if error == "UNKNOWN_COMMAND":
                 print(f"  {B_YELLOW}⚠{RESET} Unknown command: {B_WHITE}{raw_input_str}{RESET}")
                 print(f"    {DIM}Type{RESET} {B_WHITE}/{RESET} {DIM}to see available commands{RESET}")
+                print()
+            elif error in ("FORBIDDEN_COMMAND", "UNSUPPORTED_COMMAND"):
+                # This usually means local-admin command requested without permission.
+                cmd_parts = raw_input_str[1:].split(maxsplit=1)
+                cmd_name = cmd_parts[0].lower() if cmd_parts else ""
+                print(
+                    f"  {B_YELLOW}⚠{RESET} Command /{cmd_name} is local-admin only."
+                )
+                print(
+                    f"    {DIM}Run with --allow-local-admin-commands or "
+                    f"RAG_CLI_LOCAL_ADMIN=1 to enable it.{RESET}"
+                )
+                print()
+            elif error == "EMPTY_COMMAND":
+                print(f"  {B_YELLOW}⚠{RESET} Please enter a command name after '/'.")
                 print()
             continue
 
@@ -751,9 +956,12 @@ def main() -> None:
             generated_tokens = []
             done_data = None
 
-            for event_type, data in send_query_stream(server, query_text, filters):
+            for event_type, data in send_query_stream(_CURRENT_SERVER, query_text, filters):
                 if event_type == "retrieval":
                     retrieval_data = data
+                    conv_id = data.get("conversation_id")
+                    if isinstance(conv_id, str) and conv_id.strip():
+                        _CURRENT_CONVERSATION_ID = conv_id.strip()
                     elapsed = time.time() - start
                     print(f"\r  {B_GREEN}✓{RESET} Retrieved {DIM}({elapsed:.1f}s){RESET}        ")
                     display_retrieval(retrieval_data)

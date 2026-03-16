@@ -57,6 +57,19 @@ def ingest(
     selected_file: Optional[Path] = None,
     verbose_stages: Optional[bool] = None,
     persist_refactor_mirror: Optional[bool] = None,
+    docling_enabled: Optional[bool] = None,
+    docling_model: Optional[str] = None,
+    docling_artifacts_path: Optional[str] = None,
+    docling_strict: Optional[bool] = None,
+    docling_auto_download: Optional[bool] = None,
+    vision_enabled: Optional[bool] = None,
+    vision_provider: Optional[str] = None,
+    vision_model: Optional[str] = None,
+    vision_api_base_url: Optional[str] = None,
+    vision_timeout_seconds: Optional[int] = None,
+    vision_max_figures: Optional[int] = None,
+    vision_auto_pull: Optional[bool] = None,
+    vision_strict: Optional[bool] = None,
 ) -> None:
     """Ingest documents from a directory or a single selected file.
 
@@ -83,6 +96,32 @@ def ingest(
         cfg_kwargs["verbose_stage_logs"] = verbose_stages
     if persist_refactor_mirror is not None:
         cfg_kwargs["persist_refactor_mirror"] = persist_refactor_mirror
+    if docling_enabled is not None:
+        cfg_kwargs["enable_docling_parser"] = docling_enabled
+    if docling_model:
+        cfg_kwargs["docling_model"] = docling_model
+    if docling_artifacts_path is not None:
+        cfg_kwargs["docling_artifacts_path"] = docling_artifacts_path
+    if docling_strict is not None:
+        cfg_kwargs["docling_strict"] = docling_strict
+    if docling_auto_download is not None:
+        cfg_kwargs["docling_auto_download"] = docling_auto_download
+    if vision_enabled is not None:
+        cfg_kwargs["enable_vision_processing"] = vision_enabled
+    if vision_provider:
+        cfg_kwargs["vision_provider"] = vision_provider
+    if vision_model:
+        cfg_kwargs["vision_model"] = vision_model
+    if vision_api_base_url is not None:
+        cfg_kwargs["vision_api_base_url"] = vision_api_base_url
+    if vision_timeout_seconds is not None:
+        cfg_kwargs["vision_timeout_seconds"] = vision_timeout_seconds
+    if vision_max_figures is not None:
+        cfg_kwargs["vision_max_figures"] = vision_max_figures
+    if vision_auto_pull is not None:
+        cfg_kwargs["vision_auto_pull"] = vision_auto_pull
+    if vision_strict is not None:
+        cfg_kwargs["vision_strict"] = vision_strict
 
     cfg = IngestionConfig(
         **cfg_kwargs,
@@ -169,6 +208,87 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable writing original/refactored mirror artifacts and mappings",
     )
+    parser.add_argument(
+        "--no-docling",
+        action="store_true",
+        help="Disable Docling parser in structure detection stage",
+    )
+    parser.add_argument(
+        "--docling-model",
+        type=str,
+        default=None,
+        help="Docling parsing model identifier used in stage-2 parsing",
+    )
+    parser.add_argument(
+        "--docling-artifacts-path",
+        type=str,
+        default=None,
+        help="Optional local path for Docling model artifacts/cache",
+    )
+    parser.add_argument(
+        "--docling-non-strict",
+        action="store_true",
+        help="Do not fail ingestion when Docling parsing errors occur",
+    )
+    parser.add_argument(
+        "--vision",
+        dest="vision_enabled",
+        action="store_true",
+        help="Enable vision-based figure caption/OCR enrichment",
+    )
+    parser.add_argument(
+        "--no-vision",
+        dest="vision_enabled",
+        action="store_false",
+        help="Disable vision-based figure caption/OCR enrichment for this run",
+    )
+    parser.add_argument(
+        "--vision-provider",
+        type=str,
+        default=None,
+        choices=("ollama", "openai_compatible"),
+        help="Vision backend provider",
+    )
+    parser.add_argument(
+        "--vision-model",
+        type=str,
+        default=None,
+        help="Vision model identifier for the selected provider",
+    )
+    parser.add_argument(
+        "--vision-api-base-url",
+        type=str,
+        default=None,
+        help="Base URL for openai_compatible provider (for example http://localhost:8009)",
+    )
+    parser.add_argument(
+        "--vision-timeout-seconds",
+        type=int,
+        default=None,
+        help="Timeout per vision model request in seconds",
+    )
+    parser.add_argument(
+        "--vision-max-figures",
+        type=int,
+        default=None,
+        help="Maximum number of extracted figures to describe per document",
+    )
+    parser.add_argument(
+        "--no-vision-auto-pull",
+        action="store_true",
+        help="Disable auto-pull of missing vision model in Ollama preflight",
+    )
+    parser.add_argument(
+        "--vision-strict",
+        action="store_true",
+        help="Fail the document if vision analysis errors occur",
+    )
+    parser.set_defaults(vision_enabled=None)
+    parser.add_argument(
+        "--no-docling-auto-download",
+        action="store_true",
+        help="Disable Docling model auto-download preflight",
+    )
     return parser
 
 
@@ -197,4 +317,17 @@ if __name__ == "__main__":
         selected_file=selected_file,
         verbose_stages=args.verbose_stages,
         persist_refactor_mirror=not args.no_refactor_mirror,
+        docling_enabled=not args.no_docling,
+        docling_model=args.docling_model,
+        docling_artifacts_path=args.docling_artifacts_path,
+        docling_strict=not args.docling_non_strict,
+        docling_auto_download=not args.no_docling_auto_download,
+        vision_enabled=args.vision_enabled,
+        vision_provider=args.vision_provider,
+        vision_model=args.vision_model,
+        vision_api_base_url=args.vision_api_base_url,
+        vision_timeout_seconds=args.vision_timeout_seconds,
+        vision_max_figures=args.vision_max_figures,
+        vision_auto_pull=not args.no_vision_auto_pull,
+        vision_strict=args.vision_strict,
     )

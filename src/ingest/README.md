@@ -12,7 +12,14 @@ This package powers embedding ingestion for the RAG system. The workflow is orga
 - node-per-file stage implementations (`nodes/`)
 - shared schema/config/types (`pipeline_types.py`)
 - shared helper logic (`pipeline_shared.py`, `pipeline_llm.py`)
+- common shared contracts/utilities (`common/`)
 - public interface facade package (`pipeline/`)
+
+Stage 2 (`structure_detection`) is the parser front-end: Docling converts source files
+into markdown-first text suitable for downstream LLM and chunking stages, and emits
+multimodal cues (for example figure presence) consumed by `multimodal_processing`.
+When enabled, the multimodal stage can call an Ollama-hosted VLM model to describe
+figure images (caption + OCR + tags), and appends those notes into cleaned text.
 
 ## Files
 
@@ -24,18 +31,20 @@ This package powers embedding ingestion for the RAG system. The workflow is orga
 | `pipeline_impl.py` | Runtime orchestration, graph invocation, and directory-level ingestion loop | `ingest_directory`, `ingest_file`, `verify_core_design` |
 | `pipeline_workflow.py` | Top-level LangGraph `StateGraph` composition wiring all nodes | `build_graph` |
 | `pipeline_types.py` | Shared dataclasses and typed state schema | `IngestionConfig`, `IngestionRunSummary`, `IngestState` |
-| `pipeline_shared.py` | Shared file/json/hash/quality helper functions | `_load_manifest`, `_save_manifest`, `_sha256_path`, `_parse_json_object` |
+| `pipeline_shared.py` | Shared ingestion heuristics (keywords, provenance, stage logging) | `_extract_keywords_fallback`, `append_processing_log`, `map_chunk_provenance` |
 | `pipeline_llm.py` | LLM JSON utility for configurable Ollama-backed node calls | `_ollama_json` |
+| `pipeline_vision.py` | Vision helper for Docling image caption/OCR/tag extraction via Ollama VLM | `ensure_vision_ready`, `generate_vision_notes` |
 
 ## Internal Dependencies
 
 - `pipeline_impl.py` depends on `pipeline_workflow.py` for graph assembly and `pipeline_types.py` for schema/runtime types.
 - `pipeline_workflow.py` imports all stage nodes from `nodes/` and wires conditional graph transitions.
-- Node modules consume shared helpers from `pipeline_shared.py` and optional LLM calls through `pipeline_llm.py`.
+- Node modules consume shared helpers from `pipeline_shared.py`, deterministic helpers from `common/utils.py`, and optional LLM calls through `pipeline_llm.py`.
 
 ## Subdirectories
 
 - `nodes/`: one file per pipeline stage with stage-specific logic and clear boundaries.
+- `common/`: shared schemas and deterministic utility helpers used by multiple ingestion modules.
 
 ## Engineering Documentation
 
@@ -48,6 +57,32 @@ This package powers embedding ingestion for the RAG system. The workflow is orga
 - `ingest.py --verbose-stages` forces per-stage logs on for that run.
 - `ingest.py --no-verbose-stages` forces per-stage logs off for that run.
 - Omitting both flags keeps the config default (`RAG_INGESTION_VERBOSE_STAGE_LOGS`).
+- `RAG_INGESTION_DOCLING_ENABLED=true` enables Docling parser in stage 2 (`structure_detection`).
+- `RAG_INGESTION_DOCLING_MODEL` sets the Docling parser model identifier used by stage 2.
+- `RAG_INGESTION_DOCLING_ARTIFACTS_PATH` sets an optional local artifacts/cache path for Docling.
+- `RAG_INGESTION_DOCLING_STRICT=true` fails fast if Docling parsing fails (recommended production mode).
+- `RAG_INGESTION_DOCLING_AUTO_DOWNLOAD=true` pre-downloads Heron layout + TableFormer models during preflight.
+- Ingestion performs a startup Docling preflight (`ensure_docling_ready`) before processing files and fails immediately if Docling runtime or artifacts configuration is invalid.
+- `ingest.py --docling-model <id>` overrides parser model per run.
+- `ingest.py --docling-artifacts-path <path>` sets local artifacts path per run.
+- `ingest.py --no-docling` disables Docling parser for a run.
+- `ingest.py --no-docling-auto-download` disables Docling model pre-download during preflight.
+- `RAG_INGESTION_VISION_ENABLED=true` enables vision analysis in `multimodal_processing`.
+- `RAG_INGESTION_VISION_PROVIDER` selects `ollama` or `openai_compatible`.
+- `RAG_INGESTION_VISION_MODEL` sets the Ollama VLM model (for example `qwen2.5vl:3b`).
+- `RAG_INGESTION_VISION_API_BASE_URL` sets endpoint root for `openai_compatible`.
+- `RAG_INGESTION_VISION_API_KEY` sets bearer key for `openai_compatible` (keep in secrets store).
+- `RAG_INGESTION_VISION_API_PATH` overrides chat completion path (default `/v1/chat/completions`).
+- `RAG_INGESTION_VISION_MAX_FIGURES` limits figure analysis calls per document.
+- `RAG_INGESTION_VISION_AUTO_PULL=true` auto-pulls missing vision model during preflight.
+- `RAG_INGESTION_VISION_STRICT=true` fails a source if vision analysis errors occur.
+- `ingest.py --vision` enables vision analysis for a run.
+- `ingest.py --vision-provider <provider>` switches backend provider per run.
+- `ingest.py --vision-model <id>` overrides the VLM model for a run.
+- `ingest.py --vision-api-base-url <url>` sets endpoint base URL for `openai_compatible`.
+- `ingest.py --vision-max-figures <n>` limits figure analysis calls for a run.
+- `ingest.py --no-vision-auto-pull` disables VLM auto-pull in preflight.
+- `ingest.py --vision-strict` turns vision errors into document-level failures.
 - `RAG_INGESTION_PERSIST_REFACTOR_MIRROR=true` persists original/refactored mirror files plus chunk provenance mappings.
 - Source identity is tracked with `source_key`, `source_id`, and `source_uri` metadata so files remain unique across directories/connectors and retrieval can reference original location.
 

@@ -127,6 +127,10 @@ TEMPORAL_TASK_QUEUE = os.environ.get("RAG_TEMPORAL_TASK_QUEUE", "rag-reliability
 RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
 RAG_API_URL = os.environ.get("RAG_API_URL", "http://localhost:8000")
 RAG_WORKER_CONCURRENCY = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
+RAG_API_MAX_INFLIGHT_REQUESTS = int(os.environ.get("RAG_API_MAX_INFLIGHT_REQUESTS", "64"))
+RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS = int(
+    os.environ.get("RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS", "250")
+)
 
 # --- Auth / tenancy ---
 AUTH_API_KEYS_REQUIRED = os.environ.get("RAG_AUTH_API_KEYS_REQUIRED", "false").lower() in (
@@ -185,6 +189,20 @@ CACHE_PROVIDER = os.environ.get("RAG_CACHE_PROVIDER", "memory")
 CACHE_TTL_SECONDS = int(os.environ.get("RAG_CACHE_TTL_SECONDS", "120"))
 CACHE_REDIS_URL = os.environ.get("RAG_CACHE_REDIS_URL", "redis://localhost:6379/0")
 
+# --- Conversation memory ---
+MEMORY_ENABLED = os.environ.get("RAG_MEMORY_ENABLED", "true").lower() in ("true", "1", "yes")
+MEMORY_PROVIDER = os.environ.get("RAG_MEMORY_PROVIDER", "redis").strip().lower()
+MEMORY_REDIS_URL = os.environ.get("RAG_MEMORY_REDIS_URL", CACHE_REDIS_URL)
+MEMORY_REDIS_PREFIX = os.environ.get("RAG_MEMORY_REDIS_PREFIX", "rag:memory")
+MEMORY_MAX_RECENT_TURNS = int(os.environ.get("RAG_MEMORY_MAX_RECENT_TURNS", "8"))
+MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE = int(
+    os.environ.get("RAG_MEMORY_MAX_CONTEXT_TOKENS_ESTIMATE", "1400")
+)
+MEMORY_SUMMARY_TRIGGER_TURNS = int(os.environ.get("RAG_MEMORY_SUMMARY_TRIGGER_TURNS", "12"))
+MEMORY_SUMMARY_MAX_SOURCE_TURNS = int(
+    os.environ.get("RAG_MEMORY_SUMMARY_MAX_SOURCE_TURNS", "40")
+)
+
 # --- Retrieval controls ---
 RAG_DEFAULT_FAST_PATH = os.environ.get("RAG_DEFAULT_FAST_PATH", "false").lower() in (
     "true",
@@ -224,13 +242,74 @@ RAG_INGESTION_LLM_TIMEOUT_SECONDS = int(
     os.environ.get("RAG_INGESTION_LLM_TIMEOUT_SECONDS", "45")
 )
 RAG_INGESTION_LLM_MAX_KEYWORDS = int(os.environ.get("RAG_INGESTION_LLM_MAX_KEYWORDS", "12"))
+RAG_INGESTION_DOCLING_ENABLED = os.environ.get(
+    "RAG_INGESTION_DOCLING_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_DOCLING_MODEL = os.environ.get(
+    "RAG_INGESTION_DOCLING_MODEL",
+    "docling-parse-v2",
+)
+RAG_INGESTION_DOCLING_ARTIFACTS_PATH = os.environ.get(
+    "RAG_INGESTION_DOCLING_ARTIFACTS_PATH",
+    "",
+)
+RAG_INGESTION_DOCLING_STRICT = os.environ.get(
+    "RAG_INGESTION_DOCLING_STRICT", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_DOCLING_AUTO_DOWNLOAD = os.environ.get(
+    "RAG_INGESTION_DOCLING_AUTO_DOWNLOAD", "true"
+).lower() in ("true", "1", "yes")
 RAG_INGESTION_EXPORT_EXTENSIONS = os.environ.get(
     "RAG_INGESTION_EXPORT_EXTENSIONS",
-    ".txt,.md,.markdown,.rst,.html,.htm",
+    ".txt,.md,.markdown,.rst,.html,.htm,.pdf,.docx,.pptx",
 )
 RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING = os.environ.get(
     "RAG_INGESTION_ENABLE_MULTIMODAL_PROCESSING", "false"
 ).lower() in ("true", "1", "yes")
+RAG_INGESTION_VISION_ENABLED = os.environ.get(
+    "RAG_INGESTION_VISION_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_VISION_PROVIDER = os.environ.get(
+    "RAG_INGESTION_VISION_PROVIDER",
+    "ollama",
+).strip()
+RAG_INGESTION_VISION_MODEL = os.environ.get(
+    "RAG_INGESTION_VISION_MODEL",
+    "qwen2.5vl:3b",
+).strip()
+RAG_INGESTION_VISION_TIMEOUT_SECONDS = int(
+    os.environ.get("RAG_INGESTION_VISION_TIMEOUT_SECONDS", "60")
+)
+RAG_INGESTION_VISION_MAX_FIGURES = int(
+    os.environ.get("RAG_INGESTION_VISION_MAX_FIGURES", "4")
+)
+RAG_INGESTION_VISION_MAX_IMAGE_BYTES = int(
+    os.environ.get("RAG_INGESTION_VISION_MAX_IMAGE_BYTES", "3145728")
+)
+RAG_INGESTION_VISION_TEMPERATURE = float(
+    os.environ.get("RAG_INGESTION_VISION_TEMPERATURE", "0.1")
+)
+RAG_INGESTION_VISION_MAX_TOKENS = int(
+    os.environ.get("RAG_INGESTION_VISION_MAX_TOKENS", "220")
+)
+RAG_INGESTION_VISION_AUTO_PULL = os.environ.get(
+    "RAG_INGESTION_VISION_AUTO_PULL", "true"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_VISION_STRICT = os.environ.get(
+    "RAG_INGESTION_VISION_STRICT", "false"
+).lower() in ("true", "1", "yes")
+RAG_INGESTION_VISION_API_BASE_URL = os.environ.get(
+    "RAG_INGESTION_VISION_API_BASE_URL",
+    "",
+).strip()
+RAG_INGESTION_VISION_API_KEY = os.environ.get(
+    "RAG_INGESTION_VISION_API_KEY",
+    "",
+).strip()
+RAG_INGESTION_VISION_API_PATH = os.environ.get(
+    "RAG_INGESTION_VISION_API_PATH",
+    "/v1/chat/completions",
+).strip()
 RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING = os.environ.get(
     "RAG_INGESTION_ENABLE_DOCUMENT_REFACTORING", "false"
 ).lower() in ("true", "1", "yes")
@@ -253,3 +332,79 @@ RAG_INGESTION_PERSIST_REFACTOR_MIRROR = os.environ.get(
     "RAG_INGESTION_PERSIST_REFACTOR_MIRROR", "true"
 ).lower() in ("true", "1", "yes")
 RAG_INGESTION_MIRROR_DIR = PROCESSED_DIR / "refactor_mirror"
+
+# --- NeMo Guardrails ---
+RAG_NEMO_ENABLED = os.environ.get(
+    "RAG_NEMO_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_CONFIG_DIR = os.environ.get(
+    "RAG_NEMO_CONFIG_DIR",
+    str(PROJECT_ROOT / "config" / "guardrails"),
+)
+RAG_NEMO_INJECTION_ENABLED = os.environ.get(
+    "RAG_NEMO_INJECTION_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_INJECTION_SENSITIVITY = os.environ.get(
+    "RAG_NEMO_INJECTION_SENSITIVITY", "balanced"
+)
+RAG_NEMO_PII_ENABLED = os.environ.get(
+    "RAG_NEMO_PII_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_PII_EXTENDED = os.environ.get(
+    "RAG_NEMO_PII_EXTENDED", "false"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_TOXICITY_ENABLED = os.environ.get(
+    "RAG_NEMO_TOXICITY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_TOXICITY_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_TOXICITY_THRESHOLD", "0.5")
+)
+RAG_NEMO_FAITHFULNESS_ENABLED = os.environ.get(
+    "RAG_NEMO_FAITHFULNESS_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_FAITHFULNESS_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_FAITHFULNESS_THRESHOLD", "0.5")
+)
+RAG_NEMO_FAITHFULNESS_ACTION = os.environ.get(
+    "RAG_NEMO_FAITHFULNESS_ACTION", "flag"
+)
+RAG_NEMO_OUTPUT_PII_ENABLED = os.environ.get(
+    "RAG_NEMO_OUTPUT_PII_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_OUTPUT_TOXICITY_ENABLED = os.environ.get(
+    "RAG_NEMO_OUTPUT_TOXICITY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD", "0.5")
+)
+RAG_NEMO_RAIL_TIMEOUT_SECONDS = int(
+    os.environ.get("RAG_NEMO_RAIL_TIMEOUT_SECONDS", "10")
+)
+# Injection: NeMo jailbreak heuristics (perplexity-based)
+RAG_NEMO_INJECTION_PERPLEXITY_ENABLED = os.environ.get(
+    "RAG_NEMO_INJECTION_PERPLEXITY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_INJECTION_MODEL_ENABLED = os.environ.get(
+    "RAG_NEMO_INJECTION_MODEL_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_INJECTION_LP_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_INJECTION_LP_THRESHOLD", "89.79")
+)
+RAG_NEMO_INJECTION_PS_PPL_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_INJECTION_PS_PPL_THRESHOLD", "1845.65")
+)
+# PII: Presidio score threshold
+RAG_NEMO_PII_SCORE_THRESHOLD = float(
+    os.environ.get("RAG_NEMO_PII_SCORE_THRESHOLD", "0.4")
+)
+# Topic safety: LLM-based on/off-topic detection
+RAG_NEMO_TOPIC_SAFETY_ENABLED = os.environ.get(
+    "RAG_NEMO_TOPIC_SAFETY_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS = os.environ.get(
+    "RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS", ""
+)
+# Faithfulness: NeMo self-check-facts approach
+RAG_NEMO_FAITHFULNESS_SELF_CHECK = os.environ.get(
+    "RAG_NEMO_FAITHFULNESS_SELF_CHECK", "true"
+).lower() in ("true", "1", "yes")

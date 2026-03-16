@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 REQUESTS_TOTAL = Counter(
     "rag_api_requests_total",
@@ -23,6 +23,17 @@ RATE_LIMIT_REJECTS = Counter(
     ["endpoint"],
 )
 
+OVERLOAD_REJECTS = Counter(
+    "rag_api_overload_rejections_total",
+    "Rejected requests due to API overload protection",
+    ["endpoint"],
+)
+
+INFLIGHT_REQUESTS = Gauge(
+    "rag_api_inflight_requests",
+    "Current number of in-flight API requests within overload guard",
+)
+
 PIPELINE_STAGE_MS = Histogram(
     "rag_pipeline_stage_ms",
     "Pipeline stage latency in milliseconds",
@@ -32,6 +43,17 @@ PIPELINE_STAGE_MS = Histogram(
 
 CACHE_HITS = Counter("rag_cache_hits_total", "Cache hit count", ["layer"])
 CACHE_MISSES = Counter("rag_cache_misses_total", "Cache miss count", ["layer"])
+MEMORY_OP_MS = Histogram(
+    "rag_memory_operation_ms",
+    "Conversation memory operation latency in milliseconds",
+    ["operation"],
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000, 3000),
+)
+MEMORY_SUMMARY_TRIGGERS = Counter(
+    "rag_memory_summary_triggers_total",
+    "Count of rolling-summary trigger events",
+    ["reason"],
+)
 
 
 def render_metrics() -> tuple[bytes, str]:

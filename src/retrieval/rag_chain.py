@@ -3,15 +3,14 @@
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
 
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import logging
 import statistics
 import time
 
 from src.core.embeddings import LocalBGEEmbeddings
-from src.retrieval.reranker import LocalBGEReranker, RankedResult
-from src.retrieval.query_processor import process_query, QueryAction, QueryResult
+from src.retrieval.reranker import LocalBGEReranker
+from src.retrieval.query_processor import process_query
 from src.core.knowledge_graph import KnowledgeGraphBuilder, GraphQueryExpander
 from src.core.vector_store import (
     create_persistent_client,
@@ -30,6 +29,7 @@ from src.platform.validation import (
     validate_filter_value,
     validate_positive_int,
 )
+from src.retrieval.schemas import QueryAction, QueryResult, RAGResponse, RankedResult
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
     KG_PATH, KG_ENABLED, GENERATION_ENABLED,
@@ -38,6 +38,7 @@ from config.settings import (
     RETRY_MAX_ATTEMPTS,
     RETRY_MAX_BACKOFF_SECONDS,
     MAX_SANITIZATION_ITERATIONS,
+    QUERY_CONFIDENCE_THRESHOLD,
     RAG_DEFAULT_FAST_PATH,
     RAG_RETRIEVAL_TIMEOUT_MS,
     RAG_STAGE_BUDGET_QUERY_PROCESSING_MS,
@@ -47,26 +48,10 @@ from config.settings import (
     RAG_STAGE_BUDGET_RERANKING_MS,
     RAG_STAGE_BUDGET_GENERATION_MS,
 )
-from src.platform.metrics import PIPELINE_STAGE_MS
+from src.platform.timing import TimingPool
+from config.settings import RAG_NEMO_ENABLED
 
 logger = logging.getLogger("rag.rag_chain")
-
-
-@dataclass
-class RAGResponse:
-    """Complete response from the RAG pipeline."""
-    query: str
-    processed_query: str
-    query_confidence: float
-    action: str  # "search" or "ask_user"
-    results: List[RankedResult] = field(default_factory=list)
-    clarification_message: Optional[str] = None
-    kg_expanded_terms: Optional[List[str]] = None
-    generated_answer: Optional[str] = None
-    stage_timings: List[Dict[str, Any]] = field(default_factory=list)
-    timing_totals: Dict[str, float] = field(default_factory=dict)
-    budget_exhausted: bool = False
-    budget_exhausted_stage: Optional[str] = None
 
 
 class RAGChain:
@@ -139,6 +124,13 @@ class RAGChain:
             self._kg_expander: Optional[GraphQueryExpander] = fut_kg.result()
             self._generator: Optional[OllamaGenerator] = fut_gen.result()
 
+        # Initialize NeMo Guardrails (REQ-701: once at startup, not per-query)
+        self._guardrails_input_executor = None
+        self._guardrails_output_executor = None
+        self._guardrails_merge_gate = None
+        if RAG_NEMO_ENABLED:
+            self._init_guardrails()
+
         logger.info("RAG chain ready.")
 
     def close(self) -> None:
@@ -150,6 +142,122 @@ class RAGChain:
                 logger.warning("Error closing Weaviate client: %s", e)
             self._weaviate_client = None
             logger.info("Weaviate connection closed.")
+
+    def _init_guardrails(self) -> None:
+        """Initialize NeMo Guardrails runtime and rail executors."""
+        from config.settings import (
+            RAG_NEMO_CONFIG_DIR,
+            RAG_NEMO_FAITHFULNESS_ACTION,
+            RAG_NEMO_FAITHFULNESS_ENABLED,
+            RAG_NEMO_FAITHFULNESS_SELF_CHECK,
+            RAG_NEMO_FAITHFULNESS_THRESHOLD,
+            RAG_NEMO_INJECTION_ENABLED,
+            RAG_NEMO_INJECTION_LP_THRESHOLD,
+            RAG_NEMO_INJECTION_MODEL_ENABLED,
+            RAG_NEMO_INJECTION_PERPLEXITY_ENABLED,
+            RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
+            RAG_NEMO_INJECTION_SENSITIVITY,
+            RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
+            RAG_NEMO_OUTPUT_PII_ENABLED,
+            RAG_NEMO_OUTPUT_TOXICITY_ENABLED,
+            RAG_NEMO_PII_ENABLED,
+            RAG_NEMO_PII_EXTENDED,
+            RAG_NEMO_PII_SCORE_THRESHOLD,
+            RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+            RAG_NEMO_TOPIC_SAFETY_ENABLED,
+            RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
+            RAG_NEMO_TOXICITY_ENABLED,
+            RAG_NEMO_TOXICITY_THRESHOLD,
+        )
+        from src.guardrails.executor import (
+            InputRailExecutor,
+            OutputRailExecutor,
+            RailMergeGate,
+        )
+        from src.guardrails.faithfulness import FaithfulnessChecker
+        from src.guardrails.injection import InjectionDetector
+        from src.guardrails.intent import IntentClassifier
+        from src.guardrails.pii import PIIDetector
+        from src.guardrails.runtime import GuardrailsRuntime
+        from src.guardrails.topic_safety import TopicSafetyChecker
+        from src.guardrails.toxicity import ToxicityFilter
+
+        logger.info("Initializing NeMo Guardrails...")
+        runtime = GuardrailsRuntime.get()
+        runtime.initialize(RAG_NEMO_CONFIG_DIR)
+
+        # Build input rail components (only if individually enabled)
+        intent_classifier = IntentClassifier(
+            confidence_threshold=RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
+        )  # Intent is always enabled when NeMo is on
+
+        injection_detector = (
+            InjectionDetector(
+                sensitivity=RAG_NEMO_INJECTION_SENSITIVITY,
+                enable_perplexity=RAG_NEMO_INJECTION_PERPLEXITY_ENABLED,
+                enable_model_classifier=RAG_NEMO_INJECTION_MODEL_ENABLED,
+                lp_threshold=RAG_NEMO_INJECTION_LP_THRESHOLD,
+                ps_ppl_threshold=RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
+            )
+            if RAG_NEMO_INJECTION_ENABLED
+            else None
+        )
+        pii_detector = (
+            PIIDetector(
+                extended=RAG_NEMO_PII_EXTENDED,
+                score_threshold=RAG_NEMO_PII_SCORE_THRESHOLD,
+            )
+            if RAG_NEMO_PII_ENABLED
+            else None
+        )
+        toxicity_filter = (
+            ToxicityFilter(threshold=RAG_NEMO_TOXICITY_THRESHOLD)
+            if RAG_NEMO_TOXICITY_ENABLED
+            else None
+        )
+        # Shared instances for output rails (same config → reuse to avoid
+        # loading spacy/Presidio models twice)
+        shared_pii = pii_detector  # reuse if output PII uses same config
+        shared_toxicity = toxicity_filter
+        topic_safety_checker = (
+            TopicSafetyChecker(
+                custom_instructions=RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
+            )
+            if RAG_NEMO_TOPIC_SAFETY_ENABLED
+            else None
+        )
+
+        self._guardrails_input_executor = InputRailExecutor(
+            intent_classifier=intent_classifier,
+            injection_detector=injection_detector,
+            pii_detector=pii_detector,
+            toxicity_filter=toxicity_filter,
+            topic_safety_checker=topic_safety_checker,
+            timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+        )
+
+        # Build output rail components
+        faithfulness_checker = (
+            FaithfulnessChecker(
+                threshold=RAG_NEMO_FAITHFULNESS_THRESHOLD,
+                action=RAG_NEMO_FAITHFULNESS_ACTION,
+                use_self_check=RAG_NEMO_FAITHFULNESS_SELF_CHECK,
+            )
+            if RAG_NEMO_FAITHFULNESS_ENABLED
+            else None
+        )
+        output_pii = shared_pii if RAG_NEMO_OUTPUT_PII_ENABLED else None
+        output_toxicity = shared_toxicity if RAG_NEMO_OUTPUT_TOXICITY_ENABLED else None
+
+        self._guardrails_output_executor = OutputRailExecutor(
+            faithfulness_checker=faithfulness_checker,
+            pii_detector=output_pii,
+            toxicity_filter=output_toxicity,
+            timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+        )
+
+        self._guardrails_merge_gate = RailMergeGate()
+        logger.info("NeMo Guardrails initialized successfully")
 
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, wv_filter):
         """Run hybrid search against Weaviate (persistent or transient client)."""
@@ -201,6 +309,9 @@ class RAGChain:
         fast_path: Optional[bool] = None,
         overall_timeout_ms: int = RAG_RETRIEVAL_TIMEOUT_MS,
         stage_budget_overrides: Optional[Dict[str, int]] = None,
+        memory_context: Optional[str] = None,
+        memory_recent_turns: Optional[List[Dict[str, str]]] = None,
+        conversation_id: Optional[str] = None,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -217,8 +328,6 @@ class RAGChain:
         Returns:
             RAGResponse with results or clarification message.
         """
-        pipeline_start = time.perf_counter()
-        stage_timings: List[Dict[str, Any]] = []
         stage_budget_overrides = stage_budget_overrides or {}
         stage_budgets = {
             "query_processing": int(stage_budget_overrides.get("query_processing", RAG_STAGE_BUDGET_QUERY_PROCESSING_MS)),
@@ -228,46 +337,14 @@ class RAGChain:
             "reranking": int(stage_budget_overrides.get("reranking", RAG_STAGE_BUDGET_RERANKING_MS)),
             "generation": int(stage_budget_overrides.get("generation", RAG_STAGE_BUDGET_GENERATION_MS)),
         }
+        tp = TimingPool(
+            overall_budget_ms=float(overall_timeout_ms),
+            stage_budgets={k: float(v) for k, v in stage_budgets.items()},
+        )
+        pipeline_start = tp.pipeline_start  # for final span attribute
         root_span = self.tracer.start_span("rag_chain.run", {"query_length": len(query)})
         span_status = "ok"
         span_error: Optional[Exception] = None
-        budget_exhausted = False
-        budget_exhausted_stage: Optional[str] = None
-
-        def _record_stage(stage: str, bucket: str, started_at: float) -> None:
-            ms = round((time.perf_counter() - started_at) * 1000, 1)
-            stage_timings.append(
-                {
-                    "stage": stage,
-                    "bucket": bucket,
-                    "ms": ms,
-                    "budget_ms": stage_budgets.get(stage),
-                    "within_budget": ms <= float(stage_budgets.get(stage, 10**9)),
-                }
-            )
-            PIPELINE_STAGE_MS.labels(stage=stage, bucket=bucket).observe(ms)
-
-        def _compute_totals() -> Dict[str, float]:
-            retrieval_ms = sum(
-                float(s["ms"]) for s in stage_timings if s.get("bucket") == "retrieval"
-            )
-            generation_ms = sum(
-                float(s["ms"]) for s in stage_timings if s.get("bucket") == "generation"
-            )
-            return {
-                "retrieval_ms": round(retrieval_ms, 1),
-                "generation_ms": round(generation_ms, 1),
-                "total_ms": round(retrieval_ms + generation_ms, 1),
-            }
-
-        def _is_overall_budget_exhausted() -> bool:
-            elapsed = (time.perf_counter() - pipeline_start) * 1000
-            return elapsed > float(overall_timeout_ms)
-
-        def _mark_budget_exhausted(stage: str) -> None:
-            nonlocal budget_exhausted, budget_exhausted_stage
-            budget_exhausted = True
-            budget_exhausted_stage = stage
 
         def _budget_clarification(stage: str) -> str:
             return (
@@ -282,18 +359,100 @@ class RAGChain:
             source_filter = validate_filter_value("source_filter", source_filter)
             heading_filter = validate_filter_value("heading_filter", heading_filter)
 
-            # Stage 1: Query processing
+            # Stage 1: Query processing (+ input rails in parallel if NeMo enabled)
             t0 = time.perf_counter()
             query_span = self.tracer.start_span("rag_chain.process_query", parent=root_span)
-            query_result: QueryResult = process_query(
-                query,
-                max_iterations=max_query_iterations,
-                fast_path=RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
-            )
+            processing_query = query
+            if memory_context:
+                processing_query = (
+                    "Conversation context:\n"
+                    f"{memory_context}\n\n"
+                    "Current user question:\n"
+                    f"{query}"
+                )
+
+            # Run query processing and input rails in parallel (REQ-702)
+            guardrails_metadata = None
+            input_rail_result = None
+            merge_decision = None
+
+            if self._guardrails_input_executor is not None:
+                from concurrent.futures import ThreadPoolExecutor as _TP, Future as _Fut
+
+                with _TP(max_workers=2, thread_name_prefix="stage1") as stage1_pool:
+                    qp_future: _Fut = stage1_pool.submit(
+                        process_query,
+                        processing_query,
+                        QUERY_CONFIDENCE_THRESHOLD,
+                        max_query_iterations,
+                        RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
+                    )
+                    rail_future: _Fut = stage1_pool.submit(
+                        self._guardrails_input_executor.execute,
+                        query,
+                        tenant_id or "",
+                        root_span,
+                    )
+
+                    query_result = qp_future.result()
+                    input_rail_result = rail_future.result()
+            else:
+                query_result: QueryResult = process_query(
+                    processing_query,
+                    max_iterations=max_query_iterations,
+                    fast_path=RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
+                )
+
             query_span.end(status="ok")
-            _record_stage("query_processing", "retrieval", t0)
-            if stage_timings[-1]["ms"] > stage_budgets["query_processing"] or _is_overall_budget_exhausted():
-                _mark_budget_exhausted("query_processing")
+            tp.record("query_processing", "retrieval", started_at=t0)
+            if tp.check_stage_budget("query_processing"):
+                tp.mark_budget_exhausted("query_processing")
+
+            # Apply merge gate if input rails ran (REQ-707)
+            if input_rail_result is not None and self._guardrails_merge_gate is not None:
+                from src.guardrails.common.schemas import GuardrailsMetadata
+
+                merge_decision = self._guardrails_merge_gate.merge(
+                    query_result, input_rail_result
+                )
+
+                # Record per-rail timings into the timing pool
+                for r in input_rail_result.rail_executions:
+                    tp.record(f"input_rail_{r.rail_name}", "guardrails", ms=r.execution_ms)
+
+                guardrails_metadata = {
+                    "enabled": True,
+                    "input_rails": [
+                        {
+                            "rail_name": r.rail_name,
+                            "verdict": r.verdict.value,
+                            "execution_ms": r.execution_ms,
+                            "details": r.details,
+                        }
+                        for r in input_rail_result.rail_executions
+                    ],
+                    "intent": input_rail_result.intent,
+                    "intent_confidence": input_rail_result.intent_confidence,
+                    "total_rail_ms": sum(
+                        r.execution_ms for r in input_rail_result.rail_executions
+                    ),
+                }
+
+                # Handle reject/canned responses from merge gate
+                if merge_decision["action"] in ("reject", "canned"):
+                    return RAGResponse(
+                        query=query,
+                        processed_query=query_result.processed_query,
+                        query_confidence=query_result.confidence,
+                        action="ask_user" if merge_decision["action"] == "reject" else "canned",
+                        clarification_message=merge_decision["message"],
+                        stage_timings=tp.entries(),
+                        timing_totals=tp.totals(),
+                        budget_exhausted=tp.budget_exhausted,
+                        budget_exhausted_stage=tp.budget_exhausted_stage,
+                        conversation_id=conversation_id,
+                        guardrails=guardrails_metadata,
+                    )
 
             if query_result.action == QueryAction.ASK_USER:
                 return RAGResponse(
@@ -302,27 +461,35 @@ class RAGChain:
                     query_confidence=query_result.confidence,
                     action="ask_user",
                     clarification_message=query_result.clarification_message,
-                    stage_timings=stage_timings,
-                    timing_totals=_compute_totals(),
-                    budget_exhausted=budget_exhausted,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
+                    budget_exhausted=tp.budget_exhausted,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
+                    guardrails=guardrails_metadata,
                 )
-            if budget_exhausted:
-                timing_totals = _compute_totals()
-                self._log_timings(stage_timings, timing_totals)
+            if tp.budget_exhausted:
+                tp.log_summary()
                 return RAGResponse(
                     query=query,
                     processed_query=query_result.processed_query,
                     query_confidence=query_result.confidence,
                     action="ask_user",
                     clarification_message=_budget_clarification("query processing"),
-                    stage_timings=stage_timings,
-                    timing_totals=timing_totals,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
                     budget_exhausted=True,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
+                    guardrails=guardrails_metadata,
                 )
 
-            processed_query = query_result.processed_query
+            # Use PII-redacted query if available from merge gate
+            processed_query = (
+                merge_decision.get("query", query_result.processed_query)
+                if merge_decision
+                else query_result.processed_query
+            )
 
             # Stage 2: KG expansion
             t0 = time.perf_counter()
@@ -332,12 +499,11 @@ class RAGChain:
                 kg_expanded_terms = self._kg_expander.expand(processed_query, depth=1)
             kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
             kg_span.end(status="ok")
-            _record_stage("kg_expansion", "retrieval", t0)
-            if stage_timings[-1]["ms"] > stage_budgets["kg_expansion"] or _is_overall_budget_exhausted():
-                _mark_budget_exhausted("kg_expansion")
-            if budget_exhausted:
-                timing_totals = _compute_totals()
-                self._log_timings(stage_timings, timing_totals)
+            tp.record("kg_expansion", "retrieval", started_at=t0)
+            if tp.check_stage_budget("kg_expansion"):
+                tp.mark_budget_exhausted("kg_expansion")
+            if tp.budget_exhausted:
+                tp.log_summary()
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
@@ -345,10 +511,11 @@ class RAGChain:
                     action="ask_user",
                     clarification_message=_budget_clarification("KG expansion"),
                     kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=stage_timings,
-                    timing_totals=timing_totals,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
                     budget_exhausted=True,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
                 )
 
             if kg_expanded_terms:
@@ -361,12 +528,11 @@ class RAGChain:
             embed_span = self.tracer.start_span("rag_chain.embed_query", parent=root_span)
             query_embedding = self.embeddings.embed_query(processed_query)
             embed_span.end(status="ok")
-            _record_stage("embedding", "retrieval", t0)
-            if stage_timings[-1]["ms"] > stage_budgets["embedding"] or _is_overall_budget_exhausted():
-                _mark_budget_exhausted("embedding")
-            if budget_exhausted:
-                timing_totals = _compute_totals()
-                self._log_timings(stage_timings, timing_totals)
+            tp.record("embedding", "retrieval", started_at=t0)
+            if tp.check_stage_budget("embedding"):
+                tp.mark_budget_exhausted("embedding")
+            if tp.budget_exhausted:
+                tp.log_summary()
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
@@ -374,10 +540,11 @@ class RAGChain:
                     action="ask_user",
                     clarification_message=_budget_clarification("embedding"),
                     kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=stage_timings,
-                    timing_totals=timing_totals,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
                     budget_exhausted=True,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
                 )
 
             # Stage 4: Hybrid search
@@ -404,12 +571,11 @@ class RAGChain:
             )
             search_span.set_attribute("search_result_count", len(search_results))
             search_span.end(status="ok")
-            _record_stage("hybrid_search", "retrieval", t0)
-            if stage_timings[-1]["ms"] > stage_budgets["hybrid_search"] or _is_overall_budget_exhausted():
-                _mark_budget_exhausted("hybrid_search")
-            if budget_exhausted:
-                timing_totals = _compute_totals()
-                self._log_timings(stage_timings, timing_totals)
+            tp.record("hybrid_search", "retrieval", started_at=t0)
+            if tp.check_stage_budget("hybrid_search"):
+                tp.mark_budget_exhausted("hybrid_search")
+            if tp.budget_exhausted:
+                tp.log_summary()
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
@@ -417,15 +583,15 @@ class RAGChain:
                     action="search",
                     results=self._ranked_from_search_results(search_results, rerank_top_k),
                     kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=stage_timings,
-                    timing_totals=timing_totals,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
                     budget_exhausted=True,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
                 )
 
             if not search_results:
-                timing_totals = _compute_totals()
-                self._log_timings(stage_timings, timing_totals)
+                tp.log_summary()
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
@@ -433,10 +599,11 @@ class RAGChain:
                     action="search",
                     results=[],
                     kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=stage_timings,
-                    timing_totals=timing_totals,
-                    budget_exhausted=budget_exhausted,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
+                    budget_exhausted=tp.budget_exhausted,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
                 )
 
             # Stage 5: Reranking
@@ -453,12 +620,11 @@ class RAGChain:
                 rerank_span.set_attribute("rerank_score_max", max(scores))
                 rerank_span.set_attribute("rerank_score_mean", statistics.mean(scores))
             rerank_span.end(status="ok")
-            _record_stage("reranking", "retrieval", t0)
-            if stage_timings[-1]["ms"] > stage_budgets["reranking"] or _is_overall_budget_exhausted():
-                _mark_budget_exhausted("reranking")
-            if budget_exhausted:
-                timing_totals = _compute_totals()
-                self._log_timings(stage_timings, timing_totals)
+            tp.record("reranking", "retrieval", started_at=t0)
+            if tp.check_stage_budget("reranking"):
+                tp.mark_budget_exhausted("reranking")
+            if tp.budget_exhausted:
+                tp.log_summary()
                 return RAGResponse(
                     query=query,
                     processed_query=processed_query,
@@ -466,15 +632,16 @@ class RAGChain:
                     action="search",
                     results=reranked,
                     kg_expanded_terms=kg_expanded_terms or None,
-                    stage_timings=stage_timings,
-                    timing_totals=timing_totals,
+                    stage_timings=tp.entries(),
+                    timing_totals=tp.totals(),
                     budget_exhausted=True,
-                    budget_exhausted_stage=budget_exhausted_stage,
+                    budget_exhausted_stage=tp.budget_exhausted_stage,
+                    conversation_id=conversation_id,
                 )
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
-            if not skip_generation and self._generator and reranked and not budget_exhausted:
+            if not skip_generation and self._generator and reranked and not tp.budget_exhausted:
                 t0 = time.perf_counter()
                 generate_span = self.tracer.start_span("rag_chain.generate", parent=root_span)
                 context_chunks = [r.text for r in reranked]
@@ -483,15 +650,62 @@ class RAGChain:
                     query=processed_query,
                     context_chunks=context_chunks,
                     scores=scores,
+                    memory_context=memory_context,
+                    recent_turns=memory_recent_turns,
                 )
                 generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 generate_span.end(status="ok")
-                _record_stage("generation", "generation", t0)
-                if stage_timings[-1]["ms"] > stage_budgets["generation"] or _is_overall_budget_exhausted():
-                    _mark_budget_exhausted("generation")
+                tp.record("generation", "generation", started_at=t0)
+                if tp.check_stage_budget("generation"):
+                    tp.mark_budget_exhausted("generation")
 
-            timing_totals = _compute_totals()
-            self._log_timings(stage_timings, timing_totals)
+            # Stage 7: Output rails (REQ-703: parallel with consensus gate)
+            if (
+                generated_answer
+                and self._guardrails_output_executor is not None
+                and not tp.budget_exhausted
+            ):
+                t0 = time.perf_counter()
+                output_rail_span = self.tracer.start_span(
+                    "rag_chain.output_rails", parent=root_span
+                )
+                context_chunks = [r.text for r in reranked]
+                output_rail_result = self._guardrails_output_executor.execute(
+                    answer=generated_answer,
+                    context_chunks=context_chunks,
+                    parent_span=root_span,
+                )
+                output_rail_span.end(status="ok")
+                tp.record("output_rails", "guardrails", started_at=t0)
+
+                # Record per-rail timings into the timing pool
+                for r in output_rail_result.rail_executions:
+                    tp.record(f"output_rail_{r.rail_name}", "guardrails", ms=r.execution_ms)
+
+                # Apply output rail results
+                generated_answer = output_rail_result.final_answer or generated_answer
+
+                # Add output rail metadata to guardrails
+                if guardrails_metadata is None:
+                    guardrails_metadata = {"enabled": True, "total_rail_ms": 0.0}
+                guardrails_metadata["output_rails"] = [
+                    {
+                        "rail_name": r.rail_name,
+                        "verdict": r.verdict.value,
+                        "execution_ms": r.execution_ms,
+                        "details": r.details,
+                    }
+                    for r in output_rail_result.rail_executions
+                ]
+                guardrails_metadata["faithfulness_score"] = output_rail_result.faithfulness_score
+                guardrails_metadata["faithfulness_warning"] = output_rail_result.faithfulness_warning
+                guardrails_metadata["total_rail_ms"] = guardrails_metadata.get(
+                    "total_rail_ms", 0.0
+                ) + sum(
+                    r.execution_ms for r in output_rail_result.rail_executions
+                )
+
+            tp.log_summary()
 
             return RAGResponse(
                 query=query,
@@ -501,10 +715,12 @@ class RAGChain:
                 results=reranked,
                 kg_expanded_terms=kg_expanded_terms or None,
                 generated_answer=generated_answer,
-                stage_timings=stage_timings,
-                timing_totals=timing_totals,
-                budget_exhausted=budget_exhausted,
-                budget_exhausted_stage=budget_exhausted_stage,
+                stage_timings=tp.entries(),
+                timing_totals=tp.totals(),
+                budget_exhausted=tp.budget_exhausted,
+                budget_exhausted_stage=tp.budget_exhausted_stage,
+                conversation_id=conversation_id,
+                guardrails=guardrails_metadata,
             )
         except Exception as exc:
             span_status = "error"
@@ -514,16 +730,6 @@ class RAGChain:
             root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
             root_span.end(status=span_status, error=span_error)
 
-    def _log_timings(self, stage_timings: List[Dict[str, Any]], totals: Dict[str, float]) -> None:
-        if not stage_timings:
-            return
-        parts = " | ".join(
-            f"{s['bucket']}.{s['stage']}: {float(s['ms']):.0f}ms" for s in stage_timings
-        )
-        logger.info(
-            "Pipeline timings — %s | retrieval: %.0fms | generation: %.0fms | total: %.0fms",
-            parts,
-            totals.get("retrieval_ms", 0.0),
-            totals.get("generation_ms", 0.0),
-            totals.get("total_ms", 0.0),
-        )
+
+
+__all__ = ["RAGChain", "RAGResponse"]

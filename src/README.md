@@ -13,6 +13,7 @@ primitives, ingestion pipeline, retrieval runtime, and platform capabilities.
 
 | Directory | Purpose |
 | --- | --- |
+| `common/` | Cross-domain deterministic helpers shared across multiple feature packages. |
 | `core/` | Foundational primitives (embeddings, vector store, knowledge graph). |
 | `ingest/` | Modular document ingestion pipeline and LangGraph stage workflow. |
 | `retrieval/` | Query processing, retrieval orchestration, reranking, generation integration. |
@@ -22,4 +23,5 @@ primitives, ingestion pipeline, retrieval runtime, and platform capabilities.
 
 - Retrieval composes `core/` plus `platform/` services.
 - Ingestion uses `core/` storage primitives and its own pipeline modules.
+- `common/` contains cross-domain helpers that are reused by multiple feature directories.
 - Server modules in `server/` consume `src/retrieval/` and `src/platform/` APIs.

@@ -67,14 +67,18 @@ services:
     ports:
       - "${RAG_API_HOST_PORT:-8000}:8000"
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=host.docker.internal:7233
+      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
+      # API stream-generation needs Ollama access too.
+      - RAG_OLLAMA_URL=${RAG_OLLAMA_URL:-http://host.docker.internal:11435}
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3000}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
       - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
-      - RAG_RATE_LIMIT_ENABLED=true
+      - RAG_MEMORY_PROVIDER=redis
+      - RAG_MEMORY_REDIS_URL=redis://rag-redis:6379/0
+      - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
       - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
       - RAG_AUTH_OIDC_ISSUER=${RAG_AUTH_OIDC_ISSUER:-}
       - RAG_AUTH_OIDC_AUDIENCE=${RAG_AUTH_OIDC_AUDIENCE:-}
@@ -110,9 +114,10 @@ services:
       python -m server.worker
       '
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=host.docker.internal:7233
+      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
       # Ollama is expected to run on the host in this setup.
-      - RAG_OLLAMA_URL=http://host.docker.internal:11434
+      # Default port 11435 is a local proxy that forwards to 127.0.0.1:11434.
+      - RAG_OLLAMA_URL=${RAG_OLLAMA_URL:-http://host.docker.internal:11435}
       - RAG_EMBEDDING_MODEL=/models/baai/bge-m3
       - RAG_RERANKER_MODEL=/models/baai/bge-reranker-v2-m3
       - RAG_WORKER_CONCURRENCY=4

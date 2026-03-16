@@ -14,73 +14,51 @@ Usage:
 """
 
 import asyncio
-import json as json_mod
 import logging
 import os
 import sys
-import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from temporalio.client import Client
-from temporalio.service import RPCError
+from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
 from config.settings import (
     TEMPORAL_TARGET_HOST,
-    OLLAMA_BASE_URL,
-    OLLAMA_MODEL,
-    GENERATION_MAX_TOKENS,
-    GENERATION_TEMPERATURE,
+    RAG_API_MAX_INFLIGHT_REQUESTS,
+    RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS,
     RATE_LIMIT_ENABLED,
     RATE_LIMIT_REQUESTS_PER_MINUTE,
     RATE_LIMIT_WINDOW_SECONDS,
 )
 from src.platform.limits.provider import InMemoryRateLimiter
 from src.platform.metrics import (
+    INFLIGHT_REQUESTS,
+    OVERLOAD_REJECTS,
     RATE_LIMIT_REJECTS,
     REQUESTS_TOTAL,
-    REQUEST_LATENCY_MS,
-    render_metrics,
 )
 from src.platform.observability.providers import get_tracer
-from src.platform.security.auth import Principal, authenticate_request
-from src.platform.security.api_key_store import (
-    create_api_key,
-    list_api_keys,
-    revoke_api_key,
-)
-from src.platform.security.quota_store import (
-    delete_tenant_quota,
-    get_tenant_quota,
-    list_quotas,
-    set_tenant_quota,
-)
+from src.platform.security.auth import Principal
+from src.platform.security.quota_store import get_tenant_quota
 from src.platform.security.rbac import require_role
-from src.platform.security.tenancy import resolve_tenant_id
-from server.schemas import (
-    ApiErrorDetail,
-    ApiErrorResponse,
-    ApiKeyRecord,
-    CreateApiKeyRequest,
-    CreateApiKeyResponse,
-    HealthResponse,
-    QueryRequest,
-    QueryResponse,
-    QuotaSetResponse,
-    QuotasResponse,
-    QuotaUpdateRequest,
-    RootResponse,
-    StatusResponse,
+from server.console import create_console_router
+from server.routes import (
+    create_admin_router,
+    create_query_router,
+    create_system_router,
 )
-from server.workflows import RAGQueryWorkflow, RAG_QUERY_TASK_QUEUE
+from server.utils import console_ok as _console_ok, error_payload as _error_payload
+from server.schemas import (
+    QueryRequest,
+)
 
 # Use uvicorn's logger/formatter so API logs match server output
 # (INFO prefix + colorized level formatting).
@@ -92,6 +70,12 @@ _rate_limiter = InMemoryRateLimiter(
     limit=RATE_LIMIT_REQUESTS_PER_MINUTE,
     window_seconds=RATE_LIMIT_WINDOW_SECONDS,
 )
+_api_inflight_semaphore = (
+    asyncio.Semaphore(RAG_API_MAX_INFLIGHT_REQUESTS)
+    if RAG_API_MAX_INFLIGHT_REQUESTS > 0
+    else None
+)
+_api_overload_queue_timeout_ms = max(1, RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS)
 
 API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
 
@@ -112,6 +96,38 @@ def _enforce_rate_limit(principal: Principal, endpoint: str) -> None:
             status_code=429,
             detail=f"Rate limit exceeded. Retry in {limit_result.retry_after_seconds}s",
         )
+
+
+async def _acquire_request_slot(endpoint: str) -> bool:
+    """Acquire API overload slot and raise 503 when capacity is saturated."""
+    if _api_inflight_semaphore is None:
+        return False
+    try:
+        await asyncio.wait_for(
+            _api_inflight_semaphore.acquire(),
+            timeout=_api_overload_queue_timeout_ms / 1000.0,
+        )
+    except asyncio.TimeoutError:
+        OVERLOAD_REJECTS.labels(endpoint=endpoint).inc()
+        REQUESTS_TOTAL.labels(endpoint=endpoint, method="POST", status="503").inc()
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Server overloaded: too many in-flight requests. "
+                "Please retry shortly."
+            ),
+        )
+    INFLIGHT_REQUESTS.inc()
+    return True
+
+
+def _release_request_slot(acquired: bool) -> None:
+    """Release API overload slot previously acquired."""
+    if not acquired:
+        return
+    INFLIGHT_REQUESTS.dec()
+    if _api_inflight_semaphore is not None:
+        _api_inflight_semaphore.release()
 
 
 @asynccontextmanager
@@ -153,20 +169,6 @@ async def add_request_id_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["x-request-id"] = request_id
     return response
-
-
-def _error_payload(
-    request: Request,
-    *,
-    code: str,
-    message: str,
-    details: dict | None = None,
-) -> dict:
-    return ApiErrorResponse(
-        ok=False,
-        error=ApiErrorDetail(code=code, message=message, details=details),
-        request_id=getattr(request.state, "request_id", None),
-    ).model_dump()
 
 
 @app.exception_handler(HTTPException)
@@ -218,342 +220,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             message="Internal server error",
         ),
     )
-
-
-_STANDARD_ERROR_RESPONSES = {
-    401: {"model": ApiErrorResponse},
-    403: {"model": ApiErrorResponse},
-    404: {"model": ApiErrorResponse},
-    422: {"model": ApiErrorResponse},
-    429: {"model": ApiErrorResponse},
-    500: {"model": ApiErrorResponse},
-    503: {"model": ApiErrorResponse},
-}
-
-
-@app.post("/query", response_model=QueryResponse, responses=_STANDARD_ERROR_RESPONSES)
-async def query(request: QueryRequest, principal: Principal = Depends(authenticate_request)):
-    """Submit a RAG query.
-
-    The query is dispatched as a Temporal workflow to a worker where embedding
-    and reranker models are already loaded in GPU memory. Typical latency is
-    100-500ms (inference only, no model loading).
-    """
-    if _temporal_client is None:
-        raise HTTPException(status_code=503, detail="Temporal client not connected")
-    require_role(principal, "query")
-    _enforce_rate_limit(principal, "/query")
-
-    workflow_id = f"rag-query-{uuid.uuid4().hex[:12]}"
-    payload = request.model_dump(exclude_none=True)
-    payload["tenant_id"] = resolve_tenant_id(principal, request.tenant_id)
-
-    start = time.perf_counter()
-    try:
-        result = await _temporal_client.execute_workflow(
-            RAGQueryWorkflow.run,
-            payload,
-            id=workflow_id,
-            task_queue=RAG_QUERY_TASK_QUEUE,
-        )
-    except RPCError as exc:
-        REQUESTS_TOTAL.labels(endpoint="/query", method="POST", status="503").inc()
-        logger.error("Temporal RPC error: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail=f"Temporal unavailable: {exc}. Is the worker running?",
-        )
-    except Exception as exc:
-        REQUESTS_TOTAL.labels(endpoint="/query", method="POST", status="500").inc()
-        logger.error("Workflow execution failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    total_ms = (time.perf_counter() - start) * 1000
-
-    result["workflow_id"] = workflow_id
-    if "latency_ms" not in result:
-        result["latency_ms"] = round(total_ms, 1)
-
-    logger.info(
-        "Query served in %.0fms (workflow %s): %s",
-        total_ms,
-        workflow_id,
-        request.query[:60],
-    )
-    REQUESTS_TOTAL.labels(endpoint="/query", method="POST", status="200").inc()
-    REQUEST_LATENCY_MS.labels(endpoint="/query", method="POST").observe(total_ms)
-    return QueryResponse(**result)
-
-
-@app.post("/query/stream", responses=_STANDARD_ERROR_RESPONSES)
-async def query_stream(request: QueryRequest, principal: Principal = Depends(authenticate_request)):
-    """Stream a RAG query response via Server-Sent Events.
-
-    Retrieval (stages 1-5) runs through Temporal for durability.
-    Generation (stage 6) streams directly from Ollama so the user
-    sees tokens as they arrive instead of waiting for the full answer.
-
-    SSE event types:
-        retrieval  — metadata + retrieved chunks (no generated_answer)
-        token      — a single generation token
-        done       — final event with total latency
-        error      — error message
-    """
-    if _temporal_client is None:
-        raise HTTPException(status_code=503, detail="Temporal client not connected")
-    require_role(principal, "query")
-    _enforce_rate_limit(principal, "/query/stream")
-
-    workflow_id = f"rag-stream-{uuid.uuid4().hex[:12]}"
-    payload = request.model_dump(exclude_none=True)
-    payload["skip_generation"] = True
-    payload["tenant_id"] = resolve_tenant_id(principal, request.tenant_id)
-
-    async def event_generator():
-        start = time.perf_counter()
-        stream_error_message: str | None = None
-
-        try:
-            retrieval_result = await _temporal_client.execute_workflow(
-                RAGQueryWorkflow.run,
-                payload,
-                id=workflow_id,
-                task_queue=RAG_QUERY_TASK_QUEUE,
-            )
-        except RPCError as exc:
-            REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="503").inc()
-            stream_error_message = f"Retrieval failed: {exc}"
-            yield _sse("error", {"message": stream_error_message})
-            _emit_stream_observability_async(
-                workflow_id=workflow_id,
-                request=request,
-                retrieval_ms=0.0,
-                generation_ms=0.0,
-                latency_ms=(time.perf_counter() - start) * 1000,
-                token_count=0,
-                stage_timings=[],
-                timing_totals={"total_ms": 0.0},
-                outcome="error",
-                error_message=stream_error_message,
-            )
-            return
-        except Exception as exc:
-            REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="500").inc()
-            stream_error_message = str(exc)
-            yield _sse("error", {"message": stream_error_message})
-            _emit_stream_observability_async(
-                workflow_id=workflow_id,
-                request=request,
-                retrieval_ms=0.0,
-                generation_ms=0.0,
-                latency_ms=(time.perf_counter() - start) * 1000,
-                token_count=0,
-                stage_timings=[],
-                timing_totals={"total_ms": 0.0},
-                outcome="error",
-                error_message=stream_error_message,
-            )
-            return
-
-        retrieval_ms = (time.perf_counter() - start) * 1000
-        retrieval_result["workflow_id"] = workflow_id
-        retrieval_result["latency_ms"] = round(retrieval_ms, 1)
-        retrieval_stages = list(retrieval_result.get("stage_timings", []))
-
-        yield _sse("retrieval", retrieval_result)
-
-        # Stream generation if we have results and action is "search"
-        chunks = retrieval_result.get("results", [])
-        processed_query = retrieval_result.get("processed_query", request.query)
-        if retrieval_result.get("action") != "search" or not chunks:
-            done_payload = {
-                "latency_ms": round(retrieval_ms, 1),
-                "retrieval_ms": round(retrieval_ms, 1),
-                "generation_ms": 0.0,
-                "token_count": 0,
-                "stage_timings": retrieval_stages,
-                "timing_totals": _aggregate_stage_totals(retrieval_stages),
-            }
-            yield _sse("done", done_payload)
-            _emit_stream_observability_async(
-                workflow_id=workflow_id,
-                request=request,
-                retrieval_ms=retrieval_ms,
-                generation_ms=0.0,
-                latency_ms=retrieval_ms,
-                token_count=0,
-                stage_timings=retrieval_stages,
-                timing_totals=done_payload["timing_totals"],
-                outcome="completed",
-            )
-            return
-
-        context_texts = [c["text"] for c in chunks]
-        scores = [c["score"] for c in chunks]
-
-        gen_start = time.perf_counter()
-        token_count = 0
-        generation_stages: list[dict] = []
-
-        try:
-            for token in _stream_ollama(
-                processed_query,
-                context_texts,
-                scores,
-                stage_timings=generation_stages,
-            ):
-                token_count += 1
-                yield _sse("token", {"token": token})
-                # Yield control so FastAPI can flush
-                await asyncio.sleep(0)
-        except Exception as exc:
-            logger.warning("Generation stream error: %s", exc)
-            stream_error_message = str(exc)
-            yield _sse("error", {"message": f"Generation error: {exc}"})
-
-        gen_ms = (time.perf_counter() - gen_start) * 1000
-        total_ms = (time.perf_counter() - start) * 1000
-
-        logger.info(
-            "Streamed %d tokens in %.0fms (retrieval: %.0fms, generation: %.0fms) — %s",
-            token_count, total_ms, retrieval_ms, gen_ms, request.query[:60],
-        )
-        REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="200").inc()
-        REQUEST_LATENCY_MS.labels(endpoint="/query/stream", method="POST").observe(total_ms)
-        all_stages = retrieval_stages + generation_stages
-        stage_totals = _aggregate_stage_totals(all_stages)
-        done_payload = {
-            "latency_ms": round(total_ms, 1),
-            "retrieval_ms": round(retrieval_ms, 1),
-            "generation_ms": round(gen_ms, 1),
-            "token_count": token_count,
-            "stage_timings": all_stages,
-            "timing_totals": stage_totals,
-        }
-        yield _sse("done", done_payload)
-        _emit_stream_observability_async(
-            workflow_id=workflow_id,
-            request=request,
-            retrieval_ms=retrieval_ms,
-            generation_ms=gen_ms,
-            latency_ms=total_ms,
-            token_count=token_count,
-            stage_timings=all_stages,
-            timing_totals=stage_totals,
-            outcome="error" if stream_error_message else "completed",
-            error_message=stream_error_message,
-        )
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@app.get("/metrics")
-async def metrics():
-    payload, content_type = render_metrics()
-    return Response(content=payload, media_type=content_type)
-
-
-@app.get(
-    "/admin/api-keys",
-    response_model=list[ApiKeyRecord],
-    responses=_STANDARD_ERROR_RESPONSES,
-)
-async def admin_list_api_keys(
-    include_revoked: bool = False,
-    principal: Principal = Depends(authenticate_request),
-):
-    require_role(principal, "admin")
-    records = list_api_keys(include_revoked=include_revoked)
-    return [ApiKeyRecord(**r) for r in records]
-
-
-@app.post(
-    "/admin/api-keys",
-    response_model=CreateApiKeyResponse,
-    responses=_STANDARD_ERROR_RESPONSES,
-)
-async def admin_create_api_key(
-    request: CreateApiKeyRequest,
-    principal: Principal = Depends(authenticate_request),
-):
-    require_role(principal, "admin")
-    created = create_api_key(
-        subject=request.subject,
-        tenant_id=request.tenant_id,
-        roles=request.roles,
-        description=request.description,
-    )
-    return CreateApiKeyResponse(**created)
-
-
-@app.delete(
-    "/admin/api-keys/{key_id}",
-    response_model=StatusResponse,
-    responses=_STANDARD_ERROR_RESPONSES,
-)
-async def admin_revoke_api_key(key_id: str, principal: Principal = Depends(authenticate_request)):
-    require_role(principal, "admin")
-    ok = revoke_api_key(key_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="API key not found")
-    return StatusResponse(status="revoked", key_id=key_id)
-
-
-@app.get("/admin/quotas", response_model=QuotasResponse, responses=_STANDARD_ERROR_RESPONSES)
-async def admin_list_quotas(principal: Principal = Depends(authenticate_request)):
-    require_role(principal, "admin")
-    return QuotasResponse(**list_quotas())
-
-
-@app.put(
-    "/admin/quotas/{tenant_id}",
-    response_model=QuotaSetResponse,
-    responses=_STANDARD_ERROR_RESPONSES,
-)
-async def admin_set_tenant_quota(
-    tenant_id: str,
-    request: QuotaUpdateRequest,
-    principal: Principal = Depends(authenticate_request),
-):
-    require_role(principal, "admin")
-    return set_tenant_quota(tenant_id, request.requests_per_minute)
-
-
-@app.delete(
-    "/admin/quotas/{tenant_id}",
-    response_model=StatusResponse,
-    responses=_STANDARD_ERROR_RESPONSES,
-)
-async def admin_delete_tenant_quota(
-    tenant_id: str,
-    principal: Principal = Depends(authenticate_request),
-):
-    require_role(principal, "admin")
-    existed = delete_tenant_quota(tenant_id)
-    return StatusResponse(
-        status="deleted" if existed else "noop",
-        tenant_id=tenant_id,
-    )
-
-
-def _sse(event: str, data: dict) -> str:
-    """Format a Server-Sent Event."""
-    return f"event: {event}\ndata: {json_mod.dumps(data)}\n\n"
-
-
-def _aggregate_stage_totals(stage_timings: list[dict]) -> dict:
-    """Aggregate stage timings by pipeline bucket."""
-    bucket_totals: dict[str, float] = {}
-    for stage in stage_timings:
-        bucket = str(stage.get("bucket", "other"))
-        bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + float(stage.get("ms", 0.0))
-    totals = {f"{bucket}_ms": round(ms, 1) for bucket, ms in bucket_totals.items()}
-    totals["total_ms"] = round(sum(bucket_totals.values()), 1)
-    return totals
 
 
 def _emit_stream_observability_async(
@@ -611,118 +277,30 @@ def _emit_stream_observability_async(
     asyncio.create_task(_emit())
 
 
-def _stream_ollama(
-    query: str,
-    context_chunks: list[str],
-    scores: list[float],
-    stage_timings: list[dict] | None = None,
-):
-    """Stream tokens from Ollama. Lightweight — no GPU, just HTTP."""
-    from urllib.request import Request, urlopen
+def _get_temporal_client() -> Client | None:
+    return _temporal_client
 
-    from src.retrieval.generator import _SYSTEM_PROMPT, _USER_TEMPLATE
 
-    def _record_stage(stage: str, bucket: str, started_at: float) -> None:
-        if stage_timings is None:
-            return
-        stage_timings.append(
-            {"stage": stage, "bucket": bucket, "ms": round((time.perf_counter() - started_at) * 1000, 1)}
-        )
-
-    prep_start = time.perf_counter()
-    if scores:
-        context = "\n\n".join(
-            f"[{i+1}] (relevance: {score:.0%}) {chunk}"
-            for i, (chunk, score) in enumerate(zip(context_chunks, scores))
-        )
-    else:
-        context = "\n\n".join(
-            f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
-        )
-    user_message = _USER_TEMPLATE.format(context=context, question=query)
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-        "stream": True,
-        "options": {
-            "num_predict": GENERATION_MAX_TOKENS,
-            "temperature": GENERATION_TEMPERATURE,
-        },
-    }
-
-    req = Request(
-        f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-        data=json_mod.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+app.include_router(
+    create_query_router(
+        get_temporal_client=_get_temporal_client,
+        require_role=require_role,
+        enforce_rate_limit=_enforce_rate_limit,
+        acquire_request_slot=_acquire_request_slot,
+        release_request_slot=_release_request_slot,
+        emit_stream_observability=_emit_stream_observability_async,
+        logger=logger,
     )
-    _record_stage("prompt_prepare", "generation", prep_start)
-    resp = None
-    stream_start = None
-    try:
-        connect_start = time.perf_counter()
-        resp = urlopen(req, timeout=120)
-        _record_stage("http_connect", "generation", connect_start)
-        stream_start = time.perf_counter()
-        for raw_line in resp:
-            line = raw_line.decode("utf-8").strip()
-            if not line:
-                continue
-            chunk = json_mod.loads(line)
-            token = chunk.get("message", {}).get("content", "")
-            if token:
-                yield token
-            if chunk.get("done"):
-                break
-    finally:
-        if stream_start is not None:
-            _record_stage("stream_tokens", "generation", stream_start)
-        if resp is not None:
-            resp.close()
-
-
-@app.get("/health", response_model=HealthResponse, responses=_STANDARD_ERROR_RESPONSES)
-async def health():
-    """Check API and Temporal connectivity."""
-    temporal_ok = False
-    worker_ok = False
-
-    if _temporal_client is not None:
-        try:
-            await _temporal_client.workflow_service.get_system_info()
-            temporal_ok = True
-        except Exception:
-            pass
-
-        if temporal_ok:
-            try:
-                from temporalio.client import WorkflowExecutionStatus
-                async for _ in _temporal_client.list_workflows(
-                    f'TaskQueue="{RAG_QUERY_TASK_QUEUE}" AND ExecutionStatus="Running"'
-                ):
-                    worker_ok = True
-                    break
-            except Exception as exc:
-                worker_ok = False
-                logger.warning("Worker availability check failed: %s", exc)
-
-    status = "healthy" if (temporal_ok and worker_ok) else "degraded"
-    return HealthResponse(
-        status=status,
-        temporal_connected=temporal_ok,
-        worker_available=worker_ok,
+)
+app.include_router(create_admin_router())
+app.include_router(create_system_router(get_temporal_client=_get_temporal_client, logger=logger))
+app.include_router(
+    create_console_router(
+        get_temporal_client=_get_temporal_client,
+        logger=logger,
+        enforce_rate_limit=_enforce_rate_limit,
+        acquire_request_slot=_acquire_request_slot,
+        release_request_slot=_release_request_slot,
+        console_ok=_console_ok,
     )
-
-
-@app.get("/", response_model=RootResponse, responses=_STANDARD_ERROR_RESPONSES)
-async def root():
-    return RootResponse(
-        service="RAG Query API",
-        docs="/docs",
-        health="/health",
-        query_endpoint="POST /query",
-    )
+)

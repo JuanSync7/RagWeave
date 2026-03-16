@@ -77,6 +77,15 @@ Use these conventions for all new implementation work (especially pipeline-style
 - For workflow systems, use a top-level workflow composer file and stage/node-per-file implementations.
 - Move reusable helpers to dedicated shared modules (avoid helper duplication across nodes).
 - Keep shared type/state/config contracts in one canonical module.
+- Use a predictable package layout in feature directories:
+  - `schemas.py` for typed contracts (TypedDict/dataclass/pydantic),
+  - `utils.py` for deterministic, side-effect-light helpers,
+  - `common/` for cross-module contracts/helpers used by multiple subpackages.
+- Standardize shared helpers in layers (RAGFlow-style, but domain-safe):
+  - **Feature-local first**: keep helpers in `<feature>/common/` when only that feature uses them.
+  - **Cross-domain promote**: move helpers to `src/common/` only when used by multiple features.
+  - Keep feature-level `utils.py` facades stable so callers do not import deep internals.
+- Keep backward-compatible aliases in facade modules when moving helpers between files.
 
 Recommended pattern:
 
@@ -85,7 +94,31 @@ Recommended pattern:
 - `pipeline_workflow.py`: graph topology and routing
 - `nodes/*.py`: one stage per file
 - `pipeline_types.py`: state/config dataclasses and typed contracts
-- `pipeline_shared.py`/`pipeline_llm.py`: shared deterministic + LLM helpers
+- `pipeline_shared.py`/`pipeline_llm.py`: ingestion-specific shared heuristics + LLM helpers
+- `common/schemas.py` + `common/utils.py`: canonical cross-module contracts and deterministic utilities
+
+API/server-oriented pattern:
+
+- `schemas.py`: request/response models (endpoint contract surface)
+- `utils.py`: facade for reusable request/response helper functions
+- `common/schemas.py`: shared envelopes or cross-endpoint models
+- `common/utils.py`: shared helpers (error payloads, request-id helpers, normalization)
+- Keep route handlers thin; move reusable helper logic out of monolithic API modules.
+- For major UX surfaces (for example web console), create a dedicated feature package
+  (for example `server/console/`) with route/service separation and room for future growth.
+- Co-locate static assets with the feature package (for example `server/console/static/`)
+  and keep explicit fallback logic only when needed for migration compatibility.
+
+CLI/UI parity contract:
+
+- Treat CLI and UI as two clients of one product surface, not separate features.
+- Any user-facing setting/command/state added to one interface must be reflected in the other
+  in the same change set (or explicitly marked as intentionally interface-specific).
+- Keep a single source of truth for shared interaction contracts:
+  - shared request/response schemas in Python models,
+  - shared command/config metadata in a reusable module consumed by both CLI and UI adapters.
+- Do not duplicate business rules in interface layers; adapters should map to shared services/contracts.
+- Hidden maintenance/debug commands must be explicitly scoped by interface and documented.
 
 ### 3) Configurability Requirements
 
@@ -121,3 +154,5 @@ Recommended pattern:
 - New/changed modules include `@summary` and docstrings.
 - Tests pass for the affected subsystem.
 - README and engineering docs are updated to match implementation.
+- If files are moved/refactored, imports are updated and compatibility aliases are preserved or explicitly removed with migration notes.
+- If CLI/UI behavior changed, parity was updated and verified for both surfaces.

@@ -12,6 +12,7 @@ This repository contains an end-to-end RAG system with:
 
 - a modular 13-node ingestion workflow (`src/ingest`) for document-to-vector/KG processing,
 - a retrieval and query-serving runtime (`src/retrieval`, `server`) with Temporal orchestration,
+- tenant-aware conversation memory (Redis-backed) with sliding-window + rolling-summary context management,
 - platform modules for auth, limits, observability, and caching (`src/platform`),
 - operations and architecture documentation (`docs/`).
 
@@ -43,6 +44,7 @@ When document refactoring is enabled, retrieval can use refactored text while pr
 
 | Directory | Purpose |
 | --- | --- |
+| `src/common/` | Cross-domain deterministic helpers reused across ingestion/retrieval features. |
 | `src/ingest/` | Modular ingestion pipeline (node-per-file, shared helpers, LangGraph workflow). |
 | `src/retrieval/` | Query processing, retrieval orchestration, reranking, and generation. |
 | `src/platform/` | Cross-cutting platform services: auth, quotas/rate limits, cache, metrics, observability. |
@@ -70,3 +72,24 @@ When document refactoring is enabled, retrieval can use refactored text while pr
 - Ingestion: `docs/embedding/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
 - Ingestion onboarding: `docs/embedding/INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
 - Server/runtime operations: `server/README.md`
+- 100-user practical execution plan: `docs/operations/RAG_100_USER_EXECUTION_PLAN.md`
+- Web console spec & implementation: `docs/operations/WEB_CONSOLE_SPEC.md`, `docs/operations/WEB_CONSOLE_IMPLEMENTATION.md`
+- CLI spec & implementation: `docs/retrieval/CLI_SPEC.md`, `docs/retrieval/CLI_IMPLEMENTATION.md`
+
+## Console UI Dev Shortcuts
+
+From project root, you can use either `make` or `npm run`:
+
+```bash
+# make-style
+make console-install
+make console-check
+make console-build
+make all-check
+
+# npm-style
+npm run console:install
+npm run console:check
+npm run console:build
+npm run all-check
+```
