@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAG Operator Console</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #171a21;
+      --text: #e7ecf3;
+      --muted: #93a0b3;
+      --ok: #2ecc71;
+      --warn: #f5b041;
+      --err: #ff6b6b;
+      --accent: #4da3ff;
+      --border: #2a3040;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { margin: 0 0 12px; font-size: 22px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-top: 12px;
+    }
+    .tabs button, button {
+      background: #1d2330;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .tabs button.active { border-color: var(--accent); color: var(--accent); }
+    input, select, textarea {
+      width: 100%;
+      background: #111522;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    label { display: block; margin: 6px 0; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .hidden { display: none; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+    .pill { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+    .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+    .markdown {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #111522;
+      line-height: 1.45;
+    }
+    .markdown h1, .markdown h2, .markdown h3 { margin: 8px 0; }
+    .markdown p { margin: 8px 0; }
+    .markdown pre {
+      background: #0d1220;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      overflow-x: auto;
+    }
+    .markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .muted { color: var(--muted); }
+    .rerank-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+    .rerank-table th,
+    .rerank-table td {
+      border: 1px solid var(--border);
+      padding: 8px;
+      vertical-align: top;
+    }
+    .rerank-table th {
+      text-align: left;
+      color: var(--muted);
+      background: #121828;
+      position: sticky;
+      top: 0;
+    }
+    .rerank-table code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .source-link {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .source-link:hover { text-decoration: underline; }
+    .timing-panel {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #111522;
+    }
+    .timing-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .timing-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      background: #0d1220;
+    }
+    .slash-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      margin-top: 10px;
+      align-items: end;
+    }
+    .slash-suggestions {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .query-layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 12px;
+    }
+    .sidebar {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #111522;
+      padding: 10px;
+      min-height: 420px;
+    }
+    .conversation-list {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 330px;
+      overflow-y: auto;
+    }
+    .conversation-item {
+      width: 100%;
+      text-align: left;
+      background: #101624;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px;
+      cursor: pointer;
+    }
+    .conversation-item.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .conv-context-menu {
+      position: fixed;
+      z-index: 1000;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 0;
+      min-width: 180px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      display: none;
+    }
+    .conv-context-menu.visible {
+      display: block;
+    }
+    .conv-context-menu button {
+      width: 100%;
+      text-align: left;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+    .conv-context-menu button:hover {
+      background: #1d2330;
+    }
+    .history-pane {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0f1524;
+      padding: 8px;
+      max-height: 180px;
+      overflow-y: auto;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .timing-key { color: var(--muted); font-size: 12px; }
+    .timing-val { font-weight: 700; margin-top: 4px; }
+    @media (max-width: 900px) {
+      .timing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .query-layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>RAG Operator Console</h1>
+
+    <div class="card">
+      <div class="row">
+        <div style="flex: 1; min-width: 220px;">
+          <label>API Key (optional)</label>
+          <input id="apiKey" placeholder="x-api-key" />
+        </div>
+        <div style="flex: 1; min-width: 220px;">
+          <label>Bearer Token (optional)</label>
+          <input id="bearerToken" placeholder="Bearer token" />
+        </div>
+        <button id="pingBtn">Refresh Health</button>
+        <span id="healthPill" class="pill warn">unknown</span>
+      </div>
+    </div>
+
+    <div class="tabs row card">
+      <button data-tab="query" class="active">Query</button>
+      <button data-tab="ingest">Ingest</button>
+      <button data-tab="health">Health & Logs</button>
+      <button data-tab="admin">Admin</button>
+    </div>
+
+    <section id="tab-query" class="card">
+      <div class="query-layout">
+        <aside class="sidebar">
+          <label>Conversations</label>
+          <div class="row">
+            <button id="newConversationBtn">New Chat</button>
+            <button id="refreshConversationsBtn">Refresh</button>
+          </div>
+          <div style="margin-top:8px;">
+            <label><input id="memoryEnabled" type="checkbox" checked /> memory_enabled</label>
+          </div>
+          <div id="activeConversationLabel" class="muted">Active: (auto)</div>
+          <div id="conversationList" class="conversation-list"></div>
+          <div id="convContextMenu" class="conv-context-menu" aria-hidden="true">
+            <button type="button" data-action="compact">Compact conversation</button>
+            <button type="button" data-action="delete">Delete conversation</button>
+          </div>
+          <div class="history-pane" id="chatHistoryPane">No history yet.</div>
+        </aside>
+        <div>
+          <label>Query</label>
+          <textarea id="queryText" rows="3" placeholder="Ask a question..."></textarea>
+          <div class="grid">
+            <div>
+              <label>Search limit</label>
+              <input id="searchLimit" type="number" value="10" />
+            </div>
+            <div>
+              <label>Rerank top K</label>
+              <input id="rerankTopK" type="number" value="5" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <button id="runStreamBtn">Run Stream Query</button>
+            <button id="runQueryBtn">Run Non-Stream Query</button>
+          </div>
+          <div class="slash-row">
+            <div>
+              <label>Slash command</label>
+              <input id="querySlashInput" placeholder="/help, /run, /status, /conversations, /switch, /history, /compact, /delete" />
+              <div id="querySlashSuggestions" class="slash-suggestions"></div>
+            </div>
+            <button id="querySlashRunBtn">Run Command</button>
+          </div>
+          <div style="margin-top: 10px;">
+            <label>Answer (Markdown Rendered)</label>
+            <div id="queryMarkdown" class="markdown"></div>
+          </div>
+          <div style="margin-top: 10px;">
+            <label>Top reranked original documents</label>
+            <div id="rerankDocsOut"></div>
+          </div>
+          <div class="timing-panel">
+            <label>Timing</label>
+            <div id="timingOut" class="muted">No timing yet.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-ingest" class="card hidden">
+      <div class="grid">
+        <div>
+          <label>Mode</label>
+          <select id="ingestMode">
+            <option value="all_documents">all_documents</option>
+            <option value="directory">directory</option>
+            <option value="single_file">single_file</option>
+          </select>
+        </div>
+        <div>
+          <label>Target path (optional for all_documents)</label>
+          <input id="targetPath" placeholder="/path/to/file_or_dir" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <label><input id="updateMode" type="checkbox" checked /> update_mode</label>
+        <label><input id="buildKg" type="checkbox" checked /> build_kg</label>
+        <label><input id="verboseStages" type="checkbox" /> verbose_stages</label>
+      </div>
+      <div class="grid" style="margin-top: 8px;">
+        <div>
+          <label>Docling model</label>
+          <input id="doclingModel" value="docling-parse-v2" />
+        </div>
+        <div>
+          <label>Docling artifacts path (optional)</label>
+          <input id="doclingArtifactsPath" placeholder="/models/docling" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <label><input id="doclingEnabled" type="checkbox" checked /> docling_enabled</label>
+        <label><input id="doclingStrict" type="checkbox" checked /> docling_strict</label>
+        <label><input id="doclingAutoDownload" type="checkbox" checked /> docling_auto_download</label>
+      </div>
+      <div class="grid" style="margin-top: 8px;">
+        <div>
+          <label>Vision provider</label>
+          <select id="visionProvider">
+            <option value="ollama">ollama</option>
+            <option value="openai_compatible">openai_compatible</option>
+          </select>
+        </div>
+        <div>
+          <label>Vision model</label>
+          <input id="visionModel" value="qwen2.5vl:3b" />
+        </div>
+        <div>
+          <label>Vision max figures</label>
+          <input id="visionMaxFigures" type="number" min="1" max="32" value="4" />
+        </div>
+        <div>
+          <label>Vision timeout seconds</label>
+          <input id="visionTimeoutSeconds" type="number" min="5" max="600" value="60" />
+        </div>
+        <div>
+          <label>Vision API base URL (openai_compatible)</label>
+          <input id="visionApiBaseUrl" placeholder="http://localhost:8009" />
+        </div>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <label><input id="visionEnabled" type="checkbox" /> vision_enabled</label>
+        <label><input id="visionStrict" type="checkbox" /> vision_strict</label>
+        <label><input id="visionAutoPull" type="checkbox" checked /> vision_auto_pull</label>
+      </div>
+      <button id="runIngestBtn">Run Ingestion</button>
+      <div class="slash-row">
+        <div>
+          <label>Slash command</label>
+          <input id="ingestSlashInput" placeholder="/help, /run, /status, /clear" />
+          <div id="ingestSlashSuggestions" class="slash-suggestions"></div>
+        </div>
+        <button id="ingestSlashRunBtn">Run Command</button>
+      </div>
+      <div style="margin-top: 10px;">
+        <label>Ingestion result</label>
+        <div id="ingestOut" class="mono"></div>
+      </div>
+    </section>
+
+    <section id="tab-health" class="card hidden">
+      <div class="row">
+        <button id="refreshHealthBtn">Refresh Health</button>
+        <button id="refreshLogsBtn">Refresh Logs</button>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Health</label>
+        <div id="healthOut" class="mono"></div>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Logs</label>
+        <div id="logsOut" class="mono"></div>
+      </div>
+    </section>
+
+    <section id="tab-admin" class="card hidden">
+      <div class="row">
+        <button id="listKeysBtn">List API Keys</button>
+        <button id="listQuotasBtn">List Quotas</button>
+      </div>
+      <div class="grid" style="margin-top: 8px;">
+        <div>
+          <label>New Key Subject</label>
+          <input id="newKeySubject" placeholder="operator@example.com" />
+        </div>
+        <div>
+          <label>Tenant ID</label>
+          <input id="newKeyTenant" placeholder="default" />
+        </div>
+      </div>
+      <button id="createKeyBtn" style="margin-top:8px;">Create API Key</button>
+      <div style="margin-top: 10px;">
+        <label>Admin result</label>
+        <div id="adminOut" class="mono"></div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="/console/static/main.js"></script>
+</body>
+</html>
