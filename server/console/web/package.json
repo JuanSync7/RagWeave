@@ -1,0 +1,14 @@
+{
+  "name": "rag-console-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "check": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "watch": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
