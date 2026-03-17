@@ -1,14 +1,17 @@
 # @summary
-# One-sentence description: This Python module defines a document processing pipeline with key functions for metadata extraction, text chunking, normalization, and cleaning, integrated into a single file.
-# Key exports and dependencies: process_document, metadata_to_dict, chunk_text; RecursiveCharacterTextSplitter, clean_text, re, unicodedata, dataclasses, typing, langchain_text_splitters, config.settings.
+# Document text preprocessing helpers for ingestion (cleaning, metadata, chunking).
+# Exports: DocumentMetadata, strip_boilerplate, normalize_unicode, clean_whitespace,
+#          strip_section_markers, strip_trailing_short_lines, clean_text,
+#          extract_metadata, metadata_to_dict, chunk_text, process_document
+# Deps: re, unicodedata, dataclasses, typing, langchain_text_splitters, config.settings,
+#       src.ingest.common.schemas
 # @end-summary
-"""
-Document processing pipeline.
+"""Document text preprocessing helpers for ingestion.
 
-Handles preprocessing of raw documents before embedding and storage.
-Cleans real-world artifacts like headers, footers, email boilerplate,
-excessive whitespace, smart quotes, and extracts metadata from
-structured document headers.
+This module provides a deterministic, multi-stage preprocessing pipeline for
+raw text extracted from documents. It focuses on robustness against real-world
+artifacts (banners, signatures, boilerplate), then produces cleaned chunks with
+attached metadata for downstream embedding and storage.
 """
 
 import re
@@ -24,7 +27,15 @@ from src.ingest.common.schemas import ProcessedChunk
 
 @dataclass
 class DocumentMetadata:
-    """Metadata extracted from a document."""
+    """Metadata extracted from a document.
+
+    Attributes:
+        source: Source identifier (e.g., filename).
+        title: Optional title extracted from a header block.
+        author: Optional author/owner extracted from a header block.
+        date: Optional date string extracted from a header block.
+        tags: Optional list of tags extracted from a header block.
+    """
     source: str = "unknown"
     title: Optional[str] = None
     author: Optional[str] = None
@@ -107,7 +118,14 @@ _BOILERPLATE_PATTERNS = [
 
 
 def strip_boilerplate(text: str) -> str:
-    """Remove headers, footers, email boilerplate, and other non-content noise."""
+    """Remove headers, footers, email boilerplate, and other non-content noise.
+
+    Args:
+        text: Input text to clean.
+
+    Returns:
+        Text with boilerplate patterns removed.
+    """
     for pattern in _BOILERPLATE_PATTERNS:
         text = pattern.sub("", text)
     return text
@@ -129,7 +147,14 @@ _UNICODE_REPLACEMENTS = {
 
 
 def normalize_unicode(text: str) -> str:
-    """Replace smart quotes, fancy dashes, and other typographic chars with ASCII equivalents."""
+    """Normalize typographic unicode characters to simpler equivalents.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        Text with common typographic characters replaced and NFC-normalized.
+    """
     for char, replacement in _UNICODE_REPLACEMENTS.items():
         text = text.replace(char, replacement)
     # Normalize remaining unicode to NFC form
@@ -138,7 +163,14 @@ def normalize_unicode(text: str) -> str:
 
 
 def clean_whitespace(text: str) -> str:
-    """Collapse excessive whitespace while preserving paragraph structure."""
+    """Collapse excessive whitespace while preserving paragraph structure.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        Cleaned text with normalized whitespace and paragraph breaks.
+    """
     # Replace tabs with spaces
     text = text.replace("\t", " ")
     # Collapse multiple spaces within lines to single space
@@ -151,7 +183,14 @@ def clean_whitespace(text: str) -> str:
 
 
 def strip_section_markers(text: str) -> str:
-    """Normalize markdown/wiki section headers to plain text with the heading preserved."""
+    """Normalize markdown/wiki section headers to plain text.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        Text with header markers removed while preserving heading text.
+    """
     # Markdown headers: ## Heading -> Heading
     text = re.sub(r"^\s*#{1,6}\s+", "", text, flags=re.MULTILINE)
     # Wiki-style headers: == Heading == -> Heading
@@ -168,7 +207,15 @@ def strip_section_markers(text: str) -> str:
 
 
 def strip_trailing_short_lines(text: str, max_words: int = 4) -> str:
-    """Remove very short trailing lines (likely signature/name remnants)."""
+    """Remove very short trailing lines (likely signature/name remnants).
+
+    Args:
+        text: Input text.
+        max_words: Maximum words allowed for a line to be considered "short".
+
+    Returns:
+        Text with short trailing lines removed (best effort).
+    """
     lines = text.rstrip().split("\n")
     while lines and len(lines[-1].split()) <= max_words and not lines[-1].strip() == "":
         # Don't strip if it looks like a real sentence ending
@@ -180,7 +227,14 @@ def strip_trailing_short_lines(text: str, max_words: int = 4) -> str:
 
 
 def clean_text(text: str) -> str:
-    """Full text cleaning pipeline."""
+    """Run the full text cleaning pipeline.
+
+    Args:
+        text: Raw text.
+
+    Returns:
+        Cleaned text.
+    """
     text = strip_boilerplate(text)
     text = normalize_unicode(text)
     text = clean_whitespace(text)
@@ -203,8 +257,12 @@ _METADATA_KV_PATTERN = re.compile(
 def extract_metadata(raw_text: str, source: str) -> DocumentMetadata:
     """Extract structured metadata from the raw document text (before cleaning).
 
-    Scans for key-value pairs like Title:, Author:, Date:, Tags: in the
-    original text.
+    Args:
+        raw_text: Raw document text (including headers/boilerplate).
+        source: Source identifier (e.g., filename) used for defaults.
+
+    Returns:
+        Extracted `DocumentMetadata`.
     """
     metadata = DocumentMetadata(source=source)
 
@@ -225,7 +283,14 @@ def extract_metadata(raw_text: str, source: str) -> DocumentMetadata:
 
 
 def metadata_to_dict(meta: DocumentMetadata) -> dict:
-    """Convert DocumentMetadata to a flat dict for storage."""
+    """Convert `DocumentMetadata` to a flat dict for storage.
+
+    Args:
+        meta: Metadata object.
+
+    Returns:
+        Flat dictionary suitable for attaching to chunk metadata.
+    """
     d = {"source": meta.source, "tenant_id": DEFAULT_TENANT_ID}
     if meta.title:
         d["title"] = meta.title
@@ -245,7 +310,16 @@ def chunk_text(
     chunk_size: int = CHUNK_SIZE,
     chunk_overlap: int = CHUNK_OVERLAP,
 ) -> List[str]:
-    """Split text into overlapping chunks using recursive character splitting."""
+    """Split text into overlapping chunks using recursive character splitting.
+
+    Args:
+        text: Cleaned text to split.
+        chunk_size: Target maximum chunk size in characters.
+        chunk_overlap: Overlap between consecutive chunks in characters.
+
+    Returns:
+        List of chunk strings.
+    """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,

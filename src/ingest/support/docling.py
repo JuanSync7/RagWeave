@@ -1,4 +1,14 @@
-"""Docling integration for stage-2 ingestion parsing."""
+ # @summary
+ # Docling integration for ingestion parsing into markdown.
+ # Exports: DoclingParseResult, warmup_docling_models, ensure_docling_ready, parse_with_docling
+ # Deps: dataclasses, pathlib, typing
+ # @end-summary
+"""Docling integration for ingestion parsing.
+
+This module provides a minimal adapter around Docling to parse source documents
+into markdown for downstream ingestion steps (chunking, metadata extraction,
+and optional multimodal processing).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +19,15 @@ from typing import Any
 
 @dataclass
 class DoclingParseResult:
-    """Docling parsing output normalized for ingestion nodes."""
+    """Docling parsing output normalized for ingestion nodes.
+
+    Attributes:
+        text_markdown: Parsed markdown text.
+        has_figures: Whether Docling detected any figures/pictures.
+        figures: Lightweight figure identifiers for telemetry/UI.
+        headings: Extracted heading text in document order.
+        parser_model: Parser model identifier used for telemetry/debugging.
+    """
 
     text_markdown: str
     has_figures: bool
@@ -19,7 +37,19 @@ class DoclingParseResult:
 
 
 def warmup_docling_models(*, artifacts_path: str = "") -> Path:
-    """Download and validate core Docling models used by ingestion."""
+    """Download and validate core Docling models used by ingestion.
+
+    Args:
+        artifacts_path: Optional directory to store downloaded artifacts. When
+            empty, Docling's default cache location is used.
+
+    Returns:
+        The resolved Docling model root directory.
+
+    Raises:
+        RuntimeError: If Docling's downloader is unavailable or required models
+            are missing after download.
+    """
     try:
         from docling.datamodel.pipeline_options import LayoutOptions
         from docling.models.stages.table_structure.table_structure_model import (
@@ -68,7 +98,20 @@ def ensure_docling_ready(
     artifacts_path: str = "",
     auto_download: bool = True,
 ) -> None:
-    """Validate Docling runtime setup before ingestion starts."""
+    """Validate Docling runtime setup before ingestion starts.
+
+    This function performs a lightweight import check and, optionally, ensures
+    the required models are present by triggering a download.
+
+    Args:
+        parser_model: Parser model identifier used for telemetry and validation.
+        artifacts_path: Optional directory containing Docling artifacts.
+        auto_download: Whether to automatically download missing artifacts.
+
+    Raises:
+        RuntimeError: If Docling is unavailable, configuration is invalid, or
+            artifacts cannot be prepared.
+    """
     if not str(parser_model).strip():
         raise RuntimeError("Docling parser model is empty")
     try:
@@ -94,6 +137,14 @@ def ensure_docling_ready(
 
 
 def _extract_headings_from_markdown(text: str) -> list[str]:
+    """Extract heading text from markdown.
+
+    Args:
+        text: Markdown content.
+
+    Returns:
+        Heading text in appearance order.
+    """
     headings: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -110,7 +161,20 @@ def parse_with_docling(
     parser_model: str,
     artifacts_path: str = "",
 ) -> DoclingParseResult:
-    """Parse a source document into markdown using local Docling runtime."""
+    """Parse a source document into markdown using local Docling runtime.
+
+    Args:
+        source_path: Path to the source document to parse.
+        parser_model: Parser model identifier used for telemetry/debugging.
+        artifacts_path: Optional directory containing Docling artifacts.
+
+    Returns:
+        A normalized `DoclingParseResult`.
+
+    Raises:
+        RuntimeError: If Docling is unavailable, conversion fails, or the output
+            is empty/unsupported.
+    """
     try:
         # Import lazily to keep module import cheap and explicit.
         from docling.document_converter import DocumentConverter
