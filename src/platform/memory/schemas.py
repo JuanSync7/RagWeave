@@ -1,4 +1,8 @@
-"""Schema contracts for conversation memory persistence and context building."""
+"""Schema contracts for conversation memory persistence and context building.
+
+These dataclasses define the stored conversation turn format and the assembled
+memory context injected into prompts.
+"""
 
 from __future__ import annotations
 

@@ -4,7 +4,12 @@
 # Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
 # @end-summary
 
-"""Shared ingestion pipeline types and defaults."""
+"""Shared ingestion pipeline types, configuration, and state contracts.
+
+This module defines the ingestion pipeline's primary configuration dataclass,
+runtime dependency container, and the shared LangGraph state schema used across
+pipeline nodes.
+"""
 
 from __future__ import annotations
 
@@ -136,7 +141,13 @@ class IngestionConfig:
 
 @dataclass
 class IngestionDesignCheck:
-    """Validation report for ingestion configuration design constraints."""
+    """Validation report for ingestion configuration design constraints.
+
+    Attributes:
+        ok: Whether the configuration passed validation.
+        errors: Human-readable errors that should fail fast.
+        warnings: Non-fatal issues that may affect quality or performance.
+    """
     ok: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -144,7 +155,17 @@ class IngestionDesignCheck:
 
 @dataclass
 class IngestionRunSummary:
-    """Result summary for a directory-level ingestion run."""
+    """Result summary for a directory-level ingestion run.
+
+    Attributes:
+        processed: Number of sources processed (including those later failed).
+        skipped: Number of sources skipped due to idempotency checks.
+        failed: Number of sources that failed during processing.
+        stored_chunks: Total number of chunks successfully stored.
+        removed_sources: Number of sources removed from storage (when applicable).
+        errors: Human-readable error messages for failures.
+        design_warnings: Non-fatal configuration warnings surfaced during the run.
+    """
     processed: int
     skipped: int
     failed: int
@@ -156,7 +177,14 @@ class IngestionRunSummary:
 
 @dataclass
 class Runtime:
-    """Runtime container holding expensive shared ingestion dependencies."""
+    """Runtime container holding expensive shared ingestion dependencies.
+
+    Attributes:
+        config: Effective ingestion configuration.
+        embedder: Embedding model wrapper used by storage stages.
+        weaviate_client: Client used for vector and (optionally) metadata storage.
+        kg_builder: Optional knowledge graph builder used by KG stages.
+    """
     config: IngestionConfig
     embedder: LocalBGEEmbeddings
     weaviate_client: Any
@@ -164,7 +192,11 @@ class Runtime:
 
 
 class IngestState(TypedDict):
-    """LangGraph state schema shared across ingestion pipeline nodes."""
+    """LangGraph state schema shared across ingestion pipeline nodes.
+
+    The ingestion pipeline uses a shared mutable state object that is passed
+    between nodes. Keys are populated progressively as stages complete.
+    """
     source_path: str
     source_name: str
     source_uri: str

@@ -3,7 +3,14 @@
 # Exports: PIIDetector, PIIDetection
 # Deps: re, logging, dataclasses, presidio_analyzer (optional), presidio_anonymizer (optional)
 # @end-summary
-"""PII detection and redaction rail (REQ-301 through REQ-305)."""
+"""PII detection and redaction rail.
+
+This module detects potentially sensitive user-provided content (PII) and can
+redact it using type-tagged placeholders. When available, it uses Presidio NLP
+for entity recognition; otherwise it falls back to deterministic regex checks.
+
+Requirements references (from internal docs): REQ-301 through REQ-305.
+"""
 
 from __future__ import annotations
 
@@ -51,7 +58,14 @@ _EXTENDED_PRESIDIO_ENTITIES = _DEFAULT_PRESIDIO_ENTITIES + [
 
 @dataclass
 class PIIDetection:
-    """A single PII detection."""
+    """A single PII detection.
+
+    Attributes:
+        pii_type: Detected entity type label.
+        start: Start offset (inclusive) in the original text.
+        end: End offset (exclusive) in the original text.
+        placeholder: Replacement string to use during redaction.
+    """
 
     pii_type: str
     start: int
@@ -75,6 +89,14 @@ class PIIDetector:
         extended: bool = False,
         score_threshold: float = 0.4,
     ) -> None:
+        """Initialize a PII detector.
+
+        Args:
+            extended: Whether to enable extended entity types/patterns beyond
+                core categories (email/phone/SSN).
+            score_threshold: Minimum confidence score for NLP detections when
+                using Presidio.
+        """
         self._extended = extended
         self._score_threshold = score_threshold
         self._presidio_analyzer = None
@@ -104,12 +126,18 @@ class PIIDetector:
             )
 
     def _init_presidio(self) -> None:
-        """Initialize Presidio analyzer and anonymizer engines."""
+        """Initialize Presidio analyzer and anonymizer engines.
+
+        Raises:
+            ImportError: If Presidio dependencies are not installed.
+            RuntimeError: If the required spaCy model is unavailable.
+        """
         from presidio_analyzer import AnalyzerEngine
         from presidio_analyzer.nlp_engine import NlpEngineProvider
         from presidio_anonymizer import AnonymizerEngine
 
         import spacy
+
         if not spacy.util.is_package("en_core_web_lg"):
             raise RuntimeError(
                 "spacy model en_core_web_lg not installed "
@@ -130,13 +158,28 @@ class PIIDetector:
         self._presidio_anonymizer = AnonymizerEngine()
 
     def detect(self, text: str) -> List[PIIDetection]:
-        """Find all PII occurrences in text."""
+        """Find all PII occurrences in text.
+
+        Args:
+            text: Input text to scan.
+
+        Returns:
+            List of `PIIDetection` objects sorted in reverse positional order
+            (safe for in-place string replacement).
+        """
         if self._use_presidio:
             return self._detect_presidio(text)
         return self._detect_regex(text)
 
     def _detect_presidio(self, text: str) -> List[PIIDetection]:
-        """NLP-based detection via Presidio."""
+        """Detect PII using Presidio NLP.
+
+        Args:
+            text: Input text to scan.
+
+        Returns:
+            Reverse-sorted list of detections for safe replacement.
+        """
         results = self._presidio_analyzer.analyze(
             text=text,
             language="en",
@@ -156,7 +199,14 @@ class PIIDetector:
         return detections
 
     def _detect_regex(self, text: str) -> List[PIIDetection]:
-        """Regex fallback detection."""
+        """Detect PII using regex fallback patterns.
+
+        Args:
+            text: Input text to scan.
+
+        Returns:
+            Reverse-sorted list of detections for safe replacement.
+        """
         detections: List[PIIDetection] = []
         for pii_type, pattern in self._regex_patterns.items():
             for match in pattern.finditer(text):
@@ -176,6 +226,12 @@ class PIIDetector:
 
         Replaces PII with type-tagged placeholders (e.g., [EMAIL_ADDRESS_REDACTED]).
         Logs detection type and count only — never logs actual PII values (REQ-305).
+
+        Args:
+            text: Input text to scan and redact.
+
+        Returns:
+            Tuple of `(redacted_text, detections)`.
         """
         detections = self.detect(text)
         redacted = text

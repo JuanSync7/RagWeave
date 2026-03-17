@@ -21,6 +21,8 @@ _OPERATION_REGISTRY: Dict[str, Callable[[], object]] = {}
 
 @dataclass(frozen=True)
 class TemporalPayload:
+    """Wire payload for Temporal retry workflow execution."""
+
     operation_name: str
     idempotency_key: Optional[str]
     max_attempts: int
@@ -29,7 +31,12 @@ class TemporalPayload:
 
 
 def register_temporal_operation(name: str, fn: Callable[[], object]) -> None:
-    """Register operation callbacks for Temporal worker activity execution."""
+    """Register an operation callback for Temporal worker activity execution.
+
+    Args:
+        name: Operation name used to look up the callback.
+        fn: Callback invoked by the worker to perform the operation.
+    """
     _OPERATION_REGISTRY[name] = fn
 
 
@@ -37,6 +44,11 @@ class TemporalRetryProvider(RetryProvider):
     """Retry provider delegating operations to Temporal workflow execution."""
 
     def __init__(self):
+        """Create a Temporal-backed retry provider.
+
+        Raises:
+            ImportError: If the Temporal SDK is not installed.
+        """
         try:
             import temporalio  # noqa: F401
         except ImportError as exc:  # pragma: no cover
@@ -53,6 +65,17 @@ class TemporalRetryProvider(RetryProvider):
         policy: Optional[RetryPolicy] = None,
         idempotency_key: Optional[str] = None,
     ) -> T:
+        """Execute an operation via Temporal if available, otherwise locally.
+
+        Args:
+            operation_name: Operation name for registry and workflow id.
+            fn: Callable to execute.
+            policy: Optional retry policy override.
+            idempotency_key: Optional idempotency key for workflow id.
+
+        Returns:
+            The return value of `fn`.
+        """
         policy = policy or RetryPolicy()
         register_temporal_operation(operation_name, fn)
 

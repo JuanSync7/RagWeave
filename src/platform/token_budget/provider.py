@@ -42,7 +42,14 @@ _cached_capabilities: ModelCapabilities | None = None
 
 
 def _fetch_via_litellm(model: str) -> Optional[Dict[str, Any]]:
-    """Try litellm.get_model_info() for known model metadata."""
+    """Fetch model metadata via LiteLLM if available.
+
+    Args:
+        model: LiteLLM model string.
+
+    Returns:
+        Model info dict if available; otherwise None.
+    """
     try:
         import litellm
         info = litellm.get_model_info(model=model)
@@ -56,7 +63,15 @@ def _fetch_via_litellm(model: str) -> Optional[Dict[str, Any]]:
 def _fetch_via_ollama(
     model_name: str, base_url: str
 ) -> Optional[Dict[str, Any]]:
-    """Fetch model info from Ollama /api/show endpoint."""
+    """Fetch model info from Ollama `/api/show`.
+
+    Args:
+        model_name: LiteLLM model string (may include `ollama/` prefix).
+        base_url: Ollama base URL.
+
+    Returns:
+        Parsed JSON payload if successful; otherwise None.
+    """
     # Strip the "ollama/" prefix if present for the Ollama API
     ollama_model = model_name.removeprefix("ollama/")
     try:
@@ -84,6 +99,13 @@ def fetch_model_capabilities(
     1. ``litellm.get_model_info()`` — works for known cloud & open-weight models.
     2. Ollama ``/api/show`` — works for locally-pulled Ollama models.
     3. Default fallback (``TOKEN_BUDGET_DEFAULT_CONTEXT_LENGTH``).
+    Args:
+        model_name: Optional model override.
+        base_url: Optional base URL override (used for Ollama fallback).
+        default_context_length: Optional default fallback context length.
+
+    Returns:
+        Discovered `ModelCapabilities`. `stale=True` indicates a fallback path.
     """
     model = model_name or LLM_MODEL
     url = base_url or LLM_API_BASE
@@ -150,7 +172,11 @@ def fetch_model_capabilities(
 
 
 def get_capabilities() -> ModelCapabilities:
-    """Return cached model capabilities, fetching on first call."""
+    """Return cached model capabilities, fetching on first call.
+
+    Returns:
+        Cached `ModelCapabilities`.
+    """
     global _cached_capabilities
     if _cached_capabilities is None:
         _cached_capabilities = fetch_model_capabilities()
@@ -158,7 +184,11 @@ def get_capabilities() -> ModelCapabilities:
 
 
 def refresh_capabilities() -> ModelCapabilities:
-    """Re-fetch model capabilities and update the cache."""
+    """Re-fetch model capabilities and update the cache.
+
+    Returns:
+        Fresh `ModelCapabilities`.
+    """
     global _cached_capabilities
     _cached_capabilities = fetch_model_capabilities()
     return _cached_capabilities

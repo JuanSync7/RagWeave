@@ -3,7 +3,15 @@
 # Exports: ManifestEntry, SourceIdentity, ProcessedChunk
 # Deps: typing, dataclasses
 # @end-summary
-"""Typed schema contracts shared by ingestion modules."""
+"""Shared schema contracts for ingestion.
+
+This module defines lightweight, stable contracts that are used across the
+ingestion pipeline to represent:
+
+- The persisted ingestion manifest entries (per source key)
+- Source discovery identity payloads
+- Processed text chunks ready for embedding/storage
+"""
 
 from __future__ import annotations
 
@@ -12,7 +20,14 @@ from typing import TypedDict
 
 
 class ManifestEntry(TypedDict, total=False):
-    """Canonical manifest entry persisted for each source key."""
+    """Canonical manifest entry persisted for each source key.
+
+    The manifest is the primary mechanism for supporting idempotent and
+    incremental ingestion across runs.
+
+    Keys are optional to allow partial persistence and forward-compatible
+    extensions.
+    """
 
     source: str
     source_uri: str
@@ -43,7 +58,13 @@ class SourceIdentity(TypedDict):
 
 @dataclass
 class ProcessedChunk:
-    """A processed document chunk ready for embedding."""
+    """A processed document chunk ready for embedding.
+
+    Attributes:
+        text: Normalized chunk text suitable for embedding.
+        metadata: Arbitrary metadata for retrieval attribution (e.g., source
+            path, page number, headings).
+    """
 
     text: str
     metadata: dict = field(default_factory=dict)

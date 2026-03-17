@@ -3,7 +3,15 @@
 # Exports: IntentClassifier, IntentResult
 # Deps: src.guardrails.runtime, config.settings, logging, re
 # @end-summary
-"""Canonical intent classification rail (REQ-101 through REQ-105)."""
+"""Canonical intent classification rail.
+
+This module classifies user queries into a small set of canonical intents used
+to route requests (e.g., distinguish "rag_search" from greetings/off-topic).
+It prefers NeMo Guardrails when available and falls back to deterministic
+keyword matching when the runtime is disabled or unavailable.
+
+Requirements references (from internal docs): REQ-101 through REQ-105.
+"""
 
 from __future__ import annotations
 
@@ -45,7 +53,13 @@ INTENT_RESPONSES = {
 
 @dataclass
 class IntentResult:
-    """Result of intent classification."""
+    """Result of intent classification.
+
+    Attributes:
+        intent: Intent label (e.g., "rag_search", "greeting").
+        confidence: Confidence score in the chosen intent.
+        canned_response: Optional canned response text for non-search intents.
+    """
 
     intent: str
     confidence: float
@@ -59,13 +73,24 @@ class IntentClassifier:
     """
 
     def __init__(self, confidence_threshold: float = 0.5) -> None:
+        """Initialize an intent classifier.
+
+        Args:
+            confidence_threshold: Minimum confidence for model-based intent
+                selection. This is primarily reserved for future expansion;
+                the current implementation returns fixed confidences.
+        """
         self._confidence_threshold = confidence_threshold
 
     def classify(self, query: str) -> IntentResult:
         """Classify a query into a canonical intent.
 
-        Returns IntentResult with intent label, confidence, and optional
-        canned response for non-search intents.
+        Args:
+            query: User input query text.
+
+        Returns:
+            `IntentResult` with intent label, confidence, and optional canned
+            response for non-search intents.
         """
         # Try NeMo-based classification if runtime is available
         runtime = GuardrailsRuntime.get()
@@ -73,13 +98,23 @@ class IntentClassifier:
             try:
                 return self._classify_with_nemo(query, runtime)
             except Exception as e:
-                logger.warning("NeMo intent classification failed: %s — using fallback", e)
+                logger.warning(
+                    "NeMo intent classification failed: %s — using fallback", e
+                )
 
         # Deterministic keyword fallback
         return self._classify_with_keywords(query)
 
     def _classify_with_nemo(self, query: str, runtime: GuardrailsRuntime) -> IntentResult:
-        """Use NeMo runtime for intent classification."""
+        """Classify intent using the NeMo runtime.
+
+        Args:
+            query: User input query text.
+            runtime: Initialized `GuardrailsRuntime` instance.
+
+        Returns:
+            `IntentResult` derived from NeMo's response behavior.
+        """
         import asyncio
 
         messages = [{"role": "user", "content": query}]
@@ -112,7 +147,14 @@ class IntentClassifier:
         return IntentResult(intent="rag_search", confidence=0.85)
 
     def _classify_with_keywords(self, query: str) -> IntentResult:
-        """Deterministic keyword-based intent classification."""
+        """Classify intent using deterministic keyword patterns.
+
+        Args:
+            query: User input query text.
+
+        Returns:
+            `IntentResult` from keyword matching, defaulting to "rag_search".
+        """
         if _GREETING_PATTERNS.search(query):
             return IntentResult(
                 intent="greeting",

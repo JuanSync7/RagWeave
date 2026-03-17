@@ -3,7 +3,15 @@
 # Exports: ToxicityFilter, ToxicityResult
 # Deps: src.guardrails.runtime, config.settings, logging, re
 # @end-summary
-"""Toxicity filtering rail (REQ-401 through REQ-404)."""
+"""Toxicity filtering rail.
+
+This module rejects unsafe/toxic input and can filter unsafe output. It prefers
+an LLM-driven "self-check" prompt (NeMo-style yes/no classification) when the
+guardrails runtime is available, and otherwise falls back to deterministic
+keyword patterns.
+
+Requirements references (from internal docs): REQ-401 through REQ-404.
+"""
 
 from __future__ import annotations
 
@@ -55,7 +63,10 @@ Is this response safe? Respond with "yes" if safe, "no" if unsafe. Output only "
 
 # Keyword-based fallback for deterministic detection when LLM is unavailable.
 _TOXIC_KEYWORD_PATTERNS = [
-    re.compile(r"\b(?:kill|murder|attack|bomb|shoot)\s+(?:you|them|people|everyone)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:kill|murder|attack|bomb|shoot)\s+(?:you|them|people|everyone)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b(?:hate|despise)\s+(?:all|every)\s+\w+\b", re.IGNORECASE),
     re.compile(r"\b(?:die|death\s+to)\b", re.IGNORECASE),
 ]
@@ -63,7 +74,13 @@ _TOXIC_KEYWORD_PATTERNS = [
 
 @dataclass
 class ToxicityResult:
-    """Result of toxicity detection."""
+    """Result of toxicity detection.
+
+    Attributes:
+        verdict: PASS/REJECT/MODIFY verdict.
+        score: Optional normalized score in \([0.0, 1.0]\) when available.
+        message: Optional human-facing message for rejections.
+    """
 
     verdict: RailVerdict
     score: float = 0.0
@@ -80,10 +97,23 @@ class ToxicityFilter:
     """
 
     def __init__(self, threshold: float = 0.5) -> None:
+        """Initialize a toxicity filter.
+
+        Args:
+            threshold: Threshold used when parsing numeric toxicity scores from
+                legacy/JSON responses.
+        """
         self._threshold = threshold
 
     def check(self, text: str) -> ToxicityResult:
-        """Check text for toxic content (input direction)."""
+        """Check text for toxic content (input direction).
+
+        Args:
+            text: Input text to classify.
+
+        Returns:
+            `ToxicityResult` containing the verdict and optional metadata.
+        """
         # Try NeMo self-check approach first
         runtime = GuardrailsRuntime.get()
         if runtime.initialized and runtime.rails is not None:
@@ -96,7 +126,15 @@ class ToxicityFilter:
         return self._check_with_keywords(text)
 
     def _self_check(self, text: str, direction: str = "input") -> ToxicityResult:
-        """Use NeMo-style self-check prompt for safety classification."""
+        """Run NeMo-style self-check prompt for safety classification.
+
+        Args:
+            text: Input text to classify.
+            direction: "input" or "output" to select the prompt template.
+
+        Returns:
+            `ToxicityResult` derived from yes/no (or legacy JSON) response.
+        """
         if direction == "output":
             prompt = _SELF_CHECK_OUTPUT_PROMPT.format(text=text)
         else:
@@ -139,7 +177,14 @@ class ToxicityFilter:
         return ToxicityResult(verdict=RailVerdict.PASS, score=0.0)
 
     def _check_with_keywords(self, text: str) -> ToxicityResult:
-        """Deterministic keyword-based toxicity detection."""
+        """Detect toxic content using deterministic keyword patterns.
+
+        Args:
+            text: Input text to scan.
+
+        Returns:
+            `ToxicityResult` indicating whether any pattern matched.
+        """
         for pattern in _TOXIC_KEYWORD_PATTERNS:
             if pattern.search(text):
                 logger.info("Toxicity detected via keyword pattern")
@@ -151,7 +196,14 @@ class ToxicityFilter:
         return ToxicityResult(verdict=RailVerdict.PASS, score=0.0)
 
     def filter_output(self, text: str) -> str:
-        """Filter toxic content from output text, replacing with placeholder."""
+        """Filter toxic content from output text, replacing with placeholder.
+
+        Args:
+            text: Output text to filter.
+
+        Returns:
+            Original text if safe, otherwise a placeholder string.
+        """
         # Use output-direction self-check
         runtime = GuardrailsRuntime.get()
         if runtime.initialized and runtime.rails is not None:

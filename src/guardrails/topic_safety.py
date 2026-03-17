@@ -4,7 +4,14 @@
 # Exports: TopicSafetyChecker, TopicSafetyResult
 # Deps: src.guardrails.runtime, logging
 # @end-summary
-"""Topic safety rail for off-topic query detection (REQ-106)."""
+"""Topic safety rail for off-topic query detection.
+
+This module uses an LLM-based classifier prompt to decide whether a request is
+on-topic for the configured knowledge base. When the guardrails runtime is not
+available, it fails open and lets upstream intent routing handle basics.
+
+Requirements references (from internal docs): REQ-106.
+"""
 
 from __future__ import annotations
 
@@ -48,7 +55,13 @@ REJECTION_MESSAGE = (
 
 @dataclass
 class TopicSafetyResult:
-    """Result of topic safety classification."""
+    """Result of topic safety classification.
+
+    Attributes:
+        verdict: PASS/REJECT/MODIFY verdict.
+        on_topic: Whether the query is classified as on-topic.
+        message: Optional human-facing message for rejections.
+    """
 
     verdict: RailVerdict
     on_topic: bool
@@ -69,12 +82,25 @@ class TopicSafetyChecker:
         self,
         custom_instructions: str = "",
     ) -> None:
+        """Initialize a topic safety checker.
+
+        Args:
+            custom_instructions: Additional prompt instructions to refine the
+                on-topic definition for a specific deployment/domain.
+        """
         self._system_prompt = _DEFAULT_TOPIC_PROMPT.format(
             custom_instructions=custom_instructions,
         )
 
     def check(self, query: str) -> TopicSafetyResult:
-        """Check if a query is on-topic for the knowledge base."""
+        """Check if a query is on-topic for the knowledge base.
+
+        Args:
+            query: User input query text.
+
+        Returns:
+            `TopicSafetyResult` indicating whether the query is on-topic.
+        """
         runtime = GuardrailsRuntime.get()
         if runtime.initialized and runtime.rails is not None:
             try:
@@ -89,7 +115,15 @@ class TopicSafetyChecker:
         )
 
     def _check_with_llm(self, query: str) -> TopicSafetyResult:
-        """Use LLM for topic classification."""
+        """Classify topic using an LLM prompt.
+
+        Args:
+            query: User input query text.
+
+        Returns:
+            `TopicSafetyResult` derived from the LLM's "on-topic"/"off-topic"
+            response.
+        """
         from src.retrieval.query_processor import _call_ollama
 
         result = _call_ollama(

@@ -1,4 +1,12 @@
-"""Observability contracts used by the pipeline."""
+# @summary
+# Observability contracts (Span, Tracer) used across pipeline components.
+# Exports: Span, Tracer
+# Deps: abc, src.platform.schemas.observability
+# @end-summary
+"""Observability contracts used by the pipeline.
+
+Defines the minimal tracing interfaces implemented by observability providers.
+"""
 
 from abc import ABC, abstractmethod
 from typing import Optional

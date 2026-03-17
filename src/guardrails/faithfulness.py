@@ -4,7 +4,15 @@
 # Exports: FaithfulnessChecker, FaithfulnessResult, ClaimScore
 # Deps: config.settings, logging, re, json
 # @end-summary
-"""Faithfulness and hallucination detection rail (REQ-501 through REQ-505)."""
+"""Faithfulness and hallucination detection rail.
+
+This module evaluates whether a generated answer is supported by the retrieved
+context. It uses NeMo-style self-check prompts and optional claim-level scoring,
+plus a lightweight deterministic check for obvious hallucinations (e.g., years
+or large numbers not present in evidence).
+
+Requirements references (from internal docs): REQ-501 through REQ-505.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +28,14 @@ logger = logging.getLogger("rag.guardrails.faithfulness")
 
 
 def _format_numbered_chunks(chunks: List[str]) -> str:
-    """Format context chunks as numbered evidence text."""
+    """Format context chunks as numbered evidence text.
+
+    Args:
+        chunks: Context chunks to format.
+
+    Returns:
+        Evidence string with stable numeric prefixes (e.g., ``[1] ...``).
+    """
     return "\n\n".join(f"[{i + 1}] {chunk}" for i, chunk in enumerate(chunks))
 
 # NeMo-style self-check-facts prompt (adapted from NeMo's built-in task)
@@ -62,7 +77,13 @@ _FALLBACK_MESSAGE = (
 
 @dataclass
 class ClaimScore:
-    """Faithfulness score for a single claim."""
+    """Faithfulness score for a single claim.
+
+    Attributes:
+        claim: Claim text (typically a sentence from the answer).
+        score: Score in \([0.0, 1.0]\) measuring support by context.
+        supported: Boolean support flag (typically derived from a threshold).
+    """
 
     claim: str
     score: float
@@ -71,7 +92,16 @@ class ClaimScore:
 
 @dataclass
 class FaithfulnessResult:
-    """Result of faithfulness evaluation."""
+    """Result of faithfulness evaluation.
+
+    Attributes:
+        overall_score: Overall support score in \([0.0, 1.0]\).
+        verdict: PASS/REJECT/MODIFY verdict derived from policy.
+        warning: Whether to warn while still allowing the answer.
+        claim_scores: Optional per-claim breakdown.
+        hallucinated_entities: Lightweight hallucination signals (e.g., years/numbers).
+        fallback_message: Optional canned fallback message for rejection flows.
+    """
 
     overall_score: float
     verdict: RailVerdict
@@ -99,6 +129,15 @@ class FaithfulnessChecker:
         action: str = "flag",
         use_self_check: bool = True,
     ) -> None:
+        """Initialize a faithfulness checker.
+
+        Args:
+            threshold: Minimum overall score required to consider the answer
+                faithful.
+            action: Behavior when below threshold ("reject" or "flag").
+            use_self_check: Whether to run a quick self-check prompt in
+                addition to claim scoring.
+        """
         self._threshold = threshold
         self._action = action  # "reject" or "flag"
         self._use_self_check = use_self_check
@@ -111,6 +150,14 @@ class FaithfulnessChecker:
         """Evaluate faithfulness of answer against context.
 
         Uses the same context chunks that were passed to the generator (REQ-504).
+
+        Args:
+            answer: Generated answer text to evaluate.
+            context_chunks: Evidence context chunks used for the generation.
+
+        Returns:
+            `FaithfulnessResult` containing overall score, verdict, and optional
+            breakdown.
         """
         if not answer or not context_chunks:
             return FaithfulnessResult(
@@ -179,10 +226,17 @@ class FaithfulnessChecker:
     def _self_check_facts(
         self, answer: str, formatted_context: str
     ) -> Optional[float]:
-        """NeMo self-check-facts: quick overall faithfulness score.
+        """Compute a quick overall faithfulness score via self-check-facts.
 
         Adapted from NeMo's SelfCheckFactsAction — uses the evidence/hypothesis
         prompt format for a single 0.0-1.0 score.
+
+        Args:
+            answer: Answer text to evaluate as the hypothesis.
+            formatted_context: Evidence text formatted for the prompt.
+
+        Returns:
+            Score in \([0.0, 1.0]\) if available, otherwise None.
         """
         prompt = _SELF_CHECK_FACTS_PROMPT.format(
             evidence=formatted_context,
@@ -194,7 +248,10 @@ class FaithfulnessChecker:
 
             response = _call_ollama(
                 prompt,
-                system="You are a faithfulness evaluator. Output only a number between 0.0 and 1.0.",
+                system=(
+                    "You are a faithfulness evaluator. Output only a number "
+                    "between 0.0 and 1.0."
+                ),
             )
             if response:
                 # Try to extract a float from the response
@@ -214,7 +271,15 @@ class FaithfulnessChecker:
     def _score_claims(
         self, answer: str, formatted_context: str
     ) -> List[ClaimScore]:
-        """Use LLM to score each claim against context."""
+        """Use an LLM to score each claim against context.
+
+        Args:
+            answer: Answer text to score.
+            formatted_context: Evidence text formatted for the prompt.
+
+        Returns:
+            List of `ClaimScore` objects. Returns an empty list on failure.
+        """
         prompt = _CLAIM_SCORING_PROMPT.format(
             context=formatted_context, answer=answer
         )
@@ -263,6 +328,13 @@ class FaithfulnessChecker:
         """Check for entities/dates/numbers in answer not in any context chunk.
 
         Lightweight deterministic check — no LLM needed (REQ-505).
+
+        Args:
+            answer: Answer text to scan.
+            context_chunks: Evidence chunks to compare against.
+
+        Returns:
+            List of lightweight hallucination signals (e.g., ``year:2024``).
         """
         context_text = " ".join(context_chunks).lower()
         hallucinated: List[str] = []

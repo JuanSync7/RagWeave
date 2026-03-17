@@ -4,7 +4,11 @@
 # Deps: difflib, logging, re, src.ingest.common.types
 # @end-summary
 
-"""Shared helpers for ingestion pipeline nodes."""
+"""Shared helpers for ingestion pipeline nodes.
+
+These helpers provide lightweight fallbacks for metadata extraction and support
+consistent provenance and stage logging across ingestion nodes.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +21,15 @@ from src.ingest.common.types import IngestState
 logger = logging.getLogger("rag.ingest.pipeline.stage")
 
 def _extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
-    """Extract frequent keyword candidates when LLM metadata is unavailable."""
+    """Extract frequent keyword candidates when LLM metadata is unavailable.
+
+    Args:
+        text: Input text to analyze.
+        max_keywords: Maximum number of keywords to return.
+
+    Returns:
+        A list of lowercase keyword candidates sorted by descending frequency.
+    """
     words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", text.lower())
     freq: dict[str, int] = {}
     for word in words:
@@ -27,7 +39,14 @@ def _extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
 
 
 def _cross_refs(text: str) -> list[dict[str, str]]:
-    """Extract simple cross-reference patterns from source text."""
+    """Extract simple cross-reference patterns from source text.
+
+    Args:
+        text: Source text.
+
+    Returns:
+        A list of reference dictionaries with ``type`` and ``value`` keys.
+    """
     refs: list[dict[str, str]] = []
     patterns = [
         (r"\bDOC-\d{2,}\b", "document_id"),
@@ -41,14 +60,32 @@ def _cross_refs(text: str) -> list[dict[str, str]]:
 
 
 def _quality_score(text: str) -> float:
-    """Compute heuristic quality score for a chunk."""
+    """Compute heuristic quality score for a chunk.
+
+    Args:
+        text: Chunk text.
+
+    Returns:
+        A score in \(0.0, 1.0\] where higher implies "more complete" content.
+    """
     score = 0.4 + (0.2 if len(text) >= 120 else 0)
     score += min(0.2, len(re.findall(r"\d", text)) * 0.01)
     return min(1.0, score)
 
 
 def append_processing_log(state: IngestState, message: str) -> list[str]:
-    """Append a stage status message to the processing log."""
+    """Append a stage status message to the processing log.
+
+    When verbose stage logging is enabled, the message is also emitted to the
+    stage logger.
+
+    Args:
+        state: Ingestion pipeline state.
+        message: Message to append.
+
+    Returns:
+        A new processing log list with the message appended.
+    """
     runtime = state.get("runtime")
     config = getattr(runtime, "config", None)
     if bool(getattr(config, "verbose_stage_logs", False)):
@@ -57,7 +94,17 @@ def append_processing_log(state: IngestState, message: str) -> list[str]:
 
 
 def _locate_span(haystack: str, needle: str, cursor: int) -> tuple[int, int, str]:
-    """Locate a text span with cursor-first exact search and fallback."""
+    """Locate a text span with cursor-first exact search and fallback.
+
+    Args:
+        haystack: Text to search within.
+        needle: Text span to locate.
+        cursor: Preferred search start offset.
+
+    Returns:
+        Tuple of ``(start, end, method)`` where ``start`` and ``end`` are
+        character offsets and ``method`` indicates the match strategy used.
+    """
     if not haystack or not needle:
         return -1, -1, "missing"
     start = haystack.find(needle, max(cursor, 0))
@@ -70,7 +117,16 @@ def _locate_span(haystack: str, needle: str, cursor: int) -> tuple[int, int, str
 
 
 def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
-    """Return best matching paragraph span and similarity score."""
+    """Return best matching paragraph span and similarity score.
+
+    Args:
+        text: Full text to search.
+        anchor: Anchor snippet to match against paragraphs.
+
+    Returns:
+        Tuple of ``(start, end, ratio)`` where ``ratio`` is a similarity score
+        in \([0.0, 1.0]\).
+    """
     if not text.strip() or not anchor.strip():
         return -1, -1, 0.0
     best_start = best_end = -1
@@ -103,7 +159,23 @@ def map_chunk_provenance(
     original_cursor: int,
     refactored_cursor: int,
 ) -> tuple[dict[str, object], int, int]:
-    """Map a chunk to refactored and original text spans with confidence."""
+    """Map a chunk to refactored and original text spans with confidence.
+
+    This function attempts exact matching first and falls back to weaker
+    heuristics (e.g., paragraph similarity) when exact mapping fails.
+
+    Args:
+        chunk_text: The chunk text to map.
+        original_text: The original extracted text prior to refactoring.
+        refactored_text: The refactored text used for chunking.
+        original_cursor: Cursor offset hint for original text to speed up search.
+        refactored_cursor: Cursor offset hint for refactored text to speed up
+            search.
+
+    Returns:
+        Tuple of ``(provenance, next_original_cursor, next_refactored_cursor)``
+        where ``provenance`` contains offsets and confidence metadata.
+    """
     ref_start, ref_end, ref_method = _locate_span(
         refactored_text,
         chunk_text,

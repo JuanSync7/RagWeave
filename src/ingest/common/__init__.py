@@ -4,7 +4,12 @@
 #          PIPELINE_NODE_NAMES, append_processing_log, sha256_path, load_manifest, save_manifest
 # Deps: src.ingest.common.schemas, src.ingest.common.utils, src.ingest.common.types, src.ingest.common.shared
 # @end-summary
-"""Common ingestion contracts, types, and utility exports."""
+"""Shared contracts and utilities for the ingestion pipeline.
+
+This package centralizes ingestion schemas, state/config types, and deterministic
+helpers that are reused across pipeline nodes. The exports in this module are
+intended to provide a stable import surface for other ingestion modules.
+"""
 
 from src.ingest.common.schemas import ManifestEntry, ProcessedChunk, SourceIdentity
 from src.ingest.common.utils import (

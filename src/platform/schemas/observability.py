@@ -1,4 +1,8 @@
-"""Typed schemas for observability payloads."""
+"""Typed schemas for observability payloads.
+
+These dataclasses define structured tracing payloads used by observability
+providers and in-memory logging/export.
+"""
 
 from dataclasses import dataclass, field
 from time import time

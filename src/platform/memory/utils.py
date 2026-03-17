@@ -1,3 +1,9 @@
+# @summary
+# Helpers for memory trimming, context formatting, token estimation, and safe text normalization.
+# Exports: now_ms, sanitize_memory_text, estimate_token_count, trim_turns_to_budget,
+#          build_context_text, summarize_heuristic
+# Deps: re, time, src.platform.memory.schemas
+# @end-summary
 """Utility helpers for memory trimming and context formatting."""
 
 from __future__ import annotations
@@ -9,11 +15,20 @@ from src.platform.memory.schemas import ConversationTurn
 
 
 def now_ms() -> int:
+    """Return current time in milliseconds since epoch."""
     return int(time.time() * 1000)
 
 
 def sanitize_memory_text(text: str, max_chars: int = 1600) -> str:
-    """Normalize whitespace and cap text length for prompt safety."""
+    """Normalize whitespace and cap text length for prompt safety.
+
+    Args:
+        text: Input text.
+        max_chars: Max characters to retain (ellipsis may be added).
+
+    Returns:
+        Cleaned, bounded text.
+    """
 
     clean = re.sub(r"\s+", " ", (text or "")).strip()
     if len(clean) <= max_chars:
@@ -22,7 +37,14 @@ def sanitize_memory_text(text: str, max_chars: int = 1600) -> str:
 
 
 def estimate_token_count(text: str) -> int:
-    """Cheap token estimate for budget checks."""
+    """Estimate token count using a cheap character heuristic.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        Estimated token count (>= 0).
+    """
 
     if not text:
         return 0
@@ -36,7 +58,16 @@ def trim_turns_to_budget(
     max_turns: int,
     max_tokens_estimate: int,
 ) -> list[ConversationTurn]:
-    """Keep newest turns bounded by count and estimated token budget."""
+    """Keep newest turns bounded by count and estimated token budget.
+
+    Args:
+        turns: Conversation turns in chronological order.
+        max_turns: Maximum number of recent turns to consider.
+        max_tokens_estimate: Estimated token budget for selected turns.
+
+    Returns:
+        Selected recent turns, oldest-to-newest.
+    """
 
     if not turns:
         return []
@@ -54,7 +85,15 @@ def trim_turns_to_budget(
 
 
 def build_context_text(summary_text: str, recent_turns: list[ConversationTurn]) -> str:
-    """Compose canonical memory context block for prompt injection."""
+    """Compose canonical memory context block for prompt injection.
+
+    Args:
+        summary_text: Rolling summary text.
+        recent_turns: Recent conversation turns.
+
+    Returns:
+        Rendered context text suitable for inclusion in a prompt.
+    """
 
     parts: list[str] = []
     if summary_text:
@@ -69,7 +108,15 @@ def build_context_text(summary_text: str, recent_turns: list[ConversationTurn]) 
 
 
 def summarize_heuristic(turns: list[ConversationTurn], max_chars: int = 1800) -> str:
-    """Fallback compact summary when LLM summarization is unavailable."""
+    """Create a heuristic compact summary when LLM summarization is unavailable.
+
+    Args:
+        turns: Conversation turns in chronological order.
+        max_chars: Max output characters.
+
+    Returns:
+        A compact summary string.
+    """
 
     if not turns:
         return ""

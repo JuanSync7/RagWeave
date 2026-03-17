@@ -3,7 +3,11 @@
 # Exports: sha256_path, load_manifest, save_manifest, read_text_with_fallbacks, parse_json_object
 # Deps: config.settings, pathlib, json, hashlib, src.common.utils
 # @end-summary
-"""Deterministic utility helpers shared across ingestion modules."""
+"""Deterministic utility helpers shared across ingestion modules.
+
+These utilities are intentionally side-effect-light and stable so they can be
+used across pipeline nodes without pulling in heavy dependencies.
+"""
 
 from __future__ import annotations
 
@@ -21,12 +25,30 @@ logger = logging.getLogger("rag.ingest.pipeline.stage")
 
 
 def sha256_path(path: Path) -> str:
-    """Compute SHA-256 digest for a file path."""
+    """Compute the SHA-256 digest for a file path.
+
+    Args:
+        path: Path to the file to hash.
+
+    Returns:
+        Lowercase hex-encoded SHA-256 digest.
+    """
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_manifest(path: Path = INGESTION_MANIFEST_PATH) -> dict[str, Any]:
-    """Load ingestion manifest JSON or return an empty manifest."""
+    """Load the ingestion manifest JSON or return an empty manifest.
+
+    If the manifest exists but cannot be parsed, the file is moved aside (best
+    effort) and an empty manifest is returned.
+
+    Args:
+        path: Manifest path on disk.
+
+    Returns:
+        Parsed manifest dictionary. Returns an empty dictionary when missing or
+        invalid.
+    """
     if not path.exists():
         return {}
     try:
@@ -48,7 +70,12 @@ def load_manifest(path: Path = INGESTION_MANIFEST_PATH) -> dict[str, Any]:
 
 
 def save_manifest(manifest: dict[str, Any], path: Path = INGESTION_MANIFEST_PATH) -> None:
-    """Persist ingestion manifest JSON to disk atomically."""
+    """Persist the ingestion manifest JSON to disk atomically.
+
+    Args:
+        manifest: Manifest payload to persist.
+        path: Manifest path on disk.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(
@@ -59,7 +86,14 @@ def save_manifest(manifest: dict[str, Any], path: Path = INGESTION_MANIFEST_PATH
 
 
 def read_text_with_fallbacks(path: Path) -> str:
-    """Read text content using fallback encodings for legacy docs."""
+    """Read text content using fallback encodings for legacy documents.
+
+    Args:
+        path: Path to a text file to read.
+
+    Returns:
+        Decoded text content. Uses replacement characters as a last resort.
+    """
     for encoding in ("utf-8", "latin-1", "cp1252"):
         try:
             return path.read_text(encoding=encoding)

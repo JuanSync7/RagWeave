@@ -1,3 +1,8 @@
+# @summary
+# Local retry provider implementation with exponential backoff.
+# Exports: LocalRetryProvider
+# Deps: logging, time, src.platform.reliability.contracts, src.platform.schemas.reliability
+# @end-summary
 """Local retry implementation with exponential backoff."""
 
 import logging
@@ -22,6 +27,20 @@ class LocalRetryProvider(RetryProvider):
         policy: Optional[RetryPolicy] = None,
         idempotency_key: Optional[str] = None,
     ) -> T:
+        """Execute an operation with retries and exponential backoff.
+
+        Args:
+            operation_name: Operation name for logging.
+            fn: Callable to execute.
+            policy: Optional retry policy override.
+            idempotency_key: Optional idempotency key for logging/correlation.
+
+        Returns:
+            The return value of `fn`.
+
+        Raises:
+            BaseException: Re-raises the last retryable exception after exhausting attempts.
+        """
         policy = policy or RetryPolicy()
         backoff = policy.initial_backoff_seconds
         last_error: Optional[BaseException] = None

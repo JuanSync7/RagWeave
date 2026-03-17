@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("rag.guardrails.runtime")
 
@@ -28,14 +28,26 @@ class GuardrailsRuntime:
 
     @classmethod
     def get(cls) -> GuardrailsRuntime:
-        """Get the singleton instance."""
+        """Return the process-wide singleton runtime instance.
+
+        Returns:
+            The singleton `GuardrailsRuntime` instance.
+        """
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     @classmethod
     def is_enabled(cls) -> bool:
-        """Check if NeMo Guardrails is enabled and not auto-disabled."""
+        """Return whether guardrails are enabled and not auto-disabled.
+
+        This reflects both configuration (`RAG_NEMO_ENABLED`) and whether the
+        runtime has been auto-disabled due to a prior initialization/execution
+        failure.
+
+        Returns:
+            True if guardrails should be considered active for this process.
+        """
         from config.settings import RAG_NEMO_ENABLED
 
         return RAG_NEMO_ENABLED and not cls._auto_disabled
@@ -43,8 +55,15 @@ class GuardrailsRuntime:
     def initialize(self, config_dir: str) -> None:
         """Load NeMo config and compile Colang flows.
 
-        Raises on Colang parse errors (fail-fast at startup).
-        Catches other errors and auto-disables NeMo (REQ-902).
+        This method is idempotent and safe to call multiple times. It fails fast
+        on Colang syntax errors (to surface configuration issues early), and
+        fails open on other runtime errors by auto-disabling guardrails.
+
+        Args:
+            config_dir: Directory containing NeMo Guardrails configuration.
+
+        Raises:
+            SyntaxError: If Colang parsing fails (fail-fast at startup).
         """
         if self._initialized:
             return
@@ -70,19 +89,36 @@ class GuardrailsRuntime:
             self._auto_disabled = True
 
     @property
-    def rails(self):
-        """Access the LLMRails instance. Returns None if not initialized."""
+    def rails(self) -> Any | None:
+        """Return the underlying `LLMRails` instance, if initialized.
+
+        Returns:
+            The compiled `LLMRails` instance, or None if not initialized.
+        """
         return self._rails
 
     @property
     def initialized(self) -> bool:
-        """Whether the runtime has been successfully initialized."""
+        """Return whether the runtime has been successfully initialized.
+
+        Returns:
+            True if `initialize()` completed successfully.
+        """
         return self._initialized
 
     async def generate_async(self, messages: list[dict]) -> dict:
         """Execute rails on a message sequence.
 
-        Returns empty response on failure (fail-safe).
+        This is a fail-open integration point: if rails are unavailable or an
+        execution error occurs, an empty assistant message is returned and the
+        runtime is auto-disabled for subsequent requests.
+
+        Args:
+            messages: Chat message list in OpenAI-compatible dict format.
+
+        Returns:
+            Assistant message dict produced by rails, or an empty assistant
+            message if guardrails are disabled/unavailable.
         """
         if not self._initialized or self._rails is None:
             return {"role": "assistant", "content": ""}
@@ -96,14 +132,14 @@ class GuardrailsRuntime:
             return {"role": "assistant", "content": ""}
 
     def shutdown(self) -> None:
-        """Release runtime resources."""
+        """Release runtime resources and mark the runtime uninitialized."""
         self._rails = None
         self._initialized = False
         logger.info("NeMo Guardrails runtime shut down")
 
     @classmethod
     def reset(cls) -> None:
-        """Reset singleton state (for testing)."""
+        """Reset singleton state (primarily for testing)."""
         if cls._instance is not None:
             cls._instance.shutdown()
         cls._instance = None

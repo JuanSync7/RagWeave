@@ -1,9 +1,15 @@
 # @summary
-# Public API for the NeMo Guardrails integration.
-# Exports: GuardrailsRuntime, InputRailExecutor, OutputRailExecutor, RailMergeGate
-# Deps: src.guardrails.runtime, src.guardrails.executor
+# Public API for the guardrails subsystem (schemas and results).
+# Exports: GuardrailsMetadata, InputRailResult, OutputRailResult, RailExecution, RailVerdict
+# Deps: src.guardrails.common.schemas
 # @end-summary
-"""NeMo Guardrails integration for the AION RAG pipeline."""
+"""Public API for guardrails used by the RAG pipeline.
+
+This package groups "guardrail" components that can validate or transform inputs
+and outputs (e.g., prompt-injection detection, PII checks, toxicity screening).
+The package-level exports are intentionally limited to shared schemas so callers
+do not depend on implementation details of individual rails.
+"""
 
 from src.guardrails.common.schemas import (
     GuardrailsMetadata,

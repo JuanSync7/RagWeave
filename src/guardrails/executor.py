@@ -5,7 +5,14 @@
 # Exports: InputRailExecutor, OutputRailExecutor, RailMergeGate
 # Deps: src.guardrails.*, concurrent.futures, logging, time
 # @end-summary
-"""Rail execution orchestration (REQ-702, REQ-703, REQ-707)."""
+"""Rail execution orchestration for guardrails.
+
+This module runs "rails" (guardrail checks) in parallel with per-rail timeouts,
+records structured execution results, and applies merge/consensus logic to
+produce a single combined decision for routing and response shaping.
+
+Requirements references (from internal docs): REQ-702, REQ-703, REQ-707.
+"""
 
 from __future__ import annotations
 
@@ -61,7 +68,13 @@ except ImportError:
 
 
 def _record_metric(rail_name: str, verdict: RailVerdict, ms: float) -> None:
-    """Record Prometheus metrics for a rail execution."""
+    """Record Prometheus metrics for a rail execution.
+
+    Args:
+        rail_name: Logical rail name label.
+        verdict: Verdict returned by the rail.
+        ms: Execution time in milliseconds.
+    """
     if GUARDRAIL_EXECUTIONS is not None:
         GUARDRAIL_EXECUTIONS.labels(rail_name=rail_name, verdict=verdict.value).inc()
     if GUARDRAIL_EXECUTION_MS is not None:
@@ -70,7 +83,9 @@ def _record_metric(rail_name: str, verdict: RailVerdict, ms: float) -> None:
         GUARDRAIL_REJECTIONS.labels(rail_name=rail_name, reason=verdict.value).inc()
     # Also record on the unified pipeline stage histogram
     if PIPELINE_STAGE_MS is not None:
-        PIPELINE_STAGE_MS.labels(stage=f"guardrail_{rail_name}", bucket="guardrails").observe(ms)
+        PIPELINE_STAGE_MS.labels(
+            stage=f"guardrail_{rail_name}", bucket="guardrails"
+        ).observe(ms)
 
 
 class InputRailExecutor:
@@ -89,6 +104,16 @@ class InputRailExecutor:
         topic_safety_checker: Optional[TopicSafetyChecker] = None,
         timeout_seconds: int = 10,
     ) -> None:
+        """Initialize the input-rail executor.
+
+        Args:
+            intent_classifier: Optional intent classifier rail.
+            injection_detector: Optional prompt-injection detection rail.
+            pii_detector: Optional PII redaction rail.
+            toxicity_filter: Optional toxicity detection rail.
+            topic_safety_checker: Optional on-topic/off-topic detection rail.
+            timeout_seconds: Per-rail timeout in seconds.
+        """
         self._intent = intent_classifier
         self._injection = injection_detector
         self._pii = pii_detector
@@ -103,7 +128,19 @@ class InputRailExecutor:
         tenant_id: str = "",
         parent_span: Any = None,
     ) -> InputRailResult:
-        """Run all enabled rails in parallel, return combined result."""
+        """Run enabled input rails and return a combined result.
+
+        This method is fail-open: timeouts and unexpected exceptions are logged
+        and treated as PASS for the affected rail.
+
+        Args:
+            query: User input query text.
+            tenant_id: Optional tenant identifier used by some rails/policies.
+            parent_span: Optional parent tracing span for correlation.
+
+        Returns:
+            Aggregated `InputRailResult` including per-rail executions.
+        """
         result = InputRailResult()
         executions: List[RailExecution] = []
         query_hash = make_query_hash(query)
@@ -146,7 +183,10 @@ class InputRailExecutor:
                                 "intent",
                                 verdict,
                                 ms,
-                                {"intent": rail_result.intent, "confidence": rail_result.confidence},
+                                {
+                                    "intent": rail_result.intent,
+                                    "confidence": rail_result.confidence,
+                                },
                             )
                         )
                     elif name == "injection":
@@ -250,6 +290,14 @@ class OutputRailExecutor:
         toxicity_filter: Optional[ToxicityFilter] = None,
         timeout_seconds: int = 10,
     ) -> None:
+        """Initialize the output-rail executor.
+
+        Args:
+            faithfulness_checker: Optional faithfulness evaluation rail.
+            pii_detector: Optional PII redaction rail.
+            toxicity_filter: Optional toxicity filter rail for generated outputs.
+            timeout_seconds: Per-rail timeout in seconds.
+        """
         self._faithfulness = faithfulness_checker
         self._pii = pii_detector
         self._toxicity = toxicity_filter
@@ -262,7 +310,17 @@ class OutputRailExecutor:
         context_chunks: List[str],
         parent_span: Any = None,
     ) -> OutputRailResult:
-        """Run all enabled output rails in parallel, then apply consensus gate."""
+        """Run enabled output rails and apply consensus/merge logic.
+
+        Args:
+            answer: Proposed assistant answer text.
+            context_chunks: Source context snippets used to generate the answer.
+            parent_span: Optional parent tracing span for correlation.
+
+        Returns:
+            Aggregated `OutputRailResult` including per-rail executions and any
+            modified `final_answer`.
+        """
         result = OutputRailResult(final_answer=answer)
         executions: List[RailExecution] = []
 
@@ -299,7 +357,11 @@ class OutputRailExecutor:
                         result.faithfulness_verdict = faith_result.verdict
                         result.faithfulness_warning = faith_result.warning
                         result.claim_scores = [
-                            {"claim": c.claim, "score": c.score, "supported": c.supported}
+                            {
+                                "claim": c.claim,
+                                "score": c.score,
+                                "supported": c.supported,
+                            }
                             for c in faith_result.claim_scores
                         ]
                         executions.append(
@@ -321,7 +383,11 @@ class OutputRailExecutor:
 
                     elif name == "toxicity":
                         filtered_text = rail_results[name]
-                        verdict = RailVerdict.MODIFY if filtered_text != answer else RailVerdict.PASS
+                        verdict = (
+                            RailVerdict.MODIFY
+                            if filtered_text != answer
+                            else RailVerdict.PASS
+                        )
                         executions.append(RailExecution("output_toxicity", verdict, ms))
                         _record_metric("output_toxicity", verdict, ms)
 
@@ -342,7 +408,9 @@ class OutputRailExecutor:
                         name,
                         ms,
                     )
-                    executions.append(RailExecution(f"output_{name}", RailVerdict.PASS, ms))
+                    executions.append(
+                        RailExecution(f"output_{name}", RailVerdict.PASS, ms)
+                    )
                     _record_metric(f"output_{name}", RailVerdict.PASS, ms)
                     span.end(status="error")
 
@@ -353,7 +421,9 @@ class OutputRailExecutor:
                         name,
                         e,
                     )
-                    executions.append(RailExecution(f"output_{name}", RailVerdict.PASS, ms))
+                    executions.append(
+                        RailExecution(f"output_{name}", RailVerdict.PASS, ms)
+                    )
                     _record_metric(f"output_{name}", RailVerdict.PASS, ms)
                     span.end(status="error", error=e)
 
@@ -361,7 +431,10 @@ class OutputRailExecutor:
         # Priority 1: faithfulness reject → discard everything, return fallback
         faith = rail_results.get("faithfulness")
         if faith is not None and faith.verdict == RailVerdict.REJECT:
-            logger.info("Output consensus: REJECT (faithfulness score=%.2f)", faith.overall_score)
+            logger.info(
+                "Output consensus: REJECT (faithfulness score=%.2f)",
+                faith.overall_score,
+            )
             result.final_answer = faith.fallback_message
             result.rail_executions = executions
             return result
@@ -409,13 +482,21 @@ class RailMergeGate:
         query_result: Any,
         rail_result: InputRailResult,
     ) -> Dict[str, Any]:
-        """Return merged routing decision.
+        """Return merged routing decision and payload.
 
         Returns a dict with:
         - action: "reject" | "canned" | "search"
         - message: rejection/canned response text (if not search)
         - query: effective query to use for search (may be PII-redacted)
         - guardrails_meta: metadata for the response
+
+        Args:
+            query_result: Query processing result object (must include
+                `processed_query`).
+            rail_result: Aggregated input rail result.
+
+        Returns:
+            A dict describing routing action and optional message/query payload.
         """
         from src.guardrails.intent import INTENT_RESPONSES
 
@@ -438,6 +519,7 @@ class RailMergeGate:
         # Priority 3: topic safety (LLM-based off-topic detection)
         if rail_result.topic_off_topic:
             from src.guardrails.topic_safety import REJECTION_MESSAGE as TOPIC_MSG
+
             logger.info("Merge gate: CANNED (topic_safety: off-topic)")
             return {
                 "action": "canned",

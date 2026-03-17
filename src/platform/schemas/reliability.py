@@ -1,4 +1,8 @@
-"""Typed schemas for reliability and retry behavior."""
+"""Typed schemas for reliability and retry behavior.
+
+These dataclasses define retry policies and operation metadata shared across
+retry provider implementations.
+"""
 
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple, Type

@@ -69,6 +69,13 @@ def estimate_tokens(text: str | None, chars_per_token: int | None = None) -> int
     """Legacy heuristic estimator — kept for backward compatibility.
 
     Prefer :func:`count_tokens` for accurate counts.
+
+    Args:
+        text: Plain text to estimate.
+        chars_per_token: Optional heuristic override.
+
+    Returns:
+        Estimated token count (>= 0).
     """
     if not text:
         return 0
@@ -76,7 +83,15 @@ def estimate_tokens(text: str | None, chars_per_token: int | None = None) -> int
 
 
 def _heuristic_count(text: str, chars_per_token: int | None = None) -> int:
-    """Character-length heuristic fallback."""
+    """Count tokens using a character-length heuristic.
+
+    Args:
+        text: Plain text to estimate.
+        chars_per_token: Optional heuristic override.
+
+    Returns:
+        Estimated token count (>= 0).
+    """
     if not text:
         return 0
     cpt = max(1, chars_per_token if chars_per_token is not None else TOKEN_BUDGET_CHARS_PER_TOKEN)
