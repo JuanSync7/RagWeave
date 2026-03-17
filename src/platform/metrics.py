@@ -1,4 +1,16 @@
-"""Prometheus metrics helpers."""
+# @summary
+# Prometheus metrics registry for API, pipeline, cache, and memory.
+# Exports: REQUESTS_TOTAL, REQUEST_LATENCY_MS, RATE_LIMIT_REJECTS, OVERLOAD_REJECTS,
+#          INFLIGHT_REQUESTS, PIPELINE_STAGE_MS, CACHE_HITS, CACHE_MISSES,
+#          MEMORY_OP_MS, MEMORY_SUMMARY_TRIGGERS, render_metrics
+# Deps: prometheus_client
+# @end-summary
+"""Prometheus metrics registry for platform services.
+
+This module defines the shared Prometheus metrics used by the API server and
+runtime components. Importing this module registers metrics in the default
+Prometheus registry.
+"""
 
 from __future__ import annotations
 
@@ -57,6 +69,12 @@ MEMORY_SUMMARY_TRIGGERS = Counter(
 
 
 def render_metrics() -> tuple[bytes, str]:
+    """Render all registered Prometheus metrics.
+
+    Returns:
+        A `(payload, content_type)` tuple suitable for returning from an HTTP
+        metrics endpoint.
+    """
     payload = generate_latest()
     return payload, CONTENT_TYPE_LATEST
 

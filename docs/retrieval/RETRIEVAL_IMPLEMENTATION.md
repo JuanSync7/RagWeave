@@ -1,7 +1,12 @@
 # Retrieval Pipeline — Implementation Guide
 
 **AION Knowledge Management Platform**
-Version: 1.0 | Status: Draft | Domain: Retrieval Pipeline
+Version: 1.1 | Status: Draft | Domain: Retrieval Pipeline
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 1.0 | 2026-03-11 | AI Assistant | Initial draft — 5 phases, 17 tasks covering core pipeline through security |
+| 1.1 | 2026-03-13 | AI Assistant | Added Phase 6 (conversation memory) covering REQ-1001–1008, updated dependency graph and mapping |
 
 > **Document intent:** This file is a phased implementation plan tied to `RETRIEVAL_SPEC.md`.  
 > It is not the source of truth for current runtime behavior.  
@@ -397,6 +402,97 @@ Harden the pipeline against data leakage and injection.
 
 ---
 
+## Phase 6 — Conversation Memory
+
+Persistent multi-turn conversation support with tenant isolation, sliding window context, rolling summaries, and lifecycle management.
+
+### Task 6.1: Conversation Memory Provider
+
+**Description:** Build a tenant-scoped conversation memory provider that persists turns and summaries in a dedicated data store with TTL-based expiration.
+
+**Requirements Covered:** REQ-1001, REQ-1007
+
+**Dependencies:** None — standalone module.
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. Define a `ConversationTurn` and `ConversationMeta` data model with tenant, principal, conversation ID, timestamp, and content fields
+2. Implement a provider interface with `store_turn`, `get_turns`, `get_meta`, `list_conversations` operations
+3. Implement a persistent backend using a key-value store with TTL support
+4. Enforce tenant and principal isolation at the provider level (all operations scoped by tenant + principal)
+5. Add configurable TTL for automatic conversation expiration
+6. Add an in-memory fallback provider for development/offline use
+
+**Risks:** Data store latency on turn persistence could add overhead to every query; mitigate by writing turns asynchronously where possible.
+
+---
+
+### Task 6.2: Sliding Window and Rolling Summary
+
+**Description:** Implement the context assembly strategy that combines a sliding window of recent turns with a rolling summary of older turns.
+
+**Requirements Covered:** REQ-1002, REQ-1003, REQ-1008
+
+**Dependencies:** Task 6.1
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. Implement sliding window extraction (last N turns from conversation history)
+2. Implement rolling summary storage and retrieval as a special metadata field on the conversation
+3. Implement compaction logic that summarizes turns outside the window into the rolling summary using an LLM call
+4. Format the combined context (rolling summary + recent turns) for injection into query processing
+5. Externalize window size, compaction threshold, and summary max tokens to configuration
+
+**Risks:** LLM-based compaction can hallucinate or lose key entities; mitigate by preserving entity lists alongside the summary.
+
+---
+
+### Task 6.3: Conversation Lifecycle Operations
+
+**Description:** Implement the API-facing lifecycle operations: create conversation, list conversations, get history, and trigger manual compaction.
+
+**Requirements Covered:** REQ-1004, REQ-1005, REQ-1006
+
+**Dependencies:** Task 6.1, Task 6.2
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. Implement `create_conversation` that generates a stable ID and returns it
+2. Implement `list_conversations` that returns metadata for all conversations owned by a tenant/principal
+3. Implement `get_history` that returns the full ordered turn list for a conversation
+4. Implement `compact_conversation` that triggers rolling summary compaction on demand
+5. Wire per-request controls: `memory_enabled`, `memory_turn_window`, `compact_now` flags on query requests
+6. Ensure `conversation_id` is returned in every query response when memory is active
+
+**Testing Strategy:** Integration tests verifying create → query → follow-up → list → history → compact lifecycle.
+
+---
+
+### Task 6.4: Memory Context Injection into Query Processing
+
+**Description:** Thread conversation memory context into the query processing stage so that coreference resolution and reformulation benefit from prior turns and the rolling summary.
+
+**Requirements Covered:** REQ-1008, REQ-103
+
+**Dependencies:** Task 6.2, Task 3.4
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Modify the query processing entry point to accept optional memory context (recent turns + summary)
+2. Inject memory context into the reformulation prompt alongside conversation history
+3. Ensure memory-disabled queries bypass injection entirely
+4. Add metrics for memory context token count and injection latency
+
+---
+
 ## Task Dependency Graph
 
 ```
@@ -429,6 +525,12 @@ Phase 5 (Security)
 ├── Task 5.1: Externalize Injection Patterns ◄── Task 1.1
 ├── Task 5.2: Pre-Retrieval PII Filtering ◄── Task 1.1
 └── Task 5.3: Post-Generation PII Filtering ◄── Task 1.2
+
+Phase 6 (Conversation Memory)
+├── Task 6.1: Conversation Memory Provider ──────────────────────┐
+├── Task 6.2: Sliding Window and Rolling Summary ◄── Task 6.1 ──┤
+├── Task 6.3: Conversation Lifecycle Operations ◄── Task 6.1,6.2┤
+└── Task 6.4: Memory Context Injection ◄── Task 6.2, Task 3.4 ──┘
 ```
 
 ---
@@ -455,6 +557,10 @@ Phase 5 (Security)
 | 5.1 Externalize Injection Patterns | REQ-202, REQ-903 |
 | 5.2 Pre-Retrieval PII Filtering | REQ-204 |
 | 5.3 Post-Generation PII Filtering | REQ-703 |
+| 6.1 Conversation Memory Provider | REQ-1001, REQ-1007 |
+| 6.2 Sliding Window and Rolling Summary | REQ-1002, REQ-1003, REQ-1008 |
+| 6.3 Conversation Lifecycle Operations | REQ-1004, REQ-1005, REQ-1006 |
+| 6.4 Memory Context Injection | REQ-1008, REQ-103 |
 
 ---
 
@@ -1803,3 +1909,179 @@ class ConversationState:
 
         return query
 ```
+
+---
+
+## B.15 Conversation Memory Provider
+
+This snippet shows a tenant-scoped conversation memory provider with sliding window extraction, rolling summary support, and TTL-based expiration.
+
+**Tasks:** Task 6.1, Task 6.2
+**Requirements:** REQ-1001, REQ-1002, REQ-1003, REQ-1007
+
+```python
+from dataclasses import dataclass, field
+from typing import Optional, Protocol
+import time
+
+
+@dataclass
+class ConversationTurn:
+    role: str
+    content: str
+    timestamp_ms: int
+    query_id: str = ""
+
+
+@dataclass
+class ConversationMeta:
+    conversation_id: str
+    tenant_id: str
+    subject: str
+    project_id: str = ""
+    title: str = ""
+    created_at_ms: int = 0
+    updated_at_ms: int = 0
+    message_count: int = 0
+    summary: dict = field(default_factory=dict)
+
+
+class MemoryProvider(Protocol):
+    """Interface for conversation memory storage."""
+
+    def store_turn(
+        self, tenant_id: str, conversation_id: str, turn: ConversationTurn
+    ) -> None: ...
+
+    def get_turns(
+        self, tenant_id: str, conversation_id: str, limit: Optional[int] = None
+    ) -> list[ConversationTurn]: ...
+
+    def get_meta(
+        self, tenant_id: str, conversation_id: str
+    ) -> Optional[ConversationMeta]: ...
+
+    def list_conversations(
+        self, tenant_id: str, subject: str
+    ) -> list[ConversationMeta]: ...
+
+    def store_summary(
+        self, tenant_id: str, conversation_id: str, summary: dict
+    ) -> None: ...
+
+
+def assemble_memory_context(
+    provider: MemoryProvider,
+    tenant_id: str,
+    conversation_id: str,
+    window_size: int = 5,
+) -> str:
+    """Assemble sliding window + rolling summary into query processing context."""
+    meta = provider.get_meta(tenant_id, conversation_id)
+    if meta is None:
+        return ""
+
+    recent_turns = provider.get_turns(tenant_id, conversation_id, limit=window_size)
+    parts = []
+
+    if meta.summary and meta.summary.get("text"):
+        parts.append(f"Conversation summary: {meta.summary['text']}")
+
+    for turn in recent_turns:
+        parts.append(f"{turn.role}: {turn.content}")
+
+    return "\n".join(parts)
+```
+
+**Key design decisions:**
+- Provider interface enables swapping storage backends without changing callers.
+- Sliding window is extracted at read time, not write time, so window size can be overridden per request.
+- Rolling summary is stored as metadata on the conversation, not as a separate entity.
+
+---
+
+## B.16 Conversation Lifecycle Operations
+
+This snippet shows the API-facing lifecycle operations for conversation management.
+
+**Tasks:** Task 6.3
+**Requirements:** REQ-1004, REQ-1005, REQ-1006
+
+```python
+from dataclasses import dataclass
+from typing import Optional
+from uuid import uuid4
+import time
+
+
+@dataclass
+class CreateConversationResult:
+    conversation_id: str
+    tenant_id: str
+    title: str
+
+
+class ConversationService:
+    """Manages conversation lifecycle for a tenant and principal."""
+
+    def __init__(self, provider: MemoryProvider, default_window: int = 5):
+        self._provider = provider
+        self._default_window = default_window
+
+    def create(
+        self,
+        tenant_id: str,
+        subject: str,
+        title: str = "New conversation",
+        conversation_id: Optional[str] = None,
+    ) -> CreateConversationResult:
+        cid = conversation_id or f"conv-{uuid4().hex[:16]}"
+        now_ms = int(time.time() * 1000)
+        meta = ConversationMeta(
+            conversation_id=cid,
+            tenant_id=tenant_id,
+            subject=subject,
+            title=title,
+            created_at_ms=now_ms,
+            updated_at_ms=now_ms,
+        )
+        self._provider.store_meta(tenant_id, cid, meta)
+        return CreateConversationResult(
+            conversation_id=cid, tenant_id=tenant_id, title=title
+        )
+
+    def list_for_principal(
+        self, tenant_id: str, subject: str
+    ) -> list[ConversationMeta]:
+        return self._provider.list_conversations(tenant_id, subject)
+
+    def get_history(
+        self, tenant_id: str, conversation_id: str
+    ) -> list[ConversationTurn]:
+        return self._provider.get_turns(tenant_id, conversation_id)
+
+    def compact(self, tenant_id: str, conversation_id: str) -> dict:
+        """Trigger rolling summary compaction for the conversation."""
+        turns = self._provider.get_turns(tenant_id, conversation_id)
+        if len(turns) <= self._default_window:
+            return {"compacted": False, "reason": "Not enough turns to compact"}
+
+        older_turns = turns[: -self._default_window]
+        summary_text = self._summarize_turns(older_turns)
+        self._provider.store_summary(
+            tenant_id, conversation_id, {"text": summary_text}
+        )
+        return {"compacted": True, "turns_summarized": len(older_turns)}
+
+    def _summarize_turns(self, turns: list[ConversationTurn]) -> str:
+        """Summarize older turns into a condensed rolling summary."""
+        # Production: call LLM for summarization
+        # Fallback: concatenate key content
+        content = "\n".join(f"{t.role}: {t.content[:200]}" for t in turns)
+        return content[:2000]
+```
+
+**Key design decisions:**
+- Service layer wraps the provider to keep route handlers thin.
+- Compaction is a separate explicit operation, not automatic, to give operators control.
+- Conversation ID is returned on creation and echoed on every subsequent query response.

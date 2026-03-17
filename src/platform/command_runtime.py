@@ -1,4 +1,13 @@
-"""Shared slash-command parsing and dispatch helpers."""
+# @summary
+# Shared slash-command parsing and dispatch utilities used by CLI/console surfaces.
+# Exports: ParsedSlashCommand, parse_slash_command, dispatch_slash_command
+# Deps: dataclasses, src.platform.command_catalog
+# @end-summary
+"""Slash-command parsing and dispatch utilities.
+
+This module parses `/command [arg]` input and dispatches to registered handlers
+after validating availability against the shared command catalog.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +26,14 @@ class ParsedSlashCommand:
 
 
 def parse_slash_command(raw: str) -> ParsedSlashCommand | None:
-    """Parse `/name [arg]` syntax into structured fields."""
+    """Parse `/name [arg]` syntax into structured fields.
+
+    Args:
+        raw: Raw user input.
+
+    Returns:
+        A parsed command, or None if the input does not start with `/`.
+    """
 
     text = raw.strip()
     if not text.startswith("/"):
@@ -40,10 +56,18 @@ def dispatch_slash_command(
 ) -> tuple[bool, str | None]:
     """Dispatch a slash command to handlers with catalog validation.
 
-    Returns `(handled, error_message)`:
-    - handled=False means input was not a slash command.
-    - handled=True and error_message=None means command executed.
-    - handled=True and error_message set means slash command parse/validation failed.
+    Args:
+        raw: Raw user input.
+        mode: Interaction mode used for catalog filtering.
+        handlers: Mapping of command name to handler callable.
+        allow_admin: Whether to allow admin-only/hidden commands.
+
+    Returns:
+        A `(handled, error_message)` tuple:
+
+        - `handled=False` means the input was not a slash command.
+        - `handled=True` and `error_message=None` means the command executed.
+        - `handled=True` and `error_message` set means validation failed.
     """
 
     parsed = parse_slash_command(raw)

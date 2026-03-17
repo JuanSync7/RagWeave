@@ -1,0 +1,149 @@
+# @summary
+# Ingestion pipeline shared helpers for keyword fallback, stage logging, and provenance mapping.
+# Exports: _extract_keywords_fallback, append_processing_log, map_chunk_provenance
+# Deps: difflib, logging, re, src.ingest.common.types
+# @end-summary
+
+"""Shared helpers for ingestion pipeline nodes."""
+
+from __future__ import annotations
+
+import logging
+import re
+import difflib
+
+from src.ingest.common.types import IngestState
+
+logger = logging.getLogger("rag.ingest.pipeline.stage")
+
+def _extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
+    """Extract frequent keyword candidates when LLM metadata is unavailable."""
+    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", text.lower())
+    freq: dict[str, int] = {}
+    for word in words:
+        freq[word] = freq.get(word, 0) + 1
+    ranked = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)
+    return [word for word, _ in ranked[:max_keywords]]
+
+
+def _cross_refs(text: str) -> list[dict[str, str]]:
+    """Extract simple cross-reference patterns from source text."""
+    refs: list[dict[str, str]] = []
+    patterns = [
+        (r"\bDOC-\d{2,}\b", "document_id"),
+        (r"\bSection\s+\d+(?:\.\d+){0,3}\b", "section"),
+        (r"\bRFC\s+\d{3,5}\b", "standard"),
+    ]
+    for pattern, ref_type in patterns:
+        for match in re.findall(pattern, text, flags=re.IGNORECASE):
+            refs.append({"type": ref_type, "value": match})
+    return refs
+
+
+def _quality_score(text: str) -> float:
+    """Compute heuristic quality score for a chunk."""
+    score = 0.4 + (0.2 if len(text) >= 120 else 0)
+    score += min(0.2, len(re.findall(r"\d", text)) * 0.01)
+    return min(1.0, score)
+
+
+def append_processing_log(state: IngestState, message: str) -> list[str]:
+    """Append a stage status message to the processing log."""
+    runtime = state.get("runtime")
+    config = getattr(runtime, "config", None)
+    if bool(getattr(config, "verbose_stage_logs", False)):
+        logger.info("source=%s stage=%s", state.get("source_name", "<unknown>"), message)
+    return [*state["processing_log"], message]
+
+
+def _locate_span(haystack: str, needle: str, cursor: int) -> tuple[int, int, str]:
+    """Locate a text span with cursor-first exact search and fallback."""
+    if not haystack or not needle:
+        return -1, -1, "missing"
+    start = haystack.find(needle, max(cursor, 0))
+    if start >= 0:
+        return start, start + len(needle), "exact_cursor"
+    start = haystack.find(needle)
+    if start >= 0:
+        return start, start + len(needle), "exact_global"
+    return -1, -1, "not_found"
+
+
+def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
+    """Return best matching paragraph span and similarity score."""
+    if not text.strip() or not anchor.strip():
+        return -1, -1, 0.0
+    best_start = best_end = -1
+    best_ratio = 0.0
+    offset = 0
+    for paragraph in text.split("\n\n"):
+        para = paragraph.strip()
+        if not para:
+            offset += len(paragraph) + 2
+            continue
+        ratio = difflib.SequenceMatcher(
+            None,
+            anchor[:220].lower(),
+            para[:600].lower(),
+        ).ratio()
+        if ratio > best_ratio:
+            idx = text.find(paragraph, offset)
+            if idx >= 0:
+                best_ratio = ratio
+                best_start = idx
+                best_end = idx + len(paragraph)
+        offset += len(paragraph) + 2
+    return best_start, best_end, best_ratio
+
+
+def map_chunk_provenance(
+    chunk_text: str,
+    original_text: str,
+    refactored_text: str,
+    original_cursor: int,
+    refactored_cursor: int,
+) -> tuple[dict[str, object], int, int]:
+    """Map a chunk to refactored and original text spans with confidence."""
+    ref_start, ref_end, ref_method = _locate_span(
+        refactored_text,
+        chunk_text,
+        refactored_cursor,
+    )
+    next_ref_cursor = ref_end if ref_start >= 0 else refactored_cursor
+
+    orig_start, orig_end, orig_method = _locate_span(original_text, chunk_text, original_cursor)
+    confidence = 1.0 if orig_start >= 0 else 0.0
+    if orig_start < 0 and ref_start >= 0:
+        ref_slice = refactored_text[ref_start:ref_end]
+        orig_start, orig_end, orig_method = _locate_span(original_text, ref_slice, original_cursor)
+        if orig_start >= 0:
+            confidence = 0.85
+
+    if orig_start < 0:
+        para_start, para_end, ratio = _best_paragraph_span(original_text, chunk_text)
+        if para_start >= 0 and ratio >= 0.45:
+            orig_start, orig_end = para_start, para_end
+            orig_method = "paragraph_fuzzy"
+            confidence = round(min(0.79, ratio), 3)
+        else:
+            orig_method = "unmapped"
+
+    next_orig_cursor = orig_end if orig_start >= 0 else original_cursor
+    provenance = {
+        "refactored_char_start": ref_start,
+        "refactored_char_end": ref_end,
+        "original_char_start": orig_start,
+        "original_char_end": orig_end,
+        "provenance_method": f"{ref_method}->{orig_method}",
+        "provenance_confidence": confidence,
+    }
+    return provenance, next_orig_cursor, next_ref_cursor
+
+
+__all__ = [
+    "_extract_keywords_fallback",
+    "_cross_refs",
+    "_quality_score",
+    "append_processing_log",
+    "map_chunk_provenance",
+]

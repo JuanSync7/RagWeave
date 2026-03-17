@@ -1,4 +1,4 @@
-from src.ingest.document_processor import clean_text, process_document
+from src.ingest.support.document import clean_text, process_document
 
 
 def test_clean_text_removes_boilerplate():

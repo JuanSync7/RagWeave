@@ -17,8 +17,8 @@ This directory contains the runtime retrieval path used by query serving, includ
 
 | File | Purpose | Key Exports |
 | --- | --- | --- |
-| `generator.py` | Ollama-based answer synthesis for non-stream and stream generation paths | `OllamaGenerator` |
-| `query_processor.py` | Query sanitize/reformulate/evaluate state machine with confidence-based routing | `process_query`, `QueryResult`, `QueryAction`, `warm_up_ollama` |
+| `generator.py` | LLM answer synthesis (backed by LiteLLM Router) for non-stream and stream generation paths | `OllamaGenerator` |
+| `query_processor.py` | Query sanitize/reformulate/evaluate state machine with confidence-based routing (backed by LiteLLM Router) | `process_query`, `QueryResult`, `QueryAction`, `warm_up_ollama` |
 | `rag_chain.py` | End-to-end retrieval orchestration (query processing, KG expansion, hybrid search, reranking, optional generation) | `RAGChain`, `RAGResponse` |
 | `reranker.py` | Local reranker wrapper for final candidate ordering | `LocalBGEReranker`, `RankedResult` |
 | `schemas.py` | Retrieval schema facade for shared contracts | `QueryResult`, `QueryAction`, `QueryState`, `RankedResult`, `RAGResponse` |
@@ -28,7 +28,7 @@ This directory contains the runtime retrieval path used by query serving, includ
 
 - `rag_chain.py` composes `query_processor.py`, `reranker.py`, `generator.py`, and core vector/KG modules.
 - `query_processor.py` depends on prompt files in `prompts/` plus observability/retry providers.
-- `generator.py` and `query_processor.py` both rely on Ollama HTTP endpoints and retry policies.
+- `generator.py` and `query_processor.py` both rely on `src.platform.llm.LLMProvider` (LiteLLM Router) for LLM calls.
 - Shared contracts/utilities are centralized in `common/` and surfaced via `schemas.py`/`utils.py`.
 
 ## Engineering Documentation

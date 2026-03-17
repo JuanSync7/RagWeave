@@ -1,5 +1,6 @@
 # @summary
-# End-to-end RAG pipeline for query processing, KG expansion, hybrid search, and reranking. Main classes: RAGChain, RAGResponse. Key imports: LocalBGEEmbeddings, LocalBGEReranker, KnowledgeGraphBuilder, OllamaGenerator, Filter, get_weaviate_client, ensure_collection, hybrid_search.
+# End-to-end RAG pipeline for query processing, KG expansion, hybrid search, reranking, and LLM generation.
+# Main classes: RAGChain, RAGResponse. Deps: src.retrieval.generator, src.retrieval.query_processor, src.core, src.platform.llm
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
 
@@ -30,6 +31,8 @@ from src.platform.validation import (
     validate_positive_int,
 )
 from src.retrieval.schemas import QueryAction, QueryResult, RAGResponse, RankedResult
+from src.platform.token_budget import calculate_budget, get_capabilities, TokenBudgetSnapshot
+from src.retrieval.generator import _SYSTEM_PROMPT as _GEN_SYSTEM_PROMPT
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
     KG_PATH, KG_ENABLED, GENERATION_ENABLED,
@@ -659,6 +662,36 @@ class RAGChain:
                 if tp.check_stage_budget("generation"):
                     tp.mark_budget_exhausted("generation")
 
+            # Token budget snapshot (post-retrieval, post-generation)
+            token_budget = None
+            try:
+                context_texts = [r.text for r in reranked]
+                snapshot = calculate_budget(
+                    system_prompt=_GEN_SYSTEM_PROMPT,
+                    memory_context=memory_context,
+                    chunks=context_texts,
+                    query=processed_query,
+                    model=self._generator.model if self._generator else None,
+                )
+                # Enrich with actual token usage from the LLM response
+                actual_resp = getattr(self._generator, "_last_response", None) if self._generator else None
+                if actual_resp and actual_resp.prompt_tokens:
+                    snapshot = TokenBudgetSnapshot(
+                        input_tokens=snapshot.input_tokens,
+                        context_length=snapshot.context_length,
+                        output_reservation=snapshot.output_reservation,
+                        usage_percent=snapshot.usage_percent,
+                        model_name=snapshot.model_name,
+                        breakdown=snapshot.breakdown,
+                        actual_prompt_tokens=actual_resp.prompt_tokens,
+                        actual_completion_tokens=actual_resp.completion_tokens,
+                        actual_total_tokens=actual_resp.total_tokens,
+                        cost_usd=actual_resp.cost_usd,
+                    )
+                token_budget = snapshot
+            except Exception as exc:
+                logger.debug("Token budget calculation failed: %s", exc)
+
             # Stage 7: Output rails (REQ-703: parallel with consensus gate)
             if (
                 generated_answer
@@ -721,6 +754,7 @@ class RAGChain:
                 budget_exhausted_stage=tp.budget_exhausted_stage,
                 conversation_id=conversation_id,
                 guardrails=guardrails_metadata,
+                token_budget=token_budget,
             )
         except Exception as exc:
             span_status = "error"

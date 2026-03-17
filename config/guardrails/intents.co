@@ -1,0 +1,68 @@
+define user greeting
+  "hello"
+  "hi there"
+  "hey"
+  "good morning"
+  "good afternoon"
+  "hi, how are you?"
+  "greetings"
+
+define bot greeting response
+  "Hello! I'm here to help you search the knowledge base. What would you like to know?"
+
+define user farewell
+  "goodbye"
+  "bye"
+  "see you later"
+  "thanks, bye"
+  "that's all, thanks"
+  "have a nice day"
+
+define bot farewell response
+  "Goodbye! Feel free to return if you have more questions."
+
+define user off topic
+  "what's the weather today"
+  "tell me a joke"
+  "who won the game last night"
+  "what time is it"
+  "play some music"
+  "what's the stock price of NVIDIA"
+
+define bot off topic response
+  "I'm designed to help you find information in the knowledge base. I can't help with that topic, but feel free to ask me a question about the documents I have access to."
+
+define user administrative
+  "help"
+  "what can you do"
+  "how do I use this"
+  "show me the available commands"
+  "what are your capabilities"
+  "how does this work"
+
+define bot administrative response
+  "I can search the knowledge base to answer your questions. Just type your question in natural language and I'll find relevant information from the available documents."
+
+define user rag search
+  "what is the attention mechanism"
+  "explain transformer architecture"
+  "how does retrieval augmented generation work"
+  "what are embedding models"
+  "describe the difference between BM25 and vector search"
+  "what is semantic chunking"
+  "how do language models handle context windows"
+
+define flow check intent
+  user ...
+  if user intent is greeting
+    bot greeting response
+    stop
+  else if user intent is farewell
+    bot farewell response
+    stop
+  else if user intent is off topic
+    bot off topic response
+    stop
+  else if user intent is administrative
+    bot administrative response
+    stop

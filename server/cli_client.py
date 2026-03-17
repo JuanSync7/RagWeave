@@ -460,6 +460,36 @@ def display_retrieval(response: dict) -> None:
     if conv_id:
         print(f"  {DIM}Conversation{RESET}  {conv_id}")
 
+    # Token budget / context window usage
+    tb = response.get("token_budget")
+    if tb and isinstance(tb, dict):
+        pct = tb.get("usage_percent", 0)
+        inp = tb.get("input_tokens", 0)
+        ctx = tb.get("context_length", 0)
+        mdl = tb.get("model_name", "")
+
+        if pct >= 90:
+            pct_color = B_RED
+        elif pct >= 70:
+            pct_color = B_YELLOW
+        else:
+            pct_color = B_GREEN
+        print(f"  {DIM}Context{RESET}       {pct_color}{pct:.0f}%{RESET} {DIM}({inp}/{ctx} tokens, {mdl}){RESET}")
+
+        bd = tb.get("breakdown")
+        if bd and isinstance(bd, dict):
+            sp = bd.get("system_prompt", 0)
+            mem = bd.get("memory_context", 0)
+            chk = bd.get("retrieval_chunks", 0)
+            qry = bd.get("user_query", 0)
+            oh = bd.get("template_overhead", 0)
+            print(f"                {DIM}system:{sp}  memory:{mem}  chunks:{chk}  query:{qry}  overhead:{oh}{RESET}")
+
+        apt = tb.get("actual_prompt_tokens", 0)
+        act = tb.get("actual_completion_tokens", 0)
+        if apt:
+            print(f"  {DIM}Tokens{RESET}        {DIM}actual: {apt} in + {act} out = {apt + act} total{RESET}")
+
     print(f"  {DIM}{'─' * 72}{RESET}")
 
     if response["action"] == "ask_user":

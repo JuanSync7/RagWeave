@@ -1,8 +1,14 @@
-"""Shared slash-command catalog across CLI and console surfaces.
+# @summary
+# Single source of truth for user-visible slash commands across CLI and console surfaces.
+# Exports: CommandSpec, list_command_specs, get_command_spec, build_registry, to_payload,
+#          MODE_QUERY_CLI, MODE_INGEST_CLI, MODE_SERVER_CLI, MODE_CONSOLE_QUERY, MODE_CONSOLE_INGEST
+# Deps: dataclasses
+# @end-summary
+"""Slash-command catalog shared across CLI and console surfaces.
 
 This module is the single source of truth for user-visible slash commands.
-Each runtime surface (terminal CLI, web console, SDK adapters) can consume
-the same command metadata, then attach surface-specific handlers/formatters.
+Each runtime surface (terminal CLI, web console, SDK adapters) can consume the
+same command metadata, then attach surface-specific handlers/formatters.
 """
 
 from __future__ import annotations
@@ -258,7 +264,16 @@ def list_command_specs(
     include_hidden: bool = False,
     allow_admin: bool = False,
 ) -> list[CommandSpec]:
-    """Return command specs available for a given interaction mode."""
+    """List command specs available for a given interaction mode.
+
+    Args:
+        mode: Interaction mode identifier.
+        include_hidden: Whether to include hidden commands.
+        allow_admin: Whether to include admin-only commands.
+
+    Returns:
+        A list of command specs available in the given mode.
+    """
 
     result: list[CommandSpec] = []
     for spec in _COMMAND_SPECS:
@@ -279,7 +294,17 @@ def get_command_spec(
     include_hidden: bool = False,
     allow_admin: bool = False,
 ) -> CommandSpec | None:
-    """Look up a single command by name for the given mode."""
+    """Look up a single command by name for the given mode.
+
+    Args:
+        mode: Interaction mode identifier.
+        name: Command name (with or without leading `/`).
+        include_hidden: Whether to include hidden commands.
+        allow_admin: Whether to include admin-only commands.
+
+    Returns:
+        The matching command spec, or None if not available for the mode.
+    """
 
     target = name.strip().lower()
     for spec in list_command_specs(
@@ -298,7 +323,16 @@ def build_registry(
     include_hidden: bool = False,
     allow_admin: bool = False,
 ) -> dict[str, tuple[None, str]]:
-    """Return a menu/tab-completion friendly command registry."""
+    """Build a menu/tab-completion friendly command registry.
+
+    Args:
+        mode: Interaction mode identifier.
+        include_hidden: Whether to include hidden commands.
+        allow_admin: Whether to include admin-only commands.
+
+    Returns:
+        Mapping of command name to `(handler_placeholder, description)` tuple.
+    """
 
     return {
         spec.name: (None, spec.description)
@@ -309,7 +343,14 @@ def build_registry(
 
 
 def to_payload(specs: Iterable[CommandSpec]) -> list[dict]:
-    """Serialize command specs for API/JSON transport."""
+    """Serialize command specs for API/JSON transport.
+
+    Args:
+        specs: Iterable of command specs.
+
+    Returns:
+        List of JSON-serializable dictionaries.
+    """
 
     return [asdict(spec) for spec in specs]
 

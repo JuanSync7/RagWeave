@@ -89,13 +89,15 @@ Use these conventions for all new implementation work (especially pipeline-style
 
 Recommended pattern:
 
-- `pipeline/__init__.py`: public exports only
-- `pipeline_impl.py`: orchestration/runtime lifecycle
-- `pipeline_workflow.py`: graph topology and routing
+- `common/schemas.py`: typed contracts (TypedDict/dataclass)
+- `common/utils.py`: deterministic, side-effect-light utilities
+- `common/types.py`: state/config dataclasses and typed contracts
+- `common/shared.py`: cross-node shared heuristics and helpers
+- `support/`: node support libraries (LLM, vision, docling, text processing)
+- `pipeline/__init__.py`: public exports only (stable import surface)
+- `pipeline/impl.py`: orchestration/runtime lifecycle
+- `pipeline/workflow.py`: graph topology and routing
 - `nodes/*.py`: one stage per file
-- `pipeline_types.py`: state/config dataclasses and typed contracts
-- `pipeline_shared.py`/`pipeline_llm.py`: ingestion-specific shared heuristics + LLM helpers
-- `common/schemas.py` + `common/utils.py`: canonical cross-module contracts and deterministic utilities
 
 API/server-oriented pattern:
 

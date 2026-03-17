@@ -11,7 +11,14 @@ import re
 
 
 def build_logger_style(palette: dict[str, str]) -> dict[str, tuple[str, str]]:
-    """Build default logger label styling map."""
+    """Build logger label styling definitions.
+
+    Args:
+        palette: Mapping of color/style names to ANSI escape sequences.
+
+    Returns:
+        Mapping of logger name to `(label, color)` tuple used by the CLI UI.
+    """
     return {
         "rag.query_processor": (
             f"{palette['B_MAGENTA']}⟡ Query{palette['RESET']}",
@@ -49,7 +56,14 @@ def build_logger_style(palette: dict[str, str]) -> dict[str, tuple[str, str]]:
 
 
 def build_level_badges(palette: dict[str, str]) -> dict[str, str]:
-    """Build default level badge styling map."""
+    """Build log level badge strings.
+
+    Args:
+        palette: Mapping of color/style names to ANSI escape sequences.
+
+    Returns:
+        Mapping of level name (e.g. "INFO") to a styled badge string.
+    """
     return {
         "DEBUG": f"{palette['DIM']}DBG{palette['RESET']}",
         "INFO": f"{palette['B_CYAN']}ℹ{palette['RESET']}",
@@ -60,7 +74,16 @@ def build_level_badges(palette: dict[str, str]) -> dict[str, str]:
 
 
 def style_log_message(logger_name: str, msg: str, palette: dict[str, str]) -> str:
-    """Apply logger-specific message styling."""
+    """Apply logger-specific message styling.
+
+    Args:
+        logger_name: Logger name (used to select a styling function).
+        msg: Raw message string.
+        palette: Mapping of color/style names to ANSI escape sequences.
+
+    Returns:
+        Styled message string.
+    """
     if logger_name == "rag.query_processor":
         return _style_query_processor_msg(msg, palette)
     if logger_name == "rag.ingest.pipeline.stage":
@@ -71,6 +94,7 @@ def style_log_message(logger_name: str, msg: str, palette: dict[str, str]) -> st
 
 
 def _style_query_processor_msg(msg: str, palette: dict[str, str]) -> str:
+    """Style query-processor messages for display."""
     m = re.match(r"Iteration (\d+): reformulated '(.+)' -> '(.+)'", msg)
     if m:
         return f"Reformulation #{m.group(1)}: {palette['RESET']}{m.group(3)}"
@@ -107,6 +131,7 @@ def _style_query_processor_msg(msg: str, palette: dict[str, str]) -> str:
 
 
 def _style_ingest_stage_msg(msg: str, palette: dict[str, str]) -> str:
+    """Style stage-level ingestion log messages for display."""
     m = re.match(r"source=([^\s]+)\s+stage=([a-z_]+):([a-z_]+)", msg)
     if not m:
         return msg
@@ -132,6 +157,7 @@ def _style_ingest_stage_msg(msg: str, palette: dict[str, str]) -> str:
 
 
 def _style_ingest_pipeline_msg(msg: str, palette: dict[str, str]) -> str:
+    """Style high-level ingestion pipeline log messages for display."""
     m = re.match(r"ingestion_start source=(.+)", msg)
     if m:
         source = m.group(1).split("/")[-1]
@@ -191,6 +217,7 @@ def _style_ingest_pipeline_msg(msg: str, palette: dict[str, str]) -> str:
 
 
 def _format_stage_path(raw_stages: str, palette: dict[str, str]) -> str:
+    """Format a compact stage path string for display."""
     stage_items = []
     for item in [part.strip() for part in raw_stages.split(">") if part.strip()]:
         m = re.match(r"([a-z_]+):([a-z_]+)", item)

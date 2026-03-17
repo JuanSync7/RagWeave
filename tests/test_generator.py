@@ -1,25 +1,42 @@
+from unittest.mock import MagicMock
+
+from src.platform.llm.schemas import LLMResponse
 from src.retrieval.generator import OllamaGenerator
 
 
-class _Resp:
-    def __init__(self, body: bytes):
-        self._body = body
-
-    def read(self):
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-
 def test_generate_returns_text(monkeypatch):
-    def _fake_urlopen(_req, timeout=0):
-        return _Resp(b'{"message":{"content":"ok"}}')
+    mock_provider = MagicMock()
+    mock_provider.generate.return_value = LLMResponse(content="ok", model="test")
+    mock_provider.config = MagicMock(model="test-model")
 
-    monkeypatch.setattr("src.retrieval.generator.urlopen", _fake_urlopen)
+    monkeypatch.setattr(
+        "src.retrieval.generator.get_llm_provider", lambda: mock_provider
+    )
     generator = OllamaGenerator()
     out = generator.generate("q", ["ctx"])
     assert out == "ok"
+    mock_provider.generate.assert_called_once()
+
+
+def test_generate_returns_none_on_empty_chunks(monkeypatch):
+    mock_provider = MagicMock()
+    mock_provider.config = MagicMock(model="test-model")
+    monkeypatch.setattr(
+        "src.retrieval.generator.get_llm_provider", lambda: mock_provider
+    )
+    generator = OllamaGenerator()
+    out = generator.generate("q", [])
+    assert out is None
+    mock_provider.generate.assert_not_called()
+
+
+def test_generate_returns_none_on_failure(monkeypatch):
+    mock_provider = MagicMock()
+    mock_provider.generate.side_effect = RuntimeError("connection refused")
+    mock_provider.config = MagicMock(model="test-model")
+    monkeypatch.setattr(
+        "src.retrieval.generator.get_llm_provider", lambda: mock_provider
+    )
+    generator = OllamaGenerator()
+    out = generator.generate("q", ["ctx"])
+    assert out is None

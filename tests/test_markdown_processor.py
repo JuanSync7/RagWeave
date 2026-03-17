@@ -1,4 +1,4 @@
-from src.ingest.markdown_processor import (
+from src.ingest.support.markdown import (
     _build_section_metadata,
     normalize_headings_to_markdown,
     process_document_markdown,

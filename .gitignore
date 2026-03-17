@@ -11,6 +11,9 @@ build/
 .venv/
 venv/
 
+# Node
+node_modules/
+
 # Processed data (regenerable)
 processed/*.json
 processed/*.md
@@ -26,5 +29,17 @@ logs/*.log
 # Context cache
 .context/
 
+# Runtime state (certs, API keys, quotas)
+.runtime/
+
 # Environment
 .env
+
+# UV tools cache
+.uv-tools/
+
+# User documents (keep sample docs, ignore user-added files)
+# documents/
+
+# Model cache
+models/

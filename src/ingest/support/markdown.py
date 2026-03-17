@@ -1,5 +1,6 @@
 # @summary
-# Markdown-preserving document processor. Main exports: process_document_markdown, chunk_markdown, clean_document. Dependencies: re, numpy, langchain_text_splitters, extract_metadata, metadata_to_dict, strip_boilerplate, normalize_unicode, clean_whitespace, strip_trailing_short_lines, _split_sentences, _semantic_split, _build_section_metadata.
+# Markdown-preserving document processor. Main exports: process_document_markdown, chunk_markdown, clean_document.
+# Deps: re, numpy, langchain_text_splitters, src.ingest.support.document, src.ingest.common.schemas, config.settings
 # @end-summary
 """
 Markdown-preserving document processor.
@@ -24,8 +25,8 @@ from config.settings import (
     SEMANTIC_CHUNKING_ENABLED,
     SEMANTIC_SIMILARITY_THRESHOLD,
 )
-from src.ingest.document_processor import (
-    ProcessedChunk,
+from src.ingest.common.schemas import ProcessedChunk
+from src.ingest.support.document import (
     extract_metadata,
     metadata_to_dict,
     strip_boilerplate,

@@ -1,4 +1,13 @@
-"""Persistent API key lifecycle store."""
+# @summary
+# Persistent API key lifecycle store (create/list/revoke/lookup) backed by a JSON file.
+# Exports: create_api_key, list_api_keys, revoke_api_key, lookup_api_key
+# Deps: config.settings, hashlib, json, secrets, threading, time, pathlib
+# @end-summary
+"""Persistent API key lifecycle store.
+
+This module stores API keys in a local JSON file (for dev/small deployments),
+keeping only a SHA-256 hash of the raw key at rest.
+"""
 
 from __future__ import annotations
 
@@ -16,10 +25,19 @@ _LOCK = threading.Lock()
 
 
 def _ensure_parent(path: Path) -> None:
+    """Create parent directories for a store file if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _read_store(path: Path = AUTH_API_KEYS_STORE_PATH) -> dict[str, dict[str, Any]]:
+    """Read the JSON key store from disk.
+
+    Args:
+        path: Store file path.
+
+    Returns:
+        Mapping of key id to stored record.
+    """
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -29,6 +47,12 @@ def _read_store(path: Path = AUTH_API_KEYS_STORE_PATH) -> dict[str, dict[str, An
 
 
 def _write_store(payload: dict[str, dict[str, Any]], path: Path = AUTH_API_KEYS_STORE_PATH) -> None:
+    """Atomically write the JSON key store to disk.
+
+    Args:
+        payload: Store contents to write.
+        path: Store file path.
+    """
     _ensure_parent(path)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -36,6 +60,7 @@ def _write_store(payload: dict[str, dict[str, Any]], path: Path = AUTH_API_KEYS_
 
 
 def _hash_key(raw: str) -> str:
+    """Hash a raw API key for storage."""
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -47,6 +72,18 @@ def create_api_key(
     description: str = "",
     path: Path = AUTH_API_KEYS_STORE_PATH,
 ) -> dict[str, Any]:
+    """Create and persist a new API key record.
+
+    Args:
+        subject: Subject identifier (user/service).
+        tenant_id: Optional tenant id (defaults to configured default tenant).
+        roles: Optional list of roles assigned to the key.
+        description: Optional human-readable description.
+        path: Store file path.
+
+    Returns:
+        A dict containing the `api_key` (raw secret) and record metadata.
+    """
     tenant = tenant_id or DEFAULT_TENANT_ID
     key_id = f"key_{secrets.token_hex(8)}"
     secret = secrets.token_urlsafe(32)
@@ -68,7 +105,18 @@ def create_api_key(
     return {"key_id": key_id, "api_key": raw_key, **record}
 
 
-def list_api_keys(include_revoked: bool = False, path: Path = AUTH_API_KEYS_STORE_PATH) -> list[dict[str, Any]]:
+def list_api_keys(
+    include_revoked: bool = False, path: Path = AUTH_API_KEYS_STORE_PATH
+) -> list[dict[str, Any]]:
+    """List API keys stored on disk.
+
+    Args:
+        include_revoked: Whether to include revoked keys.
+        path: Store file path.
+
+    Returns:
+        A list of key records with `key_hash` removed.
+    """
     with _LOCK:
         data = _read_store(path)
     out = []
@@ -82,6 +130,15 @@ def list_api_keys(include_revoked: bool = False, path: Path = AUTH_API_KEYS_STOR
 
 
 def revoke_api_key(key_id: str, path: Path = AUTH_API_KEYS_STORE_PATH) -> bool:
+    """Revoke an API key by id.
+
+    Args:
+        key_id: Key identifier to revoke.
+        path: Store file path.
+
+    Returns:
+        True if the key was revoked; False if not found or already revoked.
+    """
     with _LOCK:
         data = _read_store(path)
         if key_id not in data:
@@ -94,6 +151,15 @@ def revoke_api_key(key_id: str, path: Path = AUTH_API_KEYS_STORE_PATH) -> bool:
 
 
 def lookup_api_key(raw_key: str, path: Path = AUTH_API_KEYS_STORE_PATH) -> dict[str, Any] | None:
+    """Look up an API key record by raw key value.
+
+    Args:
+        raw_key: Raw API key presented by a client.
+        path: Store file path.
+
+    Returns:
+        The matching record (including `key_id`) if found and not revoked; otherwise None.
+    """
     hashed = _hash_key(raw_key)
     with _LOCK:
         data = _read_store(path)

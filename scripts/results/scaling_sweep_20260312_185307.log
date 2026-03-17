@@ -1,0 +1,104 @@
+SCALING_SWEEP_START ts=20260312_185307
+=== SCALE workers=1 ===
+--- RUN workers=1 concurrency=20 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=20
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.36 rps=561.50
+latency_ms p50=13.2 p95=224.4 p99=254.4 mean=32.7
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=162.2 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=161.3 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=1.8 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=1.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=0.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+--- RUN workers=1 concurrency=40 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=40
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.54 rps=367.47
+latency_ms p50=0.6 p95=441.9 p99=483.3 mean=82.4
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=256.5 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=0.5 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=0.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=0.3 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=0.3 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+--- RUN workers=1 concurrency=60 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=60
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.53 rps=378.27
+latency_ms p50=12.3 p95=342.8 p99=404.2 mean=57.0
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=20.8 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=1.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=22.2 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=27.6 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=8.7 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+=== SCALE workers=2 ===
+--- RUN workers=2 concurrency=20 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=20
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.45 rps=447.75
+latency_ms p50=18.8 p95=267.3 p99=289.2 mean=41.9
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=172.0 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=21.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=1.3 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=162.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=4.9 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+--- RUN workers=2 concurrency=40 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=40
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.54 rps=370.58
+latency_ms p50=24.3 p95=423.4 p99=461.4 mean=91.0
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=0.8 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=0.2 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=0.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=0.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=0.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+--- RUN workers=2 concurrency=60 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=60
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.67 rps=299.71
+latency_ms p50=16.8 p95=501.5 p99=516.5 mean=108.8
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=26.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=15.0 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=18.2 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=13.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=3.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+=== SCALE workers=4 ===
+--- RUN workers=4 concurrency=20 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=20
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.40 rps=495.04
+latency_ms p50=15.8 p95=248.0 p99=270.7 mean=37.7
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=184.5 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=0.6 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=173.0 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=0.5 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=0.5 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+--- RUN workers=4 concurrency=40 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=40
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.65 rps=307.13
+latency_ms p50=22.2 p95=388.8 p99=437.9 mean=68.7
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=14.8 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=45.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=450.9 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=1.1 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=410.3 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+--- RUN workers=4 concurrency=60 total=200 ---
+starting load test url=http://localhost:8000/query total_requests=200 concurrency=60
+completed requests=200 ok=0 errors=200 error_rate=100.00% duration_s=0.66 rps=303.81
+latency_ms p50=13.9 p95=353.6 p99=397.4 mean=57.6
+errors by status: {0: 200}
+error_sample_1 status=0 latency_ms=7.9 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_2 status=0 latency_ms=18.6 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_3 status=0 latency_ms=9.4 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_4 status=0 latency_ms=7.2 msg=URLError: <urlopen error [Errno 111] Connection refused>
+error_sample_5 status=0 latency_ms=15.0 msg=URLError: <urlopen error [Errno 111] Connection refused>
+SLO check failed: error_rate=100.00% > max_error_rate=1.00%
+=== SCALE workers=6 ===

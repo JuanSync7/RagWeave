@@ -1,0 +1,24 @@
+# Virtual environments & caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.uv-tools/
+
+# Data & runtime artifacts
+.weaviate_data/
+logs/
+processed/
+documents/
+
+# Node modules (console frontend)
+server/console/web/node_modules/
+
+# Git internals
+.git/
+
+# Context-agent state (not useful for code changes)
+.context/
+
+# Runtime state
+.runtime/

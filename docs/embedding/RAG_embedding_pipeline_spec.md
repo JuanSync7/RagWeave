@@ -14,7 +14,7 @@
 |-------|-------|
 | System | AION RAG Document Embedding Pipeline |
 | Document Type | System Specification |
-| Companion Documents | RAG_embedding_pipeline_arch.md (Detailed Design), RAG_embedding_pipeline_summary.md (Executive Summary) |
+| Companion Documents | RAG_embedding_pipeline_spec_summary.md (Combined Specification + Architecture Summary), INGESTION_PIPELINE_IMPLEMENTATION.md (Implementation Guide) |
 | Version | 2.0.0 |
 | Status | Draft |
 
@@ -1602,9 +1602,8 @@ The vector store collection MUST support the following property categories:
 
 | Document | Purpose |
 |----------|---------|
-| RAG_embedding_pipeline_arch.md | Detailed design and architecture — implementation-level specification including code snippets, algorithms, data structures, and library-specific details |
-| RAG_embedding_pipeline_spec_summary.md | Specification summary — requirements overview, scope, security/deployment, phasing, and open questions for stakeholders and team leads |
-| RAG_embedding_pipeline_summary.md | Architecture summary — wireframe diagrams, code abstractions, implementation discussion points, and risk register for developers |
+| RAG_embedding_pipeline_spec_summary.md | Combined specification + architecture summary — requirements overview, architecture wireframes, design decisions, risk register, and phasing |
+| INGESTION_PIPELINE_IMPLEMENTATION.md | Phased implementation plan with task breakdown and code appendix |
 | Strategic Proposal: AI-Enabled Knowledge Management Platform | Business case, adoption strategy, infrastructure requirements, and phased rollout plan. This spec is a sub-component of the platform described in the proposal. |
 
 ---

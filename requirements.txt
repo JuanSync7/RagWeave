@@ -1,3 +1,5 @@
+# Auto-generated from pyproject.toml [project.dependencies].
+# For development deps (pytest, etc.), install with: uv pip install -e ".[dev]"
 weaviate-client
 sentence-transformers
 transformers
@@ -9,6 +11,15 @@ langgraph
 numpy
 temporalio
 langfuse
-docling
-pytest
-pytest-mock
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+accelerate
+prometheus-client
+redis
+pyjwt[crypto]
+mcp>=1.26.0
+docling>=2.79.0
+nemoguardrails>=0.21.0
+litellm
+pyyaml

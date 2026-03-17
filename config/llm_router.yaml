@@ -1,0 +1,49 @@
+# LiteLLM Router configuration
+# Activated when RAG_LLM_ROUTER_CONFIG points to this file.
+# Docs: https://docs.litellm.ai/docs/routing
+#
+# When multiple entries share the same model_name, the Router provides
+# automatic fallback + load balancing between them.
+
+model_list:
+  # "default" alias — used by retrieval, ingestion LLM, memory compaction
+  - model_name: "default"
+    litellm_params:
+      model: "ollama/qwen2.5:3b"
+      api_base: "http://localhost:11434"
+
+  # Uncomment to add a cloud fallback for "default":
+  # - model_name: "default"
+  #   litellm_params:
+  #     model: "openai/gpt-4o-mini"
+  #     api_key: "os.environ/RAG_LLM_API_KEY"
+
+  # "query" alias — used by retrieval query reformulation/evaluation
+  - model_name: "query"
+    litellm_params:
+      model: "ollama/qwen2.5:3b"
+      api_base: "http://localhost:11434"
+
+  # "vision" alias — used by ingestion multimodal processing
+  - model_name: "vision"
+    litellm_params:
+      model: "ollama/qwen2.5vl:3b"
+      api_base: "http://localhost:11434"
+
+  # "smart" alias — higher-quality model for complex reasoning tasks
+  # - model_name: "smart"
+  #   litellm_params:
+  #     model: "openai/gpt-4o"
+  #     api_key: "os.environ/RAG_LLM_API_KEY"
+
+  # "fast" alias — lightweight tasks (classification, extraction)
+  # - model_name: "fast"
+  #   litellm_params:
+  #     model: "ollama/qwen2.5:1.5b"
+  #     api_base: "http://localhost:11434"
+
+router_settings:
+  routing_strategy: "simple-shuffle"
+  num_retries: 3
+  retry_after: 5
+  allowed_fails: 2

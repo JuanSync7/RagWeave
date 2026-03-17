@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # @summary
-# Ingest documents from documents/ into Weaviate. Main exports: ingest, KnowledgeGraphBuilder, LocalBGEEmbeddings. Deps: pathlib, json, src.core.embeddings, src.ingest.markdown_processor, src.ingest.document_processor, src.core.knowledge_graph, src.core.vector_store, config.settings
+# Ingest documents from documents/ into Weaviate. Main exports: ingest.
+# Deps: config.settings, src.ingest.pipeline.impl, src.platform.validation
 # @end-summary
 """Ingest documents into Weaviate and optionally build a knowledge graph."""
 
@@ -15,15 +16,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config.settings import (
     DOCUMENTS_DIR,
-    INGESTION_MANIFEST_PATH,
     PROJECT_ROOT,
 )
-from src.ingest.pipeline_impl import (
+from src.ingest.pipeline.impl import (
     IngestionConfig,
     ingest_directory,
-    _load_manifest as _pipeline_load_manifest,
-    _save_manifest as _pipeline_save_manifest,
-    _sha256_path as _pipeline_sha256_path,
 )
 from src.platform.validation import validate_documents_dir
 
@@ -32,18 +29,6 @@ logging.basicConfig(
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger("rag.ingest")
-
-
-def _sha256_path(path: Path) -> str:
-    return _pipeline_sha256_path(path)
-
-
-def _load_manifest() -> dict:
-    return _pipeline_load_manifest(INGESTION_MANIFEST_PATH)
-
-
-def _save_manifest(manifest: dict) -> None:
-    _pipeline_save_manifest(manifest, INGESTION_MANIFEST_PATH)
 
 
 def ingest(

@@ -1,0 +1,18 @@
+SCALING_SWEEP_START ts=20260312_185614
+=== SCALE workers=1 ===
+--- WARMUP workers=1 concurrency=20 ---
+starting load test url=http://localhost:8000 total_requests=1 concurrency=1
+completed requests=1 ok=1 errors=0 error_rate=0.00% duration_s=1.73 rps=0.58
+latency_ms p50=1723.6 p95=1723.6 p99=1723.6 mean=1723.6
+SLO check passed.
+--- RUN workers=1 concurrency=20 total=200 ---
+starting load test url=http://localhost:8000 total_requests=200 concurrency=20
+completed requests=200 ok=15 errors=185 error_rate=92.50% duration_s=360.67 rps=0.55
+latency_ms p50=60040.2 p95=60069.6 p99=60311.0 mean=33926.7
+errors by status: {0: 104, 503: 81}
+error_sample_1 status=0 latency_ms=60247.0 msg=Error: timed out
+error_sample_2 status=0 latency_ms=60264.2 msg=Error: timed out
+error_sample_3 status=0 latency_ms=60290.2 msg=Error: timed out
+error_sample_4 status=0 latency_ms=60310.2 msg=Error: timed out
+error_sample_5 status=0 latency_ms=60311.0 msg=Error: timed out
+SLO check passed.

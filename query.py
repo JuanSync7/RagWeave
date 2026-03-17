@@ -279,6 +279,38 @@ def display_results(response, elapsed: float) -> None:
         terms = ", ".join(response.kg_expanded_terms[:5])
         print(f"  {DIM}KG expansion{RESET}  {B_BLUE}{terms}{RESET}")
 
+    # Token budget / context window usage
+    tb = getattr(response, "token_budget", None)
+    if tb:
+        pct = tb.usage_percent if hasattr(tb, "usage_percent") else (tb.get("usage_percent", 0) if isinstance(tb, dict) else 0)
+        inp = tb.input_tokens if hasattr(tb, "input_tokens") else (tb.get("input_tokens", 0) if isinstance(tb, dict) else 0)
+        ctx = tb.context_length if hasattr(tb, "context_length") else (tb.get("context_length", 0) if isinstance(tb, dict) else 0)
+        mdl = tb.model_name if hasattr(tb, "model_name") else (tb.get("model_name", "") if isinstance(tb, dict) else "")
+
+        if pct >= 90:
+            pct_color = B_RED
+        elif pct >= 70:
+            pct_color = B_YELLOW
+        else:
+            pct_color = B_GREEN
+        print(f"  {DIM}Context{RESET}       {pct_color}{pct:.0f}%{RESET} {DIM}({inp}/{ctx} tokens, {mdl}){RESET}")
+
+        # Detailed breakdown
+        bd = tb.breakdown if hasattr(tb, "breakdown") else (tb.get("breakdown") if isinstance(tb, dict) else None)
+        if bd:
+            sp = bd.system_prompt if hasattr(bd, "system_prompt") else (bd.get("system_prompt", 0) if isinstance(bd, dict) else 0)
+            mem = bd.memory_context if hasattr(bd, "memory_context") else (bd.get("memory_context", 0) if isinstance(bd, dict) else 0)
+            chk = bd.retrieval_chunks if hasattr(bd, "retrieval_chunks") else (bd.get("retrieval_chunks", 0) if isinstance(bd, dict) else 0)
+            qry = bd.user_query if hasattr(bd, "user_query") else (bd.get("user_query", 0) if isinstance(bd, dict) else 0)
+            oh = bd.template_overhead if hasattr(bd, "template_overhead") else (bd.get("template_overhead", 0) if isinstance(bd, dict) else 0)
+            print(f"                {DIM}system:{sp}  memory:{mem}  chunks:{chk}  query:{qry}  overhead:{oh}{RESET}")
+
+        # Actual tokens from LLM response
+        apt = tb.actual_prompt_tokens if hasattr(tb, "actual_prompt_tokens") else (tb.get("actual_prompt_tokens", 0) if isinstance(tb, dict) else 0)
+        act = tb.actual_completion_tokens if hasattr(tb, "actual_completion_tokens") else (tb.get("actual_completion_tokens", 0) if isinstance(tb, dict) else 0)
+        if apt:
+            print(f"  {DIM}Tokens{RESET}        {DIM}actual: {apt} in + {act} out = {apt + act} total{RESET}")
+
     print(f"  {DIM}{'─' * 72}{RESET}")
 
     if response.action == "ask_user":

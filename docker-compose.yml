@@ -137,7 +137,7 @@ services:
       # Seed embedded Weaviate data from local ingestion output (read-only).
       - ./.weaviate_data:/seed_weaviate:ro
       # Host model cache (read-only) for containerized worker startup.
-      - ${RAG_MODEL_ROOT:-/home/juansync7/models}:/models:ro
+      - ${RAG_MODEL_ROOT:-./models}:/models:ro
     # GPU note: if needed, run with NVIDIA container runtime enabled.
     # Example: set `gpus: all` here when your Docker setup supports it.
 

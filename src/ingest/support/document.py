@@ -13,12 +13,13 @@ structured document headers.
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, DEFAULT_TENANT_ID
+from src.ingest.common.schemas import ProcessedChunk
 
 
 @dataclass
@@ -29,13 +30,6 @@ class DocumentMetadata:
     author: Optional[str] = None
     date: Optional[str] = None
     tags: Optional[List[str]] = None
-
-
-@dataclass
-class ProcessedChunk:
-    """A processed document chunk ready for embedding."""
-    text: str
-    metadata: dict = field(default_factory=dict)
 
 
 # --- Stage 1: Header/Footer/Boilerplate Removal ---

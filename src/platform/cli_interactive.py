@@ -1,4 +1,14 @@
-"""Shared interactive command menu/input helpers for terminal CLIs."""
+# @summary
+# Terminal CLI helpers for interactive slash-command selection and tab completion.
+# Exports: get_menu_items, redraw_menu, read_key, interactive_command_select,
+#          get_input_with_menu, setup_tab_completion
+# Deps: os, readline, sys, termios, tty
+# @end-summary
+"""Interactive slash-command input helpers for terminal CLIs.
+
+This module provides a lightweight terminal UI for choosing slash commands via a
+live-filtering dropdown, plus readline tab-completion integration.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +24,15 @@ def get_menu_items(
     registry: dict[str, tuple],
     filter_text: str = "",
 ) -> list[tuple[str, str]]:
-    """Return filtered (command_name, description) pairs."""
+    """Build filtered menu items from a command registry.
+
+    Args:
+        registry: Mapping of command names to `(handler, description)` tuples.
+        filter_text: Optional prefix filter (case-insensitive).
+
+    Returns:
+        A list of `(command_name, description)` pairs.
+    """
     ft = filter_text.lower()
     return [
         (name, desc)
@@ -35,7 +53,19 @@ def redraw_menu(
     bold_cyan: str,
     bg_sel: str,
 ) -> None:
-    """Redraw prompt + typed buffer + command dropdown below it."""
+    """Redraw prompt + typed buffer + command dropdown below it.
+
+    Args:
+        prompt: Prompt string to render.
+        buf: Current input buffer (including leading `/`).
+        items: Menu items to render.
+        sel: Selected index within `items`.
+        box_width: Width of the dropdown box interior.
+        dim: ANSI escape prefix used for dimmed text.
+        reset: ANSI escape sequence to reset formatting.
+        bold_cyan: ANSI escape prefix used for command name styling.
+        bg_sel: ANSI escape prefix for selected-row background.
+    """
     items = list(items)
     w = box_width
     sys.stdout.write(f"\r\033[J{prompt}{buf}")
@@ -65,7 +95,14 @@ def redraw_menu(
 
 
 def read_key(fd: int) -> str:
-    """Read one keypress, including arrow key escape sequences."""
+    """Read one keypress, including arrow key escape sequences.
+
+    Args:
+        fd: File descriptor for stdin.
+
+    Returns:
+        A symbolic key name (e.g. "UP", "DOWN", "ESC") or a single character.
+    """
     ch = sys.stdin.read(1)
     if ch == "\x1b":
         try:
@@ -104,7 +141,24 @@ def interactive_command_select(
     bold_cyan: str,
     bg_sel: str,
 ) -> str | None:
-    """Live-filtering command selector. Returns selected command or None."""
+    """Interactively select a slash command via a live-filtering dropdown.
+
+    Args:
+        prompt: Prompt string to render.
+        registry: Mapping of command names to `(handler, description)` tuples.
+        box_width: Width of the dropdown box interior.
+        dim: ANSI escape prefix used for dimmed text.
+        reset: ANSI escape sequence to reset formatting.
+        bold_cyan: ANSI escape prefix used for command name styling.
+        bg_sel: ANSI escape prefix for selected-row background.
+
+    Returns:
+        The selected command name (without leading `/`), or None if cancelled.
+
+    Raises:
+        KeyboardInterrupt: If the user presses Ctrl-C.
+        EOFError: If the user presses Ctrl-D.
+    """
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     buf = "/"
@@ -178,7 +232,25 @@ def get_input_with_menu(
     bold_cyan: str,
     bg_sel: str,
 ) -> str:
-    """Read one line; opens interactive / menu when first key is slash."""
+    """Read a line of input, opening the slash-command menu when appropriate.
+
+    Args:
+        prompt: Prompt string to render.
+        registry: Mapping of command names to `(handler, description)` tuples.
+        box_width: Width of the dropdown box interior.
+        dim: ANSI escape prefix used for dimmed text.
+        reset: ANSI escape sequence to reset formatting.
+        bold_cyan: ANSI escape prefix used for command name styling.
+        bg_sel: ANSI escape prefix for selected-row background.
+
+    Returns:
+        The entered text. If the user chooses a command, the returned value is
+        `/<command>`. Returns an empty string if cancelled.
+
+    Raises:
+        KeyboardInterrupt: If the user presses Ctrl-C.
+        EOFError: If the user presses Ctrl-D.
+    """
     if not sys.stdin.isatty():
         return input(prompt)
 
@@ -233,7 +305,11 @@ def get_input_with_menu(
 
 
 def setup_tab_completion(registry: dict[str, tuple]) -> None:
-    """Configure readline tab-completion for / commands."""
+    """Configure readline tab completion for slash commands.
+
+    Args:
+        registry: Mapping of command names to `(handler, description)` tuples.
+    """
     def completer(text, state):
         if text.startswith("/"):
             options = [f"/{name}" for name in registry if f"/{name}".startswith(text)]

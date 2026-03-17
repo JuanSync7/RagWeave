@@ -26,6 +26,11 @@ dependencies = [
   "prometheus-client",
   "redis",
   "pyjwt[crypto]",
+  "mcp>=1.26.0",
+  "docling>=2.79.0",
+  "nemoguardrails>=0.21.0",
+  "litellm",
+  "pyyaml",
 ]
 
 [project.optional-dependencies]

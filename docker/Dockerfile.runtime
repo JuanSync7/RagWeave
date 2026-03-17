@@ -10,14 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project metadata and source needed by server/api + worker.
+# Install all project dependencies from pyproject.toml.
 COPY pyproject.toml /app/pyproject.toml
+RUN pip install --upgrade pip && pip install .
+
+# Copy source code needed by server/api + worker.
 COPY config /app/config
 COPY src /app/src
 COPY server /app/server
 COPY prompts /app/prompts
-COPY processed /app/processed
-COPY documents /app/documents
-
-RUN pip install --upgrade pip && pip install .
-

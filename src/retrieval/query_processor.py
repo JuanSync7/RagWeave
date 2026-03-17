@@ -1,9 +1,7 @@
 # @summary
-# One-sentence description of what the file does:
-# A retrieval-based query processing module using LangGraph for confidence-based routing with user-friendly exports and dependency management.
-#
-# Key exports and dependencies:
-# Exports process_query, QueryResult, QueryAction; relies on logging, json, re, state_graph, _COMPILED_GRAPH.
+# LangGraph-based query processing with confidence routing, backed by LiteLLM Router.
+# Exports: process_query, QueryResult, QueryAction, warm_up_ollama
+# Deps: langgraph, config.settings, src.platform.llm, src.retrieval.schemas
 # @end-summary
 """
 LangGraph-based query processing pipeline.
@@ -21,11 +19,8 @@ import json
 import logging
 import os
 import re
-import hashlib
 from collections import defaultdict
 from typing import Dict, List, Optional
-from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 from langgraph.graph import END, StateGraph
 
@@ -33,22 +28,14 @@ from config.settings import (
     DOMAIN_DESCRIPTION,
     KG_PATH,
     MAX_SANITIZATION_ITERATIONS,
-    OLLAMA_BASE_URL,
     PROMPTS_DIR,
     QUERY_CONFIDENCE_THRESHOLD,
     QUERY_LOG_DIR,
     QUERY_MAX_LENGTH,
-    QUERY_PROCESSING_MODEL,
     QUERY_PROCESSING_TEMPERATURE,
-    QUERY_PROCESSING_TIMEOUT,
-    RETRY_BACKOFF_MULTIPLIER,
-    RETRY_INITIAL_BACKOFF_SECONDS,
-    RETRY_MAX_ATTEMPTS,
-    RETRY_MAX_BACKOFF_SECONDS,
 )
+from src.platform.llm import get_llm_provider
 from src.platform.observability.providers import get_tracer
-from src.platform.reliability.providers import get_retry_provider
-from src.platform.schemas.reliability import RetryPolicy
 from src.retrieval.schemas import QueryAction, QueryResult, QueryState
 from src.retrieval.utils import parse_json_object
 
@@ -67,15 +54,7 @@ if not logger.handlers:
     )
     logger.addHandler(_file_handler)
 
-_retry_provider = get_retry_provider()
 _tracer = get_tracer()
-_retry_policy = RetryPolicy(
-    max_attempts=RETRY_MAX_ATTEMPTS,
-    initial_backoff_seconds=RETRY_INITIAL_BACKOFF_SECONDS,
-    max_backoff_seconds=RETRY_MAX_BACKOFF_SECONDS,
-    backoff_multiplier=RETRY_BACKOFF_MULTIPLIER,
-    retryable_exceptions=(URLError, TimeoutError, ConnectionError),
-)
 
 
 # ---------------------------------------------------------------------------
@@ -198,77 +177,56 @@ def _detect_injection(query: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Ollama helper (matches generator.py pattern — raw urllib)
+# LLM helper (backed by LiteLLM Router via LLMProvider)
 # ---------------------------------------------------------------------------
 
 
-def _call_ollama(prompt: str, system: str = "") -> Optional[str]:
-    """Call Ollama chat API. Returns response text or None on failure."""
+def _call_llm(prompt: str, system: str = "") -> Optional[str]:
+    """Call LLM via LLMProvider. Returns response text or None on failure."""
     span = _tracer.start_span(
-        "query_processor.call_ollama",
-        {"model": QUERY_PROCESSING_MODEL},
+        "query_processor.call_llm",
+        {"model_alias": "query"},
     )
-    messages = []
+    messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    payload = {
-        "model": QUERY_PROCESSING_MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "temperature": QUERY_PROCESSING_TEMPERATURE,
-            "num_predict": 256,
-        },
-    }
     try:
-        req = Request(
-            f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        def _do_request():
-            with urlopen(req, timeout=QUERY_PROCESSING_TIMEOUT) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                return result.get("message", {}).get("content")
-
-        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
-        result = _retry_provider.execute(
-            operation_name="query_processor_ollama_chat",
-            fn=_do_request,
-            policy=_retry_policy,
-            idempotency_key=f"query_ollama:{key}",
+        provider = get_llm_provider()
+        response = provider.generate(
+            messages,
+            model_alias="query",
+            temperature=QUERY_PROCESSING_TEMPERATURE,
+            max_tokens=256,
         )
         span.end(status="ok")
-        return result
-    except (URLError, json.JSONDecodeError, KeyError) as e:
-        logger.warning("Ollama call failed: %s", e)
+        return response.content or None
+    except Exception as e:
+        logger.warning("LLM call failed: %s", e)
         span.end(status="error", error=e)
         return None
 
 
-def _check_ollama_available() -> bool:
-    """Check if Ollama API is reachable."""
-    span = _tracer.start_span("query_processor.ollama_healthcheck")
+# Backward-compatible alias
+_call_ollama = _call_llm
+
+
+def _check_llm_available() -> bool:
+    """Check if the LLM provider is reachable."""
+    span = _tracer.start_span("query_processor.llm_healthcheck")
     try:
-        req = Request(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags", method="GET")
-        def _check():
-            with urlopen(req, timeout=5) as resp:
-                return resp.status == 200
-        result = _retry_provider.execute(
-            operation_name="query_processor_ollama_healthcheck",
-            fn=_check,
-            policy=_retry_policy,
-            idempotency_key="query_ollama_healthcheck",
-        )
+        provider = get_llm_provider()
+        result = provider.is_available(model_alias="query")
         span.end(status="ok")
         return result
     except Exception:
         span.end(status="error")
         return False
+
+
+# Backward-compatible alias
+_check_ollama_available = _check_llm_available
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +369,7 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
         domain_description=DOMAIN_DESCRIPTION,
     )
 
-    result = _call_ollama(prompt)
+    result = _call_llm(prompt)
 
     if result:
         try:
@@ -549,16 +507,16 @@ def warm_up_ollama() -> None:
     Call this at worker startup so the first real query doesn't pay the
     cold-start cost (~5-10s model load).
     """
-    if not _check_ollama_available():
-        logger.warning("Ollama not reachable — skipping warm-up")
+    if not _check_llm_available():
+        logger.warning("LLM not reachable — skipping warm-up")
         return
 
-    logger.info("Warming up Ollama model '%s'...", QUERY_PROCESSING_MODEL)
+    logger.info("Warming up query LLM model...")
     import time
     t0 = time.perf_counter()
-    _call_ollama("ping", system="Reply with 'ok' only.")
+    _call_llm("ping", system="Reply with 'ok' only.")
     elapsed = (time.perf_counter() - t0) * 1000
-    logger.info("Ollama warm-up done in %.0fms", elapsed)
+    logger.info("LLM warm-up done in %.0fms", elapsed)
 
 
 def process_query(
@@ -587,9 +545,9 @@ def process_query(
     span_status = "ok"
     span_error = None
     try:
-        ollama_available = _check_ollama_available()
+        ollama_available = _check_llm_available()
         if not ollama_available:
-            logger.warning("Ollama unavailable; falling back to heuristic mode")
+            logger.warning("LLM unavailable; falling back to heuristic mode")
 
         initial_state: QueryState = {
             "original_query": raw_query,

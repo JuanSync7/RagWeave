@@ -1,4 +1,15 @@
-"""Conversation memory providers with Redis canonical backend."""
+# @summary
+# Conversation memory providers (Redis canonical backend + no-op fallback) and singleton factory.
+# Exports: ConversationMemoryProvider, NoopConversationMemory, RedisConversationMemory,
+#          get_conversation_memory, conversation_meta_to_dict, conversation_turns_to_dict
+# Deps: config.settings, json, logging, uuid, dataclasses, src.platform.memory.utils, src.platform.llm
+# @end-summary
+"""Conversation memory providers and factory.
+
+This module provides a Redis-backed conversation memory implementation plus a
+no-op fallback when memory is disabled or unavailable. It also exposes a
+process-wide singleton resolver for use by API and CLI surfaces.
+"""
 
 from __future__ import annotations
 
@@ -48,6 +59,18 @@ class ConversationMemoryProvider:
         conversation_id: str | None = None,
         title: str = "",
     ) -> ConversationMeta:
+        """Create or load a conversation.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            conversation_id: Optional conversation id to reuse.
+            title: Optional title for new conversations.
+
+        Returns:
+            Conversation metadata.
+        """
         raise NotImplementedError
 
     def list_conversations(
@@ -58,6 +81,17 @@ class ConversationMemoryProvider:
         project_id: str | None,
         limit: int = 50,
     ) -> list[ConversationMeta]:
+        """List recent conversations for a subject scope.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            limit: Max number of conversations to return.
+
+        Returns:
+            List of conversation metadata entries, newest first.
+        """
         raise NotImplementedError
 
     def get_turns(
@@ -69,6 +103,18 @@ class ConversationMemoryProvider:
         conversation_id: str,
         limit: int = 100,
     ) -> list[ConversationTurn]:
+        """Fetch conversation turns.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            conversation_id: Conversation identifier.
+            limit: Max number of turns to return.
+
+        Returns:
+            List of conversation turns, oldest-to-newest.
+        """
         raise NotImplementedError
 
     def append_turn(
@@ -82,6 +128,17 @@ class ConversationMemoryProvider:
         content: str,
         query_id: str = "",
     ) -> None:
+        """Append a single turn to a conversation.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            conversation_id: Conversation identifier.
+            role: Turn role ("user", "assistant", "system").
+            content: Turn text content.
+            query_id: Optional query/request id for traceability.
+        """
         raise NotImplementedError
 
     def build_context(
@@ -93,6 +150,18 @@ class ConversationMemoryProvider:
         conversation_id: str,
         turn_window: int | None = None,
     ) -> MemoryContext:
+        """Build a bounded memory context for the next request.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            conversation_id: Conversation identifier.
+            turn_window: Optional max recent turns override.
+
+        Returns:
+            A `MemoryContext` containing summary + recent turns + rendered context text.
+        """
         raise NotImplementedError
 
     def compact_if_needed(
@@ -104,6 +173,18 @@ class ConversationMemoryProvider:
         conversation_id: str,
         force: bool = False,
     ) -> ConversationSummary:
+        """Compact older turns into a rolling summary, if needed.
+
+        Args:
+            tenant_id: Tenant identifier.
+            subject: Subject identifier (user/service).
+            project_id: Optional project identifier.
+            conversation_id: Conversation identifier.
+            force: If True, compact regardless of thresholds.
+
+        Returns:
+            The current (possibly updated) conversation summary.
+        """
         raise NotImplementedError
 
     def delete_conversation(
@@ -219,6 +300,12 @@ class RedisConversationMemory(ConversationMemoryProvider):
     """Redis-backed canonical conversation memory."""
 
     def __init__(self, redis_url: str, key_prefix: str) -> None:
+        """Create a Redis-backed memory provider.
+
+        Args:
+            redis_url: Redis connection URL.
+            key_prefix: Key prefix namespace for stored data.
+        """
         import redis  # type: ignore
 
         self._client = redis.from_url(redis_url, decode_responses=True)
@@ -226,21 +313,27 @@ class RedisConversationMemory(ConversationMemoryProvider):
         self._llm_provider = get_llm_provider()
 
     def _scope(self, tenant_id: str, subject: str, project_id: str | None) -> str:
+        """Build the scope key for a tenant/subject/project tuple."""
         return f"{tenant_id}:{subject}:{project_id or '-'}"
 
     def _meta_key(self, scope: str, conversation_id: str) -> str:
+        """Return the Redis key for conversation metadata."""
         return f"{self._prefix}:conv:{scope}:{conversation_id}:meta"
 
     def _turns_key(self, scope: str, conversation_id: str) -> str:
+        """Return the Redis key for conversation turns list."""
         return f"{self._prefix}:conv:{scope}:{conversation_id}:turns"
 
     def _index_key(self, scope: str) -> str:
+        """Return the Redis key for the conversation index sorted set."""
         return f"{self._prefix}:conv:{scope}:index"
 
     def _now(self) -> int:
+        """Return current timestamp in milliseconds."""
         return now_ms()
 
     def _meta_from_hash(self, raw: dict[str, Any], conversation_id: str) -> ConversationMeta:
+        """Convert a Redis hash payload into `ConversationMeta`."""
         summary_text = str(raw.get("summary_text", "") or "")
         summary = ConversationSummary(
             text=summary_text,
@@ -408,6 +501,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         )
 
     def _llm_summarize(self, turns: list[ConversationTurn], existing_summary: str) -> str:
+        """Summarize turns using the configured LLM, with heuristic fallback."""
         if not turns:
             return existing_summary
         context_parts: list[str] = []
@@ -506,7 +600,11 @@ _MEMORY: ConversationMemoryProvider | None = None
 
 
 def get_conversation_memory() -> ConversationMemoryProvider:
-    """Resolve configured memory provider singleton."""
+    """Resolve the configured conversation memory provider singleton.
+
+    Returns:
+        The configured `ConversationMemoryProvider`.
+    """
 
     global _MEMORY
     if _MEMORY is not None:
@@ -529,11 +627,13 @@ def get_conversation_memory() -> ConversationMemoryProvider:
 
 
 def conversation_meta_to_dict(meta: ConversationMeta) -> dict[str, Any]:
+    """Convert conversation metadata to a JSON-serializable dict."""
     payload = asdict(meta)
     return payload
 
 
 def conversation_turns_to_dict(turns: list[ConversationTurn]) -> list[dict[str, Any]]:
+    """Convert conversation turns to JSON-serializable dicts."""
     return [asdict(turn) for turn in turns]
 
 

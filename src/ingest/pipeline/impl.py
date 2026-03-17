@@ -1,0 +1,445 @@
+# @summary
+# 13-node LangGraph ingestion implementation with configurable optional stages.
+# @end-summary
+
+"""Ingestion pipeline runtime orchestration and public implementation API."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from pathlib import Path
+from typing import Any, Optional
+
+from config.settings import (
+    GLINER_ENABLED,
+    KG_OBSIDIAN_EXPORT_DIR,
+    KG_PATH,
+    PROCESSED_DIR,
+    RAG_INGESTION_MIRROR_DIR,
+    RAG_INGESTION_EXPORT_EXTENSIONS,
+)
+from src.core.embeddings import LocalBGEEmbeddings
+from src.core.knowledge_graph import KnowledgeGraphBuilder, export_obsidian
+from src.core.vector_store import (
+    delete_collection,
+    delete_documents_by_source_key,
+    ensure_collection,
+    get_weaviate_client,
+)
+from src.ingest.support.docling import ensure_docling_ready
+from src.ingest.support.vision import ensure_vision_ready
+from src.ingest.common.schemas import ManifestEntry, SourceIdentity
+from src.ingest.common.utils import load_manifest, save_manifest, sha256_path
+from src.ingest.nodes.document_ingestion import document_ingestion_node
+from src.ingest.common.shared import _extract_keywords_fallback
+from src.ingest.common.types import (
+    IngestionConfig,
+    IngestionDesignCheck,
+    IngestionRunSummary,
+    PIPELINE_NODE_NAMES,
+    Runtime,
+)
+from src.ingest.pipeline.workflow import build_graph
+
+logger = logging.getLogger("rag.ingest.pipeline")
+_GRAPH = build_graph()
+_LOCAL_CONNECTOR = "local_fs"
+
+
+def _safe_relative(path: Path, root: Path) -> str:
+    """Return a stable display path relative to root when possible."""
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _local_source_identity(path: Path, documents_root: Path) -> SourceIdentity:
+    """Build stable source identity fields for local filesystem ingestion."""
+    resolved = path.resolve()
+    stat = resolved.stat()
+    source_id = f"{stat.st_dev}:{stat.st_ino}"
+    source_key = f"{_LOCAL_CONNECTOR}:{source_id}"
+    return {
+        "source_path": str(resolved),
+        "source_name": _safe_relative(resolved, documents_root),
+        "source_uri": resolved.as_uri(),
+        "source_id": source_id,
+        "source_key": source_key,
+        "connector": _LOCAL_CONNECTOR,
+        "source_version": str(stat.st_mtime_ns),
+    }
+
+
+def _mirror_file_stem(source_name: str, source_key: str) -> str:
+    """Return a stable mirror filename stem for a source."""
+    safe_name = source_name.replace("/", "__").replace("\\", "__")
+    suffix = hashlib.sha1(source_key.encode("utf-8")).hexdigest()[:8]
+    return f"{safe_name}.{suffix}"
+
+
+def _write_refactor_mirror_artifacts(
+    source: SourceIdentity,
+    result: dict,
+    config: IngestionConfig,
+) -> None:
+    """Persist original/refactored mirrors plus chunk-level provenance mapping."""
+    mirror_dir = Path(config.mirror_output_dir or str(RAG_INGESTION_MIRROR_DIR))
+    mirror_dir.mkdir(parents=True, exist_ok=True)
+    stem = _mirror_file_stem(source["source_name"], source["source_key"])
+    original_path = mirror_dir / f"{stem}.original.md"
+    refactored_path = mirror_dir / f"{stem}.refactored.md"
+    mapping_path = mirror_dir / f"{stem}.mapping.json"
+
+    original_path.write_text(str(result.get("raw_text", "")), encoding="utf-8")
+    refactored_path.write_text(str(result.get("refactored_text", "")), encoding="utf-8")
+
+    mapping_payload = {
+        "source": source["source_name"],
+        "source_uri": source["source_uri"],
+        "source_key": source["source_key"],
+        "source_id": source["source_id"],
+        "connector": source["connector"],
+        "source_version": source["source_version"],
+        "original_mirror_path": str(original_path),
+        "refactored_mirror_path": str(refactored_path),
+        "chunks": [
+            {
+                "chunk_index": int(chunk.metadata.get("chunk_index", idx)),
+                "chunk_id": str(chunk.metadata.get("chunk_id", "")),
+                "retrieval_text_origin": str(chunk.metadata.get("retrieval_text_origin", "")),
+                "original_char_start": int(chunk.metadata.get("original_char_start", -1)),
+                "original_char_end": int(chunk.metadata.get("original_char_end", -1)),
+                "refactored_char_start": int(chunk.metadata.get("refactored_char_start", -1)),
+                "refactored_char_end": int(chunk.metadata.get("refactored_char_end", -1)),
+                "provenance_method": str(chunk.metadata.get("provenance_method", "")),
+                "provenance_confidence": float(chunk.metadata.get("provenance_confidence", 0.0)),
+            }
+            for idx, chunk in enumerate(result.get("chunks", []))
+        ],
+    }
+    mapping_path.write_text(
+        json.dumps(mapping_payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _normalize_manifest_entries(
+    manifest: dict[str, Any],
+) -> dict[str, ManifestEntry]:
+    """Normalize old/new manifest formats into a source_key-indexed mapping."""
+    normalized: dict[str, ManifestEntry] = {}
+    for raw_key, raw_entry in manifest.items():
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = dict(raw_entry)
+        source_key = str(entry.get("source_key", "")).strip()
+        if not source_key:
+            key_text = str(raw_key)
+            if key_text.startswith(f"{_LOCAL_CONNECTOR}:"):
+                source_key = key_text
+            else:
+                source_key = f"legacy_name:{key_text}"
+                entry.setdefault("legacy_name", key_text)
+        entry["source_key"] = source_key
+        normalized[source_key] = entry
+    return normalized
+
+
+def _find_manifest_entry(
+    manifest: dict[str, ManifestEntry],
+    source: SourceIdentity,
+) -> tuple[Optional[str], ManifestEntry]:
+    """Find best manifest match for a discovered source identity."""
+    direct = manifest.get(source["source_key"])
+    if direct is not None:
+        return source["source_key"], direct
+
+    for key, entry in manifest.items():
+        if entry.get("source_id") == source["source_id"]:
+            return key, entry
+    for key, entry in manifest.items():
+        if entry.get("source_uri") == source["source_uri"]:
+            return key, entry
+
+    leaf_name = Path(source["source_path"]).name
+    for key, entry in manifest.items():
+        if entry.get("legacy_name") == leaf_name:
+            return key, entry
+    return None, ManifestEntry()
+
+
+def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
+    """Validate ingestion configuration compatibility and return actionable feedback."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    if config.chunk_overlap >= config.chunk_size:
+        errors.append("chunk_overlap must be < chunk_size")
+    if config.enable_knowledge_graph_storage and not config.enable_knowledge_graph_extraction:
+        errors.append("knowledge_graph_storage requires knowledge_graph_extraction")
+    if config.enable_knowledge_graph_storage and not config.build_kg:
+        errors.append("knowledge_graph_storage requires build_kg=True")
+    if config.enable_document_refactoring and not config.enable_llm_metadata:
+        warnings.append("refactoring enabled but LLM disabled; cleaned text used")
+    if config.enable_docling_parser and not str(config.docling_model).strip():
+        errors.append("docling parser requires a non-empty docling_model")
+    if config.enable_vision_processing:
+        if not config.enable_multimodal_processing:
+            errors.append("vision processing requires multimodal_processing to be enabled")
+    return IngestionDesignCheck(ok=not errors, errors=errors, warnings=warnings)
+
+
+def ingest_file(
+    source_path: Path,
+    runtime: Runtime,
+    source_name: str,
+    source_uri: str,
+    source_key: str,
+    source_id: str,
+    connector: str,
+    source_version: str,
+    existing_hash: str = "",
+    existing_source_uri: str = "",
+) -> dict:
+    """Run the compiled ingestion graph for a single source file."""
+    return _GRAPH.invoke(
+        {
+            "source_path": str(source_path),
+            "source_name": source_name,
+            "source_uri": source_uri,
+            "source_key": source_key,
+            "source_id": source_id,
+            "connector": connector,
+            "source_version": source_version,
+            "content_hash": "",
+            "existing_hash": existing_hash,
+            "existing_source_uri": existing_source_uri,
+            "should_skip": False,
+            "errors": [],
+            "processing_log": [],
+            "raw_text": "",
+            "structure": {},
+            "multimodal_notes": [],
+            "cleaned_text": "",
+            "refactored_text": "",
+            "chunks": [],
+            "metadata_summary": "",
+            "metadata_keywords": [],
+            "cross_references": [],
+            "kg_triples": [],
+            "stored_count": 0,
+            "runtime": runtime,
+        }
+    )
+
+
+def ingest_directory(
+    documents_dir: Path,
+    config: Optional[IngestionConfig] = None,
+    fresh: bool = True,
+    update: bool = False,
+    obsidian_export: bool = False,
+    selected_sources: Optional[list[Path]] = None,
+) -> IngestionRunSummary:
+    """Ingest a directory of documents and persist vectors/KG artifacts."""
+    config = config or IngestionConfig()
+    config.update_mode = update
+    design = verify_core_design(config)
+    if not design.ok:
+        raise ValueError("Invalid ingestion config: " + "; ".join(design.errors))
+    if config.enable_docling_parser:
+        ensure_docling_ready(
+            parser_model=config.docling_model,
+            artifacts_path=config.docling_artifacts_path,
+            auto_download=config.docling_auto_download,
+        )
+    if config.enable_vision_processing:
+        ensure_vision_ready(config)
+
+    manifest = _normalize_manifest_entries(load_manifest())
+    errors: list[str] = []
+    processed = skipped = failed = stored_chunks = 0
+
+    patterns = [
+        pattern.strip()
+        for pattern in RAG_INGESTION_EXPORT_EXTENSIONS.split(",")
+        if pattern.strip()
+    ]
+    allowed_suffixes = {pattern.lower() for pattern in patterns}
+    if selected_sources is None:
+        files = sorted(
+            {path.resolve() for p in patterns for path in documents_dir.rglob(f"*{p}")}
+        )
+    else:
+        files = sorted(
+            {
+                path.resolve()
+                for path in selected_sources
+                if path.is_file() and path.suffix.lower() in allowed_suffixes
+            }
+        )
+    if not files:
+        return IngestionRunSummary(0, 0, 0, 0, 0, [], design.warnings)
+
+    sources = [_local_source_identity(path, documents_dir) for path in files]
+    source_keys = {source["source_key"] for source in sources}
+
+    removed_sources = (
+        sorted(set(manifest.keys()) - source_keys)
+        if update and selected_sources is None
+        else []
+    )
+
+    with get_weaviate_client() as client:
+        if fresh:
+            delete_collection(client)
+            manifest = {}
+        ensure_collection(client)
+
+        for source in removed_sources:
+            delete_documents_by_source_key(
+                client,
+                source,
+                legacy_source=str(manifest.get(source, {}).get("source", "")),
+            )
+            manifest.pop(source, None)
+
+        runtime = Runtime(
+            config=config,
+            embedder=LocalBGEEmbeddings(),
+            weaviate_client=client,
+            kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
+            if config.build_kg
+            else None,
+        )
+
+        if config.export_processed:
+            PROCESSED_DIR.mkdir(exist_ok=True)
+
+        for source in sources:
+            source_path = Path(source["source_path"])
+            logger.info(
+                "ingestion_start source=%s source_key=%s",
+                source["source_name"],
+                source["source_key"],
+            )
+            matched_key, matched_entry = _find_manifest_entry(manifest, source)
+            previous_hash = matched_entry.get("content_hash", "") if update else ""
+            previous_uri = matched_entry.get("source_uri", "") if update else ""
+            result = ingest_file(
+                source_path,
+                runtime,
+                source_name=source["source_name"],
+                source_uri=source["source_uri"],
+                source_key=source["source_key"],
+                source_id=source["source_id"],
+                connector=source["connector"],
+                source_version=source["source_version"],
+                existing_hash=previous_hash if update else "",
+                existing_source_uri=previous_uri if update else "",
+            )
+            if result["errors"]:
+                failed += 1
+                errors.extend(result["errors"])
+                logger.error(
+                    "ingestion_failed source=%s source_key=%s errors=%s",
+                    source["source_name"],
+                    source["source_key"],
+                    "; ".join(result["errors"]),
+                )
+                continue
+            if result["should_skip"]:
+                skipped += 1
+                if matched_key and matched_key != source["source_key"]:
+                    manifest.pop(matched_key, None)
+                manifest[source["source_key"]] = {
+                    **matched_entry,
+                    "source": source["source_name"],
+                    "source_uri": source["source_uri"],
+                    "source_id": source["source_id"],
+                    "source_key": source["source_key"],
+                    "connector": source["connector"],
+                    "source_version": source["source_version"],
+                    "content_hash": result["content_hash"],
+                }
+                logger.info(
+                    "ingestion_skipped source=%s source_key=%s reason=unchanged stages=%s",
+                    source["source_name"],
+                    source["source_key"],
+                    " > ".join(result["processing_log"]),
+                )
+                continue
+
+            processed += 1
+            stored_chunks += int(result["stored_count"])
+            logger.info(
+                "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
+                source["source_name"],
+                source["source_key"],
+                len(result["chunks"]),
+                int(result["stored_count"]),
+                " > ".join(result["processing_log"]),
+            )
+            if config.persist_refactor_mirror:
+                _write_refactor_mirror_artifacts(source, result, config)
+            if matched_key and matched_key != source["source_key"]:
+                manifest.pop(matched_key, None)
+            stem = _mirror_file_stem(source["source_name"], source["source_key"])
+            manifest[source["source_key"]] = {
+                "source": source["source_name"],
+                "source_uri": source["source_uri"],
+                "source_id": source["source_id"],
+                "source_key": source["source_key"],
+                "connector": source["connector"],
+                "source_version": source["source_version"],
+                "content_hash": result["content_hash"],
+                "chunk_count": len(result["chunks"]),
+                "summary": result["metadata_summary"],
+                "keywords": result["metadata_keywords"],
+                "processing_log": result["processing_log"][-12:],
+                "mirror_stem": stem,
+            }
+
+            if config.export_processed:
+                export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
+                (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(
+                    result["cleaned_text"], encoding="utf-8"
+                )
+                chunk_payload = [
+                    {"chunk_index": idx, "text": chunk.text, "metadata": chunk.metadata}
+                    for idx, chunk in enumerate(result["chunks"])
+                ]
+                (PROCESSED_DIR / f"{export_stem}.chunks.json").write_text(
+                    json.dumps(chunk_payload, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+        if runtime.kg_builder is not None:
+            runtime.kg_builder.save(KG_PATH)
+            if obsidian_export:
+                export_obsidian(runtime.kg_builder.graph, KG_OBSIDIAN_EXPORT_DIR)
+
+    save_manifest(manifest)
+    return IngestionRunSummary(
+        processed=processed,
+        skipped=skipped,
+        failed=failed,
+        stored_chunks=stored_chunks,
+        removed_sources=len(removed_sources),
+        errors=errors,
+        design_warnings=design.warnings,
+    )
+
+
+__all__ = [
+    "PIPELINE_NODE_NAMES",
+    "IngestionConfig",
+    "IngestionDesignCheck",
+    "IngestionRunSummary",
+    "Runtime",
+    "ingest_directory",
+    "ingest_file",
+    "verify_core_design",
+]

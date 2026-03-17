@@ -1,4 +1,15 @@
-"""Authentication helpers for API key and JWT bearer auth."""
+# @summary
+# Authentication helpers for API key and bearer token (JWT/OIDC) auth.
+# Exports: Principal, authenticate_request
+# Deps: fastapi, config.settings, src.platform.security.api_key_store
+# @end-summary
+"""Authentication helpers for API key and bearer token auth.
+
+Supports:
+- API keys (static JSON config or managed key store)
+- OIDC JWT validation (via PyJWT + JWKS)
+- HS256 JWT validation (local secret)
+"""
 
 from __future__ import annotations
 
@@ -42,6 +53,7 @@ class Principal:
 
 
 def _b64url_decode(inp: str) -> bytes:
+    """Decode a base64url-encoded string."""
     import base64
 
     padding = "=" * (-len(inp) % 4)
@@ -49,6 +61,18 @@ def _b64url_decode(inp: str) -> bytes:
 
 
 def _verify_hs256_jwt(token: str, secret: str) -> dict[str, Any]:
+    """Verify and decode an HS256 JWT.
+
+    Args:
+        token: JWT string.
+        secret: HS256 signing secret.
+
+    Returns:
+        Decoded JWT payload.
+
+    Raises:
+        ValueError: If the token is invalid or expired.
+    """
     parts = token.split(".")
     if len(parts) != 3:
         raise ValueError("Invalid JWT format")
@@ -72,6 +96,17 @@ def _verify_hs256_jwt(token: str, secret: str) -> dict[str, Any]:
 
 
 def _verify_oidc_jwt(token: str) -> dict[str, Any]:
+    """Verify and decode an OIDC JWT using JWKS.
+
+    Args:
+        token: JWT string.
+
+    Returns:
+        Decoded JWT payload.
+
+    Raises:
+        ValueError: If required OIDC settings are missing or validation fails.
+    """
     if not AUTH_OIDC_JWKS_URL:
         raise ValueError("OIDC enabled but JWKS URL is not configured")
     if not AUTH_OIDC_ISSUER:
@@ -96,6 +131,14 @@ def _verify_oidc_jwt(token: str) -> dict[str, Any]:
 
 
 def _parse_api_keys() -> dict[str, dict[str, Any]]:
+    """Parse statically configured API keys from JSON settings.
+
+    Returns:
+        Mapping of token id to key configuration.
+
+    Raises:
+        RuntimeError: If the JSON is invalid or not an object.
+    """
     if not AUTH_API_KEYS_JSON.strip():
         return {}
     try:
@@ -111,6 +154,14 @@ _API_KEY_INDEX = _parse_api_keys()
 
 
 def _principal_from_api_key(raw_key: str) -> Optional[Principal]:
+    """Resolve a Principal from an API key value.
+
+    Args:
+        raw_key: Raw API key presented by the client.
+
+    Returns:
+        A `Principal` if the key is recognized; otherwise None.
+    """
     for token_id, cfg in _API_KEY_INDEX.items():
         candidate = str(cfg.get("key", ""))
         if candidate and hmac.compare_digest(candidate, raw_key):
@@ -135,6 +186,17 @@ def _principal_from_api_key(raw_key: str) -> Optional[Principal]:
 
 
 def _principal_from_jwt(raw_jwt: str) -> Principal:
+    """Resolve a Principal from a bearer token.
+
+    Args:
+        raw_jwt: Raw JWT bearer token.
+
+    Returns:
+        An authenticated `Principal`.
+
+    Raises:
+        HTTPException: If validation fails or configuration is missing.
+    """
     if AUTH_OIDC_ENABLED:
         try:
             payload = _verify_oidc_jwt(raw_jwt)
@@ -180,6 +242,7 @@ def _principal_from_jwt(raw_jwt: str) -> Principal:
 
 
 def _extract_bearer(authorization: str | None) -> str | None:
+    """Extract a bearer token from an Authorization header value."""
     if not authorization:
         return None
     prefix = "bearer "
@@ -192,7 +255,20 @@ async def authenticate_request(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None),
 ) -> Principal:
-    """FastAPI dependency for auth. Honors API-key and JWT settings."""
+    """FastAPI dependency for request authentication.
+
+    Honors API key and bearer token settings. API keys take precedence over JWTs.
+
+    Args:
+        authorization: `Authorization` header value.
+        x_api_key: `X-API-Key` header value.
+
+    Returns:
+        An authenticated `Principal`.
+
+    Raises:
+        HTTPException: If authentication is required and credentials are missing/invalid.
+    """
     bearer = _extract_bearer(authorization)
 
     # API key has precedence for service clients.

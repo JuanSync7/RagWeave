@@ -1,7 +1,12 @@
 # Retrieval Pipeline Specification
 
 **AION Knowledge Management Platform**
-Version: 1.0 | Status: Draft | Domain: Retrieval Pipeline
+Version: 1.1 | Status: Draft | Domain: Retrieval Pipeline
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 1.0 | 2026-03-11 | AI Assistant | Initial draft — 8-stage pipeline with 39 requirements |
+| 1.1 | 2026-03-13 | AI Assistant | Added conversation memory section (REQ-1001–1008), performance budget cross-reference, updated pipeline diagram and traceability matrix |
 
 > **Document intent:** This is a normative requirements/specification document (target-state + conformance language).  
 > For currently implemented runtime behavior, refer to `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`, `docs/retrieval/RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`, and `src/retrieval/README.md`.
@@ -32,6 +37,10 @@ Everything between these two points is in scope. Document ingestion, embedding p
 | **Coreference Resolution** | The process of resolving pronouns and references ("it", "that", "the previous one") against prior conversation context |
 | **Knowledge Graph (KG)** | A directed graph of domain entities and their relationships, used optionally to expand queries with related terms |
 | **Fusion** | The method by which BM25 and vector search scores are combined into a single ranked list |
+| **Conversation Memory** | Persistent, tenant-scoped storage of multi-turn conversation turns and rolling summaries used to provide conversational context across queries |
+| **Sliding Window** | A context strategy that injects the N most recent conversation turns as context into query processing |
+| **Rolling Summary** | A compacted summary of older conversation turns that is maintained to provide long-range context without unbounded growth |
+| **Conversation Compaction** | The process of summarizing accumulated conversation turns into a condensed rolling summary, triggered manually or by turn-count thresholds |
 
 ### 1.3 Requirement Priority Levels
 
@@ -61,9 +70,9 @@ User Query (natural language input)
     │
     ▼
 ┌──────────────────────────────────────┐
-│ [1] QUERY PROCESSING                 │
-│     Reformulate, score confidence,   │
-│     resolve multi-turn references    │
+│ [1] QUERY PROCESSING                 │◄─── Conversation Memory
+│     Reformulate, score confidence,   │     (sliding window + rolling
+│     resolve multi-turn references    │      summary context injection)
 └──────────────┬───────────────────────┘
                │
                ▼
@@ -116,9 +125,9 @@ User Query (natural language input)
                │
                ▼
 ┌──────────────────────────────────────┐
-│ [8] ANSWER DELIVERY                  │
-│     Return answer with sources,      │
-│     confidence, risk-based display   │
+│ [8] ANSWER DELIVERY                  │───► Conversation Memory
+│     Return answer with sources,      │     (persist turn, update
+│     confidence, risk-based display   │      rolling summary)
 └──────────────────────────────────────┘
 ```
 
@@ -126,14 +135,14 @@ User Query (natural language input)
 
 | Stage | Input | Output |
 |-------|-------|--------|
-| Query Processing | Raw user query, conversation history | Processed query, confidence, action (search/ask_user) |
+| Query Processing | Raw user query, conversation memory context | Processed query, confidence, action (search/ask_user) |
 | Pre-Retrieval Guardrail | Processed query, risk taxonomy, PII patterns | Validated query, risk level, or rejection |
 | Retrieval | Validated query, query embedding, filters | Ranked candidate documents (top-N) |
 | Reranking | Query, candidate documents | Re-scored documents (top-K), relevance scores |
 | Document Formatting | Re-scored documents, metadata | Formatted context string, version conflict flags |
 | Generation | Formatted context, query, system prompt | Generated answer with citations, LLM confidence |
 | Post-Generation Guardrail | Answer, retrieved docs, scores, risk level | Validated answer or re-retrieval trigger or escalation |
-| Answer Delivery | Validated answer, sources, confidence, risk | Final response to user |
+| Answer Delivery | Validated answer, sources, confidence, risk | Final response to user; turn persisted to conversation memory |
 
 ---
 
@@ -158,6 +167,50 @@ User Query (natural language input)
 > **Description:** The system MUST implement an iterative refinement loop for query processing. If the confidence score is below the threshold after reformulation, the system MUST retry reformulation up to a configurable maximum number of iterations before routing to ask_user.
 > **Rationale:** A single reformulation attempt may not be sufficient for highly ambiguous queries. Iterative refinement gives the system multiple chances to improve query quality.
 > **Acceptance Criteria:** The system attempts up to N reformulations (configurable, default 3) before giving up. Each iteration produces a measurably different query. The loop terminates early if confidence exceeds the threshold.
+
+---
+
+## 3a. Conversation Memory
+
+> **REQ-1001** | Priority: MUST
+> **Description:** The system MUST support persistent, tenant-scoped conversation memory. Each conversation MUST be isolated by tenant and principal identity. Conversations MUST persist across requests so that users can resume multi-turn interactions after disconnection.
+> **Rationale:** Stateless query processing forces users to repeat context in every query. Persistent memory enables natural multi-turn interactions and eliminates redundant clarification, which is critical for complex engineering investigations that span multiple questions.
+> **Acceptance Criteria:** A user can submit a query with a conversation identifier, disconnect, reconnect later, and submit a follow-up query that correctly resolves references to the earlier turn. Two different tenants using the same conversation identifier do not share state.
+
+> **REQ-1002** | Priority: MUST
+> **Description:** The system MUST implement a sliding window context strategy that injects the N most recent conversation turns into query processing. The window size (N) MUST be configurable globally and overridable per request.
+> **Rationale:** Injecting the full conversation history into every query would exceed LLM context limits and degrade relevance. A bounded sliding window provides recent context while keeping token usage predictable.
+> **Acceptance Criteria:** With a window size of 5, the 6th turn drops the oldest turn from the injected context. Changing the window size per request produces a different context window. The default window size is configurable without code changes.
+
+> **REQ-1003** | Priority: SHOULD
+> **Description:** The system SHOULD maintain a rolling summary of conversation turns that fall outside the sliding window. The summary SHOULD be compacted (condensed) periodically or on demand to prevent unbounded growth while preserving long-range conversational context.
+> **Rationale:** Without a summary, older conversation context is completely lost when it exits the sliding window. A rolling summary preserves the essential themes and entities from earlier turns, enabling the system to maintain coherence across long conversations.
+> **Acceptance Criteria:** After 20 turns with a window of 5, the system injects both the rolling summary (covering turns 1–15) and the 5 most recent turns. Compaction reduces summary size without losing key entities and topics.
+
+> **REQ-1004** | Priority: MUST
+> **Description:** The system MUST provide lifecycle operations for conversation management: create a new conversation, list conversations for a tenant/principal, retrieve conversation history, and trigger manual compaction.
+> **Rationale:** Users and operators need to manage conversations explicitly — starting fresh investigations, reviewing past interactions, and controlling memory growth.
+> **Acceptance Criteria:** All four lifecycle operations (create, list, history, compact) are available through the API. Creating a conversation returns a stable identifier. Listing conversations returns metadata (title, message count, timestamps). History returns the ordered turns for a conversation.
+
+> **REQ-1005** | Priority: MUST
+> **Description:** The system MUST support per-request memory controls: enabling or disabling memory injection, overriding the turn window size, and forcing immediate compaction after a turn.
+> **Rationale:** Different query types benefit from different memory strategies. Exploratory queries benefit from full context; one-off lookups should not be polluted by prior conversation state. Operators may need to trigger compaction to control resource usage.
+> **Acceptance Criteria:** A query with memory disabled produces the same result as a stateless query. A query with `memory_turn_window=2` injects only the 2 most recent turns regardless of the global default. A query with forced compaction triggers summary compaction before the response is returned.
+
+> **REQ-1006** | Priority: MUST
+> **Description:** The system MUST return the conversation identifier in every query response when memory is active, enabling clients to maintain conversation continuity without server-side session state.
+> **Rationale:** Stateless clients (CLI, web console, API integrations) need the conversation identifier in responses to pass it back on subsequent requests.
+> **Acceptance Criteria:** When a query is submitted without a conversation identifier and memory is enabled, the system creates a new conversation and returns its identifier in the response. When a query includes a conversation identifier, the same identifier is returned.
+
+> **REQ-1007** | Priority: SHOULD
+> **Description:** The system SHOULD use a dedicated persistent data store for conversation memory that supports TTL-based expiration. Conversations without activity beyond a configurable TTL SHOULD be automatically expired.
+> **Rationale:** Conversation state grows over time. Without automatic expiration, inactive conversations accumulate and consume storage. A dedicated store with TTL support prevents unbounded growth without manual cleanup.
+> **Acceptance Criteria:** A conversation with no activity for longer than the configured TTL is no longer retrievable. The TTL is configurable. Active conversations (with recent queries) are not affected by TTL expiration.
+
+> **REQ-1008** | Priority: SHOULD
+> **Description:** The system SHOULD inject conversation memory context into the query processing stage (Section 3) so that coreference resolution and query reformulation benefit from prior turns and the rolling summary.
+> **Rationale:** Conversation memory is only valuable if it influences query processing. Injecting memory context before reformulation enables the system to resolve "it", "that", and "tell me more" against prior conversation state.
+> **Acceptance Criteria:** A follow-up query "What about the clock frequency?" after a prior turn about "USB power domain voltage" is reformulated to include "USB controller" context from memory. The memory context appears in the query processing input, not just the generation prompt.
 
 ---
 
@@ -456,6 +509,8 @@ User Query (natural language input)
 
 ## 11. Non-Functional Requirements
 
+> **Note:** Performance-specific requirements (fast-path routing, per-stage timeout budgets, evaluation harness, load testing, and capacity validation) are defined in the companion document `RAG_RETRIEVAL_PERFORMANCE_SPEC.md`. Requirements in this section cover general pipeline non-functional concerns.
+
 > **REQ-901** | Priority: SHOULD
 > **Description:** The system SHOULD meet the following latency targets for each pipeline stage under standard load:
 >
@@ -550,9 +605,17 @@ User Query (natural language input)
 | REQ-901 | 11 | SHOULD | Non-Functional |
 | REQ-902 | 11 | MUST | Non-Functional |
 | REQ-903 | 11 | MUST | Non-Functional |
+| REQ-1001 | 3a | MUST | Conversation Memory |
+| REQ-1002 | 3a | MUST | Conversation Memory |
+| REQ-1003 | 3a | SHOULD | Conversation Memory |
+| REQ-1004 | 3a | MUST | Conversation Memory |
+| REQ-1005 | 3a | MUST | Conversation Memory |
+| REQ-1006 | 3a | MUST | Conversation Memory |
+| REQ-1007 | 3a | SHOULD | Conversation Memory |
+| REQ-1008 | 3a | SHOULD | Conversation Memory |
 
-**Total Requirements: 39**
+**Total Requirements: 47**
 
-- MUST: 28
-- SHOULD: 9
+- MUST: 33
+- SHOULD: 12
 - MAY: 1

@@ -1,10 +1,10 @@
 # @summary
 # Ingestion package exports for document processing and LangGraph pipeline entrypoints.
 # Exports: ingest_directory, ingest_file, IngestionConfig, IngestionRunSummary
-# Deps: src.ingest.pipeline
+# Deps: src.ingest.pipeline.impl
 # @end-summary
 
-from src.ingest.pipeline_impl import (
+from src.ingest.pipeline.impl import (
     IngestionConfig,
     IngestionRunSummary,
     ingest_directory,

@@ -96,6 +96,21 @@ class ChunkResult(BaseModel):
     metadata: dict
 
 
+class TokenBudgetResponse(BaseModel):
+    """Token budget snapshot included in query responses."""
+
+    input_tokens: int = 0
+    context_length: int = 0
+    output_reservation: int = 0
+    usage_percent: float = 0.0
+    model_name: str = ""
+    breakdown: Optional[dict] = None
+    actual_prompt_tokens: int = 0
+    actual_completion_tokens: int = 0
+    actual_total_tokens: int = 0
+    cost_usd: float = 0.0
+
+
 class QueryResponse(BaseModel):
     """Full response from the RAG pipeline."""
     query: str
@@ -113,6 +128,7 @@ class QueryResponse(BaseModel):
     budget_exhausted: bool = False
     budget_exhausted_stage: Optional[str] = None
     conversation_id: Optional[str] = None
+    token_budget: Optional[TokenBudgetResponse] = None
 
 
 class HealthResponse(BaseModel):

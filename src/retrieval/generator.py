@@ -1,28 +1,18 @@
 # @summary
-# Ollama-based LLM generator for RAG answer synthesis. Main exports: OllamaGenerator. Deps: json, urllib.request, typing, config.settings
+# LLM generator for RAG answer synthesis, backed by LiteLLM Router.
+# Main exports: OllamaGenerator. Deps: typing, config.settings, src.platform.llm
 # @end-summary
-"""Ollama-based LLM generator for RAG answer synthesis."""
+"""LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
 
-import json
 import logging
-import hashlib
 from typing import List, Optional
-from urllib.request import urlopen, Request
-from urllib.error import URLError
 
 from config.settings import (
-    OLLAMA_BASE_URL,
-    OLLAMA_MODEL,
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,
-    RETRY_BACKOFF_MULTIPLIER,
-    RETRY_INITIAL_BACKOFF_SECONDS,
-    RETRY_MAX_ATTEMPTS,
-    RETRY_MAX_BACKOFF_SECONDS,
 )
+from src.platform.llm import get_llm_provider
 from src.platform.observability.providers import get_tracer
-from src.platform.reliability.providers import get_retry_provider
-from src.platform.schemas.reliability import RetryPolicy
 
 
 _SYSTEM_PROMPT = (
@@ -52,28 +42,26 @@ logger = logging.getLogger("rag.generator")
 
 
 class OllamaGenerator:
-    """Generate answers using Ollama's HTTP API."""
+    """Generate answers using LiteLLM Router (provider-agnostic).
+
+    Retains the OllamaGenerator name for backward compatibility — callers
+    continue to use the same class, but all HTTP calls now go through
+    LLMProvider instead of raw urllib to Ollama's /api/chat.
+    """
 
     def __init__(
         self,
-        model: str = OLLAMA_MODEL,
-        base_url: str = OLLAMA_BASE_URL,
         max_tokens: int = GENERATION_MAX_TOKENS,
         temperature: float = GENERATION_TEMPERATURE,
     ):
-        self.model = model
-        self.base_url = base_url.rstrip("/")
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.retry_provider = get_retry_provider()
         self.tracer = get_tracer()
-        self.retry_policy = RetryPolicy(
-            max_attempts=RETRY_MAX_ATTEMPTS,
-            initial_backoff_seconds=RETRY_INITIAL_BACKOFF_SECONDS,
-            max_backoff_seconds=RETRY_MAX_BACKOFF_SECONDS,
-            backoff_multiplier=RETRY_BACKOFF_MULTIPLIER,
-            retryable_exceptions=(URLError, TimeoutError, ConnectionError),
-        )
+        self._provider = get_llm_provider()
+        # Expose model name for logging (matches old interface)
+        self.model = self._provider.config.model
+        # Last LLM response — populated after generate() for token tracking
+        self._last_response = None
 
     def _build_messages(
         self,
@@ -150,47 +138,19 @@ class OllamaGenerator:
             memory_context=memory_context,
             recent_turns=recent_turns,
         )
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "num_predict": self.max_tokens,
-                "temperature": self.temperature,
-            },
-        }
 
         try:
-            req = Request(
-                f"{self.base_url}/api/chat",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            response = self._provider.generate(
+                messages,
+                model_alias="default",
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
             )
-
-            def _do_request():
-                with urlopen(req, timeout=120) as resp:
-                    result = json.loads(resp.read().decode("utf-8"))
-                    return result.get("message", {}).get("content")
-
-            content = self.retry_provider.execute(
-                operation_name="ollama_generate",
-                fn=_do_request,
-                policy=self.retry_policy,
-                idempotency_key=(
-                    f"gen:{self.model}:"
-                    f"{hashlib.sha256(query.encode('utf-8')).hexdigest()[:16]}:"
-                    f"{len(context_chunks)}"
-                ),
-            )
+            self._last_response = response
             span.end(status="ok")
-            return content
-        except URLError as e:
-            logger.warning("Ollama generation failed: %s", e)
-            span.end(status="error", error=e)
-            return None
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning("Could not parse Ollama response: %s", e)
+            return response.content or None
+        except Exception as e:
+            logger.warning("LLM generation failed: %s", e)
             span.end(status="error", error=e)
             return None
 
@@ -202,10 +162,10 @@ class OllamaGenerator:
         memory_context: Optional[str] = None,
         recent_turns: Optional[List[dict]] = None,
     ):
-        """Stream tokens from Ollama. Yields content strings as they arrive.
+        """Stream tokens from LLM. Yields content strings as they arrive.
 
-        Same prompt as generate(), but uses Ollama's streaming mode so
-        callers can display tokens incrementally.
+        Same prompt as generate(), but uses streaming mode so callers
+        can display tokens incrementally.
         """
         if not context_chunks:
             return
@@ -217,56 +177,28 @@ class OllamaGenerator:
             memory_context=memory_context,
             recent_turns=recent_turns,
         )
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "num_predict": self.max_tokens,
-                "temperature": self.temperature,
-            },
-        }
 
         try:
-            req = Request(
-                f"{self.base_url}/api/chat",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            resp = urlopen(req, timeout=120)
-            try:
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    chunk = json.loads(line)
-                    token = chunk.get("message", {}).get("content", "")
-                    if token:
-                        yield token
-                    if chunk.get("done"):
-                        break
-            finally:
-                resp.close()
-        except URLError as e:
-            logger.warning("Ollama streaming failed: %s", e)
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning("Could not parse Ollama stream chunk: %s", e)
+            for chunk in self._provider.generate_stream(
+                messages,
+                model_alias="default",
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            ):
+                yield chunk
+        except Exception as e:
+            logger.warning("LLM streaming failed: %s", e)
 
     def is_available(self) -> bool:
-        """Check if Ollama is running and the model is available."""
+        """Check if the LLM provider is reachable."""
         span = self.tracer.start_span(
             "generator.is_available",
             {"model": self.model},
         )
         try:
-            req = Request(f"{self.base_url}/api/tags", method="GET")
-            with urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                models = [m.get("name", "") for m in data.get("models", [])]
-                available = any(self.model in m for m in models)
-                span.end(status="ok")
-                return available
+            available = self._provider.is_available(model_alias="default")
+            span.end(status="ok")
+            return available
         except Exception:
             span.end(status="error")
             return False

@@ -8,12 +8,10 @@ Document ingestion package with a modular 13-node LangGraph workflow, shared uti
 
 This package powers embedding ingestion for the RAG system. The workflow is organized as:
 
-- top-level graph composition (`pipeline_workflow.py`)
-- node-per-file stage implementations (`nodes/`)
-- shared schema/config/types (`pipeline_types.py`)
-- shared helper logic (`pipeline_shared.py`, `pipeline_llm.py`)
-- common shared contracts/utilities (`common/`)
-- public interface facade package (`pipeline/`)
+- `common/`: cross-cutting contracts, state/config types, node helpers, and deterministic utilities
+- `nodes/`: one file per pipeline stage (13 LangGraph nodes)
+- `support/`: node support libraries (document parsing, vision/VLM, LLM helpers, text processing)
+- `pipeline/`: orchestration layer (public API facade, runtime lifecycle, graph composition)
 
 Stage 2 (`structure_detection`) is the parser front-end: Docling converts source files
 into markdown-first text suitable for downstream LLM and chunking stages, and emits
@@ -21,30 +19,20 @@ multimodal cues (for example figure presence) consumed by `multimodal_processing
 When enabled, the multimodal stage can call an Ollama-hosted VLM model to describe
 figure images (caption + OCR + tags), and appends those notes into cleaned text.
 
-## Files
+## Subdirectories
 
-| File | Purpose | Key Exports |
-| --- | --- | --- |
-| `document_processor.py` | Metadata extraction and plain-text preprocessing helpers | `process_document`, `extract_metadata`, `metadata_to_dict`, `chunk_text` |
-| `markdown_processor.py` | Markdown-aware cleaning and chunking primitives | `chunk_markdown`, `clean_document`, `ProcessedChunk` |
-| `pipeline/__init__.py` | Public API facade for ingestion pipeline | `IngestionConfig`, `ingest_directory`, `ingest_file` |
-| `pipeline_impl.py` | Runtime orchestration, graph invocation, and directory-level ingestion loop | `ingest_directory`, `ingest_file`, `verify_core_design` |
-| `pipeline_workflow.py` | Top-level LangGraph `StateGraph` composition wiring all nodes | `build_graph` |
-| `pipeline_types.py` | Shared dataclasses and typed state schema | `IngestionConfig`, `IngestionRunSummary`, `IngestState` |
-| `pipeline_shared.py` | Shared ingestion heuristics (keywords, provenance, stage logging) | `_extract_keywords_fallback`, `append_processing_log`, `map_chunk_provenance` |
-| `pipeline_llm.py` | LLM JSON utility for configurable Ollama-backed node calls | `_ollama_json` |
-| `pipeline_vision.py` | Vision helper for Docling image caption/OCR/tag extraction via Ollama VLM | `ensure_vision_ready`, `generate_vision_notes` |
+| Directory | Purpose |
+| --- | --- |
+| `common/` | Shared schemas, state/config types, universal node helpers, and deterministic utilities |
+| `nodes/` | One file per pipeline stage with stage-specific logic and clear boundaries |
+| `support/` | Node support libraries: Docling parsing, vision/VLM, LLM helpers, text processing |
+| `pipeline/` | Public API facade, runtime orchestration, and LangGraph workflow composition |
 
 ## Internal Dependencies
 
-- `pipeline_impl.py` depends on `pipeline_workflow.py` for graph assembly and `pipeline_types.py` for schema/runtime types.
-- `pipeline_workflow.py` imports all stage nodes from `nodes/` and wires conditional graph transitions.
-- Node modules consume shared helpers from `pipeline_shared.py`, deterministic helpers from `common/utils.py`, and optional LLM calls through `pipeline_llm.py`.
-
-## Subdirectories
-
-- `nodes/`: one file per pipeline stage with stage-specific logic and clear boundaries.
-- `common/`: shared schemas and deterministic utility helpers used by multiple ingestion modules.
+- `pipeline/impl.py` depends on `pipeline/workflow.py` for graph assembly and `common/types.py` for schema/runtime types.
+- `pipeline/workflow.py` imports all stage nodes from `nodes/` and wires conditional graph transitions.
+- Node modules consume shared helpers from `common/shared.py`, deterministic helpers from `common/utils.py`, and specialized processing from `support/`.
 
 ## Engineering Documentation
 

@@ -93,7 +93,7 @@ GLINER_ENTITY_LABELS = [
     "programming language", "data structure",
 ]
 
-# --- LLM Generation (Ollama) ---
+# --- LLM Generation (Ollama — legacy) ---
 GENERATION_ENABLED = os.environ.get(
     "RAG_GENERATION_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
@@ -101,6 +101,54 @@ OLLAMA_BASE_URL = os.environ.get("RAG_OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
 GENERATION_MAX_TOKENS = int(os.environ.get("RAG_GENERATION_MAX_TOKENS", "1024"))
 GENERATION_TEMPERATURE = float(os.environ.get("RAG_GENERATION_TEMPERATURE", "0.3"))
+
+# --- LLM Provider (LiteLLM) ─────────────────────────────────────────
+# Unified config. Falls back to legacy Ollama vars for backward compat.
+_legacy_ollama_model = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
+_legacy_ollama_url = os.environ.get("RAG_OLLAMA_URL", "http://localhost:11434")
+
+LLM_MODEL = os.environ.get(
+    "RAG_LLM_MODEL",
+    f"ollama/{_legacy_ollama_model}",
+)
+LLM_API_BASE = os.environ.get("RAG_LLM_API_BASE", _legacy_ollama_url)
+LLM_API_KEY = os.environ.get("RAG_LLM_API_KEY", "")
+LLM_MAX_TOKENS = int(os.environ.get("RAG_LLM_MAX_TOKENS", str(GENERATION_MAX_TOKENS)))
+LLM_TEMPERATURE = float(os.environ.get("RAG_LLM_TEMPERATURE", str(GENERATION_TEMPERATURE)))
+LLM_NUM_RETRIES = int(os.environ.get("RAG_LLM_NUM_RETRIES", "3"))
+LLM_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.environ.get("RAG_LLM_FALLBACK_MODELS", "").split(",")
+    if m.strip()
+]
+_legacy_vision_model = os.environ.get("RAG_INGESTION_VISION_MODEL", "qwen2.5vl:3b")
+LLM_VISION_MODEL = os.environ.get(
+    "RAG_LLM_VISION_MODEL",
+    f"ollama/{_legacy_vision_model}",
+)
+LLM_ROUTER_CONFIG = os.environ.get("RAG_LLM_ROUTER_CONFIG", "")
+
+# --- Token Budget ---
+TOKEN_BUDGET_DEFAULT_CONTEXT_LENGTH = int(
+    os.environ.get("RAG_TOKEN_BUDGET_DEFAULT_CONTEXT_LENGTH", "2048")
+)
+TOKEN_BUDGET_CHARS_PER_TOKEN = int(
+    os.environ.get("RAG_TOKEN_BUDGET_CHARS_PER_TOKEN", "4")
+)
+TOKEN_BUDGET_WARN_PERCENT = int(
+    os.environ.get("RAG_TOKEN_BUDGET_WARN_PERCENT", "70")
+)
+TOKEN_BUDGET_CRITICAL_PERCENT = int(
+    os.environ.get("RAG_TOKEN_BUDGET_CRITICAL_PERCENT", "90")
+)
+
+# Query-processing model alias — defaults to the primary LLM model.
+# Used by the retrieval query processor for reformulation/evaluation.
+_legacy_query_model = os.environ.get("RAG_QUERY_MODEL", None)
+LLM_QUERY_MODEL = os.environ.get(
+    "RAG_LLM_QUERY_MODEL",
+    f"ollama/{_legacy_query_model}" if _legacy_query_model else LLM_MODEL,
+)
 
 # Resolve forward reference: query processing model defaults to generation model
 if QUERY_PROCESSING_MODEL is None:
