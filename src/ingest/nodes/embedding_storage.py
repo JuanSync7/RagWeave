@@ -17,7 +17,16 @@ from src.ingest.common.types import IngestState
 
 
 def embedding_storage_node(state: IngestState) -> dict:
-    """Persist chunk embeddings and metadata into the configured vector store."""
+    """Persist chunk embeddings and metadata into the configured vector store.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``stored_count`` and an updated
+        ``processing_log``. When the workflow is skipped or there are no chunks,
+        returns ``stored_count=0``.
+    """
     if state["should_skip"] or not state["chunks"]:
         return {
             "stored_count": 0,

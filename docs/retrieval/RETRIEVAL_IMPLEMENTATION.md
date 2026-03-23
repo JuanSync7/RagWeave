@@ -8,11 +8,11 @@ Version: 1.1 | Status: Draft | Domain: Retrieval Pipeline
 | 1.0 | 2026-03-11 | AI Assistant | Initial draft — 5 phases, 17 tasks covering core pipeline through security |
 | 1.1 | 2026-03-13 | AI Assistant | Added Phase 6 (conversation memory) covering REQ-1001–1008, updated dependency graph and mapping |
 
-> **Document intent:** This file is a phased implementation plan tied to `RETRIEVAL_SPEC.md`.  
+> **Document intent:** This file is a phased implementation plan tied to `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`.  
 > It is not the source of truth for current runtime behavior.  
 > For as-built behavior, refer to `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`, `src/retrieval/README.md`, and `server/README.md`.
 
-This document provides a phased implementation plan and detailed code appendix for the retrieval pipeline specified in `RETRIEVAL_SPEC.md`. Every task references the requirements it satisfies.
+This document provides a phased implementation plan and detailed code appendix for the retrieval pipeline specified in `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`. Every task references the requirements it satisfies.
 
 ---
 

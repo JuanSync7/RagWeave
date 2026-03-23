@@ -13,7 +13,16 @@ from src.ingest.common.types import IngestState
 
 
 def knowledge_graph_extraction_node(state: IngestState) -> dict:
-    """Extract entity relations and stage triples for downstream KG storage."""
+    """Extract entity relations and stage triples for downstream KG storage.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``kg_triples`` (when enabled) and an
+        updated ``processing_log``. When disabled, returns only a skipped log
+        entry.
+    """
     if not state["runtime"].config.enable_knowledge_graph_extraction:
         return {
             "processing_log": append_processing_log(

@@ -88,7 +88,14 @@ def normalize_headings_to_markdown(text: str) -> str:
 
 
 def _split_sentences(text: str) -> List[str]:
-    """Split text into sentences using regex."""
+    """Split text into sentences using a regex heuristic.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        List of non-empty sentence-like segments.
+    """
     raw = re.split(r'(?<=[.!?])\s+|\n\n+', text)
     return [s.strip() for s in raw if s.strip()]
 
@@ -145,7 +152,14 @@ def chunk_markdown(
     similarity to split oversized sections. Falls back to character splitting
     for any chunks still exceeding chunk_size.
 
-    Returns list of dicts with 'text' and 'header_metadata' keys.
+    Args:
+        text: Markdown text to split.
+        chunk_size: Target maximum chunk size in characters.
+        chunk_overlap: Overlap between consecutive chunks in characters.
+        embedder: Optional embedder with an ``encode_sentences`` method.
+
+    Returns:
+        List of dictionaries with ``text`` and ``header_metadata`` keys.
     """
     md_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=_HEADERS_TO_SPLIT,
@@ -197,7 +211,14 @@ def chunk_markdown(
 
 
 def _build_section_metadata(header_meta: dict) -> dict:
-    """Convert header metadata from MarkdownHeaderTextSplitter to flat fields."""
+    """Convert header metadata to flat section fields.
+
+    Args:
+        header_meta: Metadata payload produced by `MarkdownHeaderTextSplitter`.
+
+    Returns:
+        Dictionary containing ``section_path``, ``heading``, and ``heading_level``.
+    """
     # LangChain versions vary between "h1"..."h4" and "Header 1"..."Header 4".
     levels = [
         ("h1", "Header 1"),
@@ -255,6 +276,7 @@ def process_document_markdown(
     Args:
         raw_text: The raw document text.
         source: Source identifier (e.g., filename).
+        embedder: Optional embedder used for semantic splitting.
 
     Returns:
         List of ProcessedChunk objects ready for embedding.

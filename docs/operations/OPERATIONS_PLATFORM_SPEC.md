@@ -1,14 +1,15 @@
 # Operations Platform Specification
 
 **AION Knowledge Management Platform**
-Version: 1.0 | Status: Implemented Baseline | Domain: Operations
+Version: 1.1 | Status: Implemented Baseline | Domain: Operations
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-03-13 | AI Assistant | Initial specification reverse-engineered from implemented operations infrastructure |
+| 1.1 | 2026-03-17 | AI Assistant | Absorbed observability/SLO/alerting (sec 10) and operations/DR/delivery (sec 11) requirements from former BACKEND_PLATFORM_SPEC.md. That spec was split — platform services (auth, quotas, caching) are now in `docs/server/PLATFORM_SERVICES_SPEC.md`. |
 
 > **Document intent:** This is a normative requirements/specification document for the operations platform.
-> For backend auth/quotas/observability, see `BACKEND_PLATFORM_SPEC.md`. For API server behavior, see `SERVER_API_SPEC.md`.
+> For platform services (auth, tenancy, rate limits, caching), see `docs/server/PLATFORM_SERVICES_SPEC.md`. For API server behavior, see `docs/server/SERVER_API_SPEC.md`.
 > For operational runbooks (DR, secrets), see appendices in `OPERATIONS_PLATFORM_IMPLEMENTATION.md`.
 > For the 100-user scaling plan, see `RAG_100_USER_EXECUTION_PLAN.md`.
 
@@ -65,7 +66,9 @@ This document uses RFC 2119 language:
 | 6 | REQ-4xx | Disaster Recovery and Backup |
 | 7 | REQ-5xx | Secrets and Configuration Management |
 | 8 | REQ-6xx | CI/CD and Delivery |
-| 9 | REQ-9xx | Non-Functional Requirements |
+| 9 | REQ-7xx | Application-Level Observability and SLOs (from Platform Services) |
+| 10 | REQ-8xx | Security Hardening and Delivery (from Platform Services) |
+| 11 | REQ-9xx | Non-Functional Requirements |
 
 ### 1.6 Assumptions & Constraints
 
@@ -87,10 +90,10 @@ This document uses RFC 2119 language:
 
 ### 1.8 Out of Scope
 
-- Retrieval pipeline behavior (see `RETRIEVAL_SPEC.md`)
+- Retrieval pipeline behavior (see `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`)
 - API endpoint contracts (see `SERVER_API_SPEC.md`)
 - Web console UI behavior (see `WEB_CONSOLE_SPEC.md`)
-- Ingestion pipeline behavior (see `RAG_embedding_pipeline_spec.md`)
+- Ingestion pipeline behavior (see `INGESTION_PIPELINE_SPEC.md`)
 
 ---
 
@@ -102,31 +105,31 @@ This document uses RFC 2119 language:
 ┌────────────────────────────────────────────────────────────────┐
 │ DEPLOYMENT TOPOLOGY                                            │
 │                                                                │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐ │
-│   │ API      │  │ Worker   │  │ Worker   │  │ Worker       │ │
-│   │ Server   │  │ Replica 1│  │ Replica 2│  │ Replica N    │ │
-│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬───────┘ │
-│        │              │              │               │         │
-│        ▼              ▼              ▼               ▼         │
-│   ┌───────────────────────────────────────────────────────┐   │
-│   │ WORKFLOW ENGINE (task queue + state)                   │   │
-│   └───────────────────────────────────────────────────────┘   │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
+│   │ API      │  │ Worker   │  │ Worker   │  │ Worker       │   │
+│   │ Server   │  │ Replica 1│  │ Replica 2│  │ Replica N    │   │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬───────┘   │
+│        │             │             │               │           │
+│        ▼             ▼             ▼               ▼           │
+│   ┌───────────────────────────────────────────────────────┐    │
+│   │ WORKFLOW ENGINE (task queue + state)                  │    │
+│   └───────────────────────────────────────────────────────┘    │
 │        │                                                       │
-│   ┌────┴────────┐  ┌─────────────┐  ┌──────────────────────┐ │
-│   │ Vector DB   │  │ Key-Value   │  │ Workflow DB          │ │
-│   │             │  │ Store       │  │                      │ │
-│   └─────────────┘  └─────────────┘  └──────────────────────┘ │
+│   ┌────┴────────┐  ┌─────────────┐  ┌──────────────────────┐   │
+│   │ Vector DB   │  │ Key-Value   │  │ Workflow DB          │   │
+│   │             │  │ Store       │  │                      │   │
+│   └─────────────┘  └─────────────┘  └──────────────────────┘   │
 │                                                                │
 │ MONITORING STACK                                               │
-│   ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐ │
-│   │ Metrics     │  │ Dashboards  │  │ Alerting             │ │
-│   │ Collector   │  │             │  │                      │ │
-│   └─────────────┘  └─────────────┘  └──────────────────────┘ │
+│   ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐   │
+│   │ Metrics     │  │ Dashboards  │  │ Alerting             │   │
+│   │ Collector   │  │             │  │                      │   │
+│   └─────────────┘  └─────────────┘  └──────────────────────┘   │
 │                                                                │
 │ OBSERVABILITY STACK (optional)                                 │
-│   ┌──────────────────────────────────────────────────────┐    │
-│   │ Trace Backend (request-level traces + LLM spans)     │    │
-│   └──────────────────────────────────────────────────────┘    │
+│   ┌──────────────────────────────────────────────────────┐     │
+│   │ Trace Backend (request-level traces + LLM spans)     │     │
+│   └──────────────────────────────────────────────────────┘     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -286,7 +289,62 @@ This document uses RFC 2119 language:
 
 ---
 
-## 9. Non-Functional Requirements
+## 9. Application-Level Observability and SLOs
+
+> The following requirements were absorbed from the former BACKEND_PLATFORM_SPEC.md (sections 6-7) to consolidate all observability, operations, and delivery requirements in one specification.
+
+> **REQ-701** | Priority: MUST
+> **Description:** The system MUST publish platform metrics for p50/p95/p99 latency, error rate, request volume, queue depth, worker utilization, and admission-control rejects.
+> **Rationale:** Langfuse traces provide request-level detail but do not replace fleet-level SLO telemetry.
+> **Acceptance Criteria:** Metrics are available in a time-series backend and can be graphed per environment and tenant.
+
+> **REQ-702** | Priority: MUST
+> **Description:** The system MUST define alert policies for SLO breaches and saturation events with page/non-page severities.
+> **Rationale:** Without alerts, degradation is discovered late and incident MTTR increases.
+> **Acceptance Criteria:** Synthetic fault tests trigger alerts with correct severity and routing.
+
+> **REQ-703** | Priority: MUST
+> **Description:** The system MUST provide trace-to-metric correlation identifiers between API logs, workflow executions, and observability traces.
+> **Rationale:** Cross-system debugging requires stable correlation keys to reconstruct failures.
+> **Acceptance Criteria:** Given an incident request ID, operators can locate matching API logs, workflow records, and traces within 5 minutes.
+
+> **REQ-704** | Priority: SHOULD
+> **Description:** The system SHOULD maintain per-tenant SLO dashboards and error budgets.
+> **Rationale:** Shared global dashboards hide tenant-specific reliability issues.
+> **Acceptance Criteria:** Dashboard views segment latency/error/admission metrics by tenant and service class.
+
+---
+
+## 10. Security Hardening and Delivery
+
+> **REQ-801** | Priority: MUST
+> **Description:** The system MUST use centralized secret management for runtime credentials and MUST prohibit long-lived plaintext production secrets in local env files.
+> **Rationale:** Plaintext secrets increase credential exposure risk and complicate rotation.
+> **Acceptance Criteria:** Runtime credentials are injected from a secret store; rotation runbooks and access audit trails exist.
+
+> **REQ-802** | Priority: MUST
+> **Description:** The system MUST define and validate disaster recovery procedures for all stateful backend dependencies.
+> **Rationale:** Partial backup coverage creates false confidence and prolongs outages during incident recovery.
+> **Acceptance Criteria:** Quarterly restore drills validate complete recovery path and produce signed run reports.
+
+> **REQ-803** | Priority: MUST
+> **Description:** The system MUST implement CI/CD gates for schema migrations, health checks, smoke tests, and rollback eligibility.
+> **Rationale:** Safe delivery requires automated guardrails to prevent broken deploys from progressing.
+> **Acceptance Criteria:** Deploy pipeline blocks release on failing migration checks or health gates; rollback procedure is automated and tested.
+
+> **REQ-804** | Priority: MUST
+> **Description:** The system MUST enforce baseline security hardening: TLS in transit, least-privilege identities, network segmentation, and image vulnerability scanning.
+> **Rationale:** Production backend services require defense-in-depth beyond functional correctness.
+> **Acceptance Criteria:** Security controls are enabled in deployment manifests and validated by automated checks in CI.
+
+> **REQ-805** | Priority: SHOULD
+> **Description:** The system SHOULD maintain incident runbooks for top failure classes (queue overload, dependency outage, degraded retrieval path, observability outage).
+> **Rationale:** Clear response playbooks reduce recovery variance between operators and shifts.
+> **Acceptance Criteria:** On-call simulation shows operators can execute runbooks without tribal knowledge.
+
+---
+
+## 11. Non-Functional Requirements
 
 > **REQ-901** | Priority: SHOULD
 > **Description:** The operations platform SHOULD support the following operational targets:
@@ -364,12 +422,21 @@ This document uses RFC 2119 language:
 | REQ-601 | 8 | MUST | CI/CD |
 | REQ-602 | 8 | SHOULD | CI/CD |
 | REQ-603 | 8 | SHOULD | CI/CD |
-| REQ-901 | 9 | SHOULD | Non-Functional |
-| REQ-902 | 9 | MUST | Non-Functional |
-| REQ-903 | 9 | MUST | Non-Functional |
+| REQ-701 | 9 | MUST | Application-Level Observability |
+| REQ-702 | 9 | MUST | Application-Level Observability |
+| REQ-703 | 9 | MUST | Application-Level Observability |
+| REQ-704 | 9 | SHOULD | Application-Level Observability |
+| REQ-801 | 10 | MUST | Security Hardening and Delivery |
+| REQ-802 | 10 | MUST | Security Hardening and Delivery |
+| REQ-803 | 10 | MUST | Security Hardening and Delivery |
+| REQ-804 | 10 | MUST | Security Hardening and Delivery |
+| REQ-805 | 10 | SHOULD | Security Hardening and Delivery |
+| REQ-901 | 11 | SHOULD | Non-Functional |
+| REQ-902 | 11 | MUST | Non-Functional |
+| REQ-903 | 11 | MUST | Non-Functional |
 
-**Total Requirements: 26**
+**Total Requirements: 35**
 
-- MUST: 17
-- SHOULD: 9
+- MUST: 24
+- SHOULD: 11
 - MAY: 0

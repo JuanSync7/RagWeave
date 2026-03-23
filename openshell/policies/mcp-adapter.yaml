@@ -1,0 +1,126 @@
+# Sandbox policy for the MCP adapter.
+#
+# The adapter exposes RAG API operations as MCP tools over stdio transport.
+# It makes HTTP calls to the FastAPI backend and provides admin tools for
+# API key management and quota configuration.
+#
+# This is the most restricted sandbox — stdio-only with a single allowed
+# network destination and mandatory human approval for admin operations.
+
+apiVersion: openshell.nvidia.com/v1
+kind: SandboxPolicy
+metadata:
+  name: mcp-adapter
+  labels:
+    component: mcp-adapter
+    stack: rag
+spec:
+  enforcement: audit_only  # Change to "deny" after validation
+
+  sandbox:
+    # ── Filesystem ──────────────────────────────────────────────
+    filesystem:
+      allow:
+        - path: /app
+          access: read-only
+          description: "Application source code (mcp_adapter.py, schemas, config)"
+
+        - path: /usr/local/lib/python*
+          access: read-only
+          description: "Python standard library and site-packages"
+
+        - path: /usr/lib
+          access: read-only
+          description: "System shared libraries"
+
+        - path: /tmp
+          access: read-write
+          description: "Python tempfiles"
+
+      deny_all_other: true
+
+    # ── Network ─────────────────────────────────────────────────
+    network:
+      allow:
+        - host: rag-api
+          port: 8000
+          protocol: tcp
+          description: "FastAPI backend — the only destination for all tool calls"
+
+      deny_all_other: true
+
+    # ── Process ─────────────────────────────────────────────────
+    process:
+      allow:
+        - binary: /usr/local/bin/python*
+          description: "Python interpreter for MCP server"
+      max_processes: 5
+      deny_exec: true
+
+  # ── Approval Gates ──────────────────────────────────────────
+  # Admin tools require human approval before the HTTP request is sent.
+  approval_gates:
+    - name: admin-api-key-operations
+      match:
+        tool_name: "admin_list_api_keys"
+      require: human_approval
+      timeout_seconds: 120
+      on_timeout: deny
+      description: "Listing API keys requires approval"
+
+    - name: admin-create-api-key
+      match:
+        tool_name: "admin_create_api_key"
+      require: human_approval
+      timeout_seconds: 120
+      on_timeout: deny
+      description: "Creating API keys requires approval"
+
+    - name: admin-revoke-api-key
+      match:
+        tool_name: "admin_revoke_api_key"
+      require: human_approval
+      timeout_seconds: 120
+      on_timeout: deny
+      description: "Revoking API keys requires approval"
+
+    - name: admin-quota-operations
+      match:
+        tool_name: "admin_*_quota*"
+      require: human_approval
+      timeout_seconds: 120
+      on_timeout: deny
+      description: "Quota modifications require approval"
+
+  # ── Credentials ─────────────────────────────────────────────
+  credentials:
+    inject:
+      - name: RAG_MCP_API_KEY
+        source: vault://rag/mcp-api-key
+        description: "API key for authenticating with RAG backend"
+
+      - name: RAG_MCP_BEARER_TOKEN
+        source: vault://rag/mcp-bearer-token
+        description: "Bearer token for OIDC-authenticated requests"
+
+    filesystem_leakage: deny
+
+  # ── Audit ───────────────────────────────────────────────────
+  audit:
+    level: detailed  # Higher detail for admin operations
+    events:
+      - policy_violations
+      - credential_access
+      - network_connections
+      - approval_gate_decisions
+      - tool_invocations
+    export:
+      prometheus:
+        enabled: true
+        port: 9102
+      json_log:
+        enabled: true
+        path: /var/log/openshell/mcp-adapter.jsonl
+        rotation:
+          max_size_mb: 50
+          max_files: 10

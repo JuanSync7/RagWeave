@@ -1,0 +1,89 @@
+# OpenShell workspace definition for the RAG stack.
+#
+# Defines which agent processes run inside OpenShell sandboxes,
+# their container images, policy bindings, and resource requirements.
+#
+# Usage:
+#   docker compose --profile workers --profile sandbox up -d
+#
+# The OpenShell container reads this file and manages sandbox lifecycle
+# for each defined workload.
+
+apiVersion: openshell.nvidia.com/v1
+kind: Workspace
+metadata:
+  name: rag-stack
+  labels:
+    project: rag
+    environment: development  # Change to "production" for prod deployments
+spec:
+  # ── Sandbox Definitions ─────────────────────────────────────
+  sandboxes:
+    - name: rag-worker
+      description: "Temporal worker — GPU model inference for RAG queries"
+      image: rag-worker:latest  # Built from docker/Dockerfile.runtime
+      policy: /etc/openshell/policies/rag-worker.yaml
+      command: >
+        sh -lc '
+        WORKER_WV_DIR="/tmp/rag-weaviate-$$HOSTNAME" &&
+        if [ -d "/seed_weaviate" ] && [ ! -d "$$WORKER_WV_DIR" ]; then
+          cp -a /seed_weaviate "$$WORKER_WV_DIR";
+        fi &&
+        export RAG_WEAVIATE_DATA_DIR="$$WORKER_WV_DIR" &&
+        python -m server.worker
+        '
+      replicas: 1  # Scale via: docker compose --profile sandbox up -d --scale openshell=3
+      environment:
+        - RAG_TEMPORAL_TARGET_HOST=temporal:7233
+        - RAG_OLLAMA_URL=${RAG_OLLAMA_URL:-http://host.docker.internal:11435}
+        - RAG_EMBEDDING_MODEL=/models/baai/bge-m3
+        - RAG_RERANKER_MODEL=/models/baai/bge-reranker-v2-m3
+        - RAG_WORKER_CONCURRENCY=4
+        - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
+        - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3000}
+        - RAG_CACHE_PROVIDER=redis
+        - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
+      volumes:
+        - /seed_weaviate:/seed_weaviate:ro
+        - /models:/models:ro
+      resources:
+        gpu: optional  # Uses GPU if NVIDIA Container Toolkit is available
+        cpu_limit: "4"
+        memory_limit: "8Gi"
+
+    - name: mcp-adapter
+      description: "MCP tool server — exposes RAG API as MCP tools over stdio"
+      image: rag-worker:latest  # Same image, different entrypoint
+      policy: /etc/openshell/policies/mcp-adapter.yaml
+      command: python -m server.mcp_adapter
+      replicas: 0  # On-demand only — started by MCP client connection
+      environment:
+        - RAG_API_URL=http://rag-api:8000
+        - RAG_MCP_ENABLE_ADMIN_TOOLS=true
+      resources:
+        gpu: none
+        cpu_limit: "1"
+        memory_limit: "512Mi"
+
+  # ── Shared Configuration ────────────────────────────────────
+  defaults:
+    restart_policy: unless-stopped
+    log_driver: json-file
+    log_opts:
+      max-size: "50m"
+      max-files: "5"
+
+  # ── Credential Store ────────────────────────────────────────
+  credential_store:
+    provider: vault  # Options: vault, file, env
+    config:
+      # For development, use file-based credentials:
+      #   provider: file
+      #   config:
+      #     path: /etc/openshell/credentials.json
+      #
+      # For production, use HashiCorp Vault:
+      vault_addr: ${VAULT_ADDR:-http://localhost:8200}
+      vault_token: ${VAULT_TOKEN:-}
+      vault_mount: secret
+      vault_prefix: rag/

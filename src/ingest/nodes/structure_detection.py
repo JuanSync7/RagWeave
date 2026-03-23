@@ -16,7 +16,25 @@ from src.ingest.common.types import IngestState
 
 
 def structure_detection_node(state: IngestState) -> dict:
-    """Extract lightweight structural signals from raw document text."""
+    """Extract lightweight structural signals from raw document text.
+
+    When Docling parsing is enabled, this node attempts to parse the source file
+    into markdown and derive figure and heading signals from the parsed output.
+    When Docling is disabled (or fails in non-strict mode), the node falls back
+    to regex-based heuristics.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing:
+        - Updated ``raw_text`` (may be Docling-generated markdown)
+        - A ``structure`` dictionary with figure/heading signals
+        - Updated ``processing_log``
+
+        In strict Docling mode, failures return an error payload with
+        ``should_skip=True`` to short-circuit the workflow.
+    """
     config = state["runtime"].config
     raw_text = state["raw_text"]
     figures: list[str] = []

@@ -14,7 +14,15 @@ from src.ingest.common.types import IngestState
 
 
 def quality_validation_node(state: IngestState) -> dict:
-    """Filter chunks by heuristic quality thresholds and deduplicate text."""
+    """Filter chunks by heuristic quality thresholds and deduplicate text.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing filtered ``chunks`` and an updated
+        ``processing_log``. When disabled, returns only a skipped log entry.
+    """
     config = state["runtime"].config
     if not config.enable_quality_validation:
         return {

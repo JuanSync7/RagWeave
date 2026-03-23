@@ -13,7 +13,15 @@ from src.ingest.common.types import IngestState
 
 
 def text_cleaning_node(state: IngestState) -> dict:
-    """Normalize source text and append generated multimodal notes."""
+    """Normalize source text and append generated multimodal notes.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``cleaned_text`` and an updated
+        ``processing_log``.
+    """
     cleaned = clean_document(state["raw_text"])
     if state["multimodal_notes"]:
         cleaned += "\n\n## Figure Notes\n" + "\n".join(

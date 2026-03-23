@@ -19,7 +19,18 @@ from src.ingest.common.types import IngestState
 
 
 def chunking_node(state: IngestState) -> dict:
-    """Split normalized text into chunks with baseline document metadata."""
+    """Split normalized text into chunks with baseline document metadata.
+
+    This node normalizes headings to markdown, chunks the text, and attaches
+    baseline source metadata plus section metadata to each chunk.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing a list of `ProcessedChunk` objects and an
+        updated ``processing_log``.
+    """
     config = state["runtime"].config
     base_metadata = metadata_to_dict(
         extract_metadata(state["raw_text"], state["source_name"])

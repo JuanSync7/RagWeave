@@ -13,7 +13,16 @@ from src.ingest.common.types import IngestState
 
 
 def document_refactoring_node(state: IngestState) -> dict:
-    """Optionally rewrite cleaned text through an LLM-based refactoring pass."""
+    """Optionally rewrite cleaned text through an LLM-based refactoring pass.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``refactored_text`` and an updated
+        ``processing_log``. When refactoring is disabled or the LLM response is
+        empty, this node passes through the cleaned text unchanged.
+    """
     config = state["runtime"].config
     if not config.enable_document_refactoring:
         return {

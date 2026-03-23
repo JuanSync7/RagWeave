@@ -2,7 +2,16 @@
 # 13-node LangGraph ingestion implementation with configurable optional stages.
 # @end-summary
 
-"""Ingestion pipeline runtime orchestration and public implementation API."""
+"""Ingestion pipeline runtime orchestration and public implementation API.
+
+This module provides the primary entrypoints for running the ingestion workflow
+over a file or directory, including:
+
+- Source discovery and stable identity generation
+- Idempotency checks using a persisted manifest (incremental updates)
+- Orchestration of the compiled LangGraph workflow
+- Persistence of processed outputs (vector store, optional mirrors/artifacts)
+"""
 
 from __future__ import annotations
 
@@ -49,7 +58,16 @@ _LOCAL_CONNECTOR = "local_fs"
 
 
 def _safe_relative(path: Path, root: Path) -> str:
-    """Return a stable display path relative to root when possible."""
+    """Return a stable display path relative to a root when possible.
+
+    Args:
+        path: Path to render.
+        root: Root directory to attempt making `path` relative to.
+
+    Returns:
+        Relative path string when `path` is within `root`, otherwise the resolved
+        absolute path string.
+    """
     try:
         return str(path.resolve().relative_to(root.resolve()))
     except ValueError:
@@ -57,7 +75,16 @@ def _safe_relative(path: Path, root: Path) -> str:
 
 
 def _local_source_identity(path: Path, documents_root: Path) -> SourceIdentity:
-    """Build stable source identity fields for local filesystem ingestion."""
+    """Build stable source identity fields for local filesystem ingestion.
+
+    Args:
+        path: Path to the source file.
+        documents_root: Root directory used for display names.
+
+    Returns:
+        A `SourceIdentity` mapping containing stable keys suitable for
+        idempotency checks and manifest indexing.
+    """
     resolved = path.resolve()
     stat = resolved.stat()
     source_id = f"{stat.st_dev}:{stat.st_ino}"
@@ -74,7 +101,15 @@ def _local_source_identity(path: Path, documents_root: Path) -> SourceIdentity:
 
 
 def _mirror_file_stem(source_name: str, source_key: str) -> str:
-    """Return a stable mirror filename stem for a source."""
+    """Return a stable mirror filename stem for a source.
+
+    Args:
+        source_name: Display name for the source (often relative path).
+        source_key: Stable source key used for hashing.
+
+    Returns:
+        A filesystem-safe stem value.
+    """
     safe_name = source_name.replace("/", "__").replace("\\", "__")
     suffix = hashlib.sha1(source_key.encode("utf-8")).hexdigest()[:8]
     return f"{safe_name}.{suffix}"
@@ -85,7 +120,13 @@ def _write_refactor_mirror_artifacts(
     result: dict,
     config: IngestionConfig,
 ) -> None:
-    """Persist original/refactored mirrors plus chunk-level provenance mapping."""
+    """Persist original/refactored mirrors plus chunk-level provenance mapping.
+
+    Args:
+        source: Source identity payload.
+        result: Ingestion graph result payload.
+        config: Ingestion configuration controlling mirror directory.
+    """
     mirror_dir = Path(config.mirror_output_dir or str(RAG_INGESTION_MIRROR_DIR))
     mirror_dir.mkdir(parents=True, exist_ok=True)
     stem = _mirror_file_stem(source["source_name"], source["source_key"])
@@ -129,7 +170,14 @@ def _write_refactor_mirror_artifacts(
 def _normalize_manifest_entries(
     manifest: dict[str, Any],
 ) -> dict[str, ManifestEntry]:
-    """Normalize old/new manifest formats into a source_key-indexed mapping."""
+    """Normalize old/new manifest formats into a source_key-indexed mapping.
+
+    Args:
+        manifest: Raw manifest mapping loaded from disk.
+
+    Returns:
+        Normalized mapping keyed by `source_key`.
+    """
     normalized: dict[str, ManifestEntry] = {}
     for raw_key, raw_entry in manifest.items():
         if not isinstance(raw_entry, dict):
@@ -152,7 +200,19 @@ def _find_manifest_entry(
     manifest: dict[str, ManifestEntry],
     source: SourceIdentity,
 ) -> tuple[Optional[str], ManifestEntry]:
-    """Find best manifest match for a discovered source identity."""
+    """Find the best manifest match for a discovered source identity.
+
+    Matching proceeds from most-stable to least-stable identifiers:
+    ``source_key`` → ``source_id`` → ``source_uri`` → legacy filename.
+
+    Args:
+        manifest: Normalized manifest mapping keyed by `source_key`.
+        source: Discovered source identity.
+
+    Returns:
+        Tuple of ``(matched_key, entry)``. When no match is found, returns
+        ``(None, ManifestEntry())``.
+    """
     direct = manifest.get(source["source_key"])
     if direct is not None:
         return source["source_key"], direct
@@ -172,7 +232,14 @@ def _find_manifest_entry(
 
 
 def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
-    """Validate ingestion configuration compatibility and return actionable feedback."""
+    """Validate ingestion configuration compatibility and return actionable feedback.
+
+    Args:
+        config: Ingestion configuration to validate.
+
+    Returns:
+        An `IngestionDesignCheck` containing errors and warnings.
+    """
     errors: list[str] = []
     warnings: list[str] = []
     if config.chunk_overlap >= config.chunk_size:
@@ -203,7 +270,23 @@ def ingest_file(
     existing_hash: str = "",
     existing_source_uri: str = "",
 ) -> dict:
-    """Run the compiled ingestion graph for a single source file."""
+    """Run the compiled ingestion graph for a single source file.
+
+    Args:
+        source_path: Source file path.
+        runtime: Runtime container with shared dependencies.
+        source_name: Display name for the source.
+        source_uri: Stable URI for the source.
+        source_key: Stable source key used for idempotency.
+        source_id: Stable identity for the source.
+        connector: Connector identifier (e.g., local filesystem).
+        source_version: Source version string (e.g., mtime ns).
+        existing_hash: Previously stored content hash (for incremental updates).
+        existing_source_uri: Previously stored URI (for incremental updates).
+
+    Returns:
+        The raw ingestion graph result payload.
+    """
     return _GRAPH.invoke(
         {
             "source_path": str(source_path),
@@ -243,7 +326,24 @@ def ingest_directory(
     obsidian_export: bool = False,
     selected_sources: Optional[list[Path]] = None,
 ) -> IngestionRunSummary:
-    """Ingest a directory of documents and persist vectors/KG artifacts."""
+    """Ingest a directory of documents and persist vectors/KG artifacts.
+
+    Args:
+        documents_dir: Directory containing source documents.
+        config: Optional ingestion configuration. When omitted, defaults are used.
+        fresh: Whether to start from a fresh vector store collection.
+        update: Whether to run in incremental mode using the manifest.
+        obsidian_export: Whether to export the knowledge graph to an Obsidian vault.
+        selected_sources: Optional explicit list of files to ingest.
+
+    Returns:
+        An `IngestionRunSummary` describing the run outcome.
+
+    Raises:
+        ValueError: If configuration validation fails.
+        RuntimeError: If required optional dependencies (e.g., Docling or vision)
+            are enabled but not available.
+    """
     config = config or IngestionConfig()
     config.update_mode = update
     design = verify_core_design(config)

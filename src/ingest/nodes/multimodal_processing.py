@@ -15,7 +15,20 @@ from src.ingest.support.vision import generate_vision_notes
 
 
 def multimodal_processing_node(state: IngestState) -> dict:
-    """Generate multimodal notes when figure references are detected and enabled."""
+    """Generate multimodal notes when figure references are detected and enabled.
+
+    This node adds lightweight figure notes when a document references figures,
+    and optionally enriches those notes with VLM-generated captions/OCR output.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``multimodal_notes``, optional
+        ``structure`` telemetry fields (vision model info), and an updated
+        ``processing_log``. In strict vision mode, failures return an error
+        payload with ``should_skip=True``.
+    """
     config = state["runtime"].config
     has_figures = state["structure"].get("has_figures", False)
     if not config.enable_multimodal_processing or not has_figures:

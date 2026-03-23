@@ -383,6 +383,82 @@ Version: 2.0 | Status: Draft | Domain: Web Console (Dual-Console Architecture)
 
 ---
 
+### Task 4.8: Sidebar Navigation Rail and Icon-Collapse Mode
+
+**Description:** Refactor the sidebar into a structured navigation rail with four primary sections (Conversations, Projects, Search, Customize), an internal collapse toggle button, and an icon-rail collapsed state (56px) with CSS tooltip hover effects. Replaces the previous desktop "hide completely" behavior.
+
+**Requirements Covered:** REQ-202, REQ-217
+
+**Dependencies:** Task 4.1, Task 4.4
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. Move the sidebar collapse toggle button inside the sidebar header (replace the external hamburger in the chat header on desktop)
+2. Implement two sidebar states on desktop: expanded (260px, icon + label) and collapsed icon-rail (56px, icon only); on mobile the overlay drawer behavior is unchanged
+3. Hide all `.sidebar-label` elements and panel content in the collapsed state via a `.collapsed` CSS class on `<aside>`
+4. Add four primary nav items — **Conversations** (💬), **Projects** (📁), **Search** (🔍), **Customize** (✦) — each with an icon and a label that switches the sidebar content panel
+5. Implement the **Conversations** panel (existing conversation list), **Projects** panel (placeholder with description), **Search** panel (search input + results area), and **Customize** panel (shortcut to settings)
+6. Add CSS tooltip on hover for each icon in the collapsed state using `data-tooltip` attribute and CSS `::after` pseudo-element
+7. Rotate the collapse button arrow (‹ / ›) to indicate current state
+8. Persist collapsed state to `localStorage` (`nc_sidebar_collapsed`) and restore on page load
+9. On mobile/tablet: nav item click closes the overlay after selection; icon-rail mode is suppressed
+
+**Risks:** Panel switching must not conflict with the mobile overlay open/close logic. The tooltip `::after` approach requires `overflow: visible` on the sidebar in collapsed state; test that the sidebar border does not clip tooltips.
+
+---
+
+### Task 4.6: Context Window Usage Indicator
+
+**Description:** Display a live context window usage percentage in the User Console header, sourced from the `context_usage_pct` field returned by the query endpoint. Surfaces a warning at ≥80% and a critical state at ≥95%, with a hover tooltip breaking down the usage by component.
+
+**Requirements Covered:** REQ-214
+
+**Dependencies:** Task 4.1, Task 4.2, Task 1.4
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Extend `ConsoleQueryResponse` to include `context_usage_pct` (0–100) and a `context_breakdown` object with keys `memory_tokens`, `chunk_tokens`, `query_tokens`, `system_tokens`
+2. Add a context usage chip to the chat header area (right side, between model badge and connection status)
+3. Implement three visual states: normal (<80%, neutral color), warning (80–94%, amber), critical (≥95%, red with pulse animation)
+4. Update the chip value after each completed turn (streaming end event or non-streaming response)
+5. Implement a hover/tap tooltip that shows the `context_breakdown` token counts as a mini table
+6. Add a "Compact conversation" shortcut link inside the critical-state tooltip
+7. Reset the indicator to zero on new conversation
+
+**Risks:** Token estimation accuracy depends on the backend heuristic (see `TOKEN_BUDGET_SPEC.md`). The UI should label it "~X% context used" to set appropriate precision expectations.
+
+---
+
+### Task 4.7: Input Bar Context Actions and Command Button
+
+**Description:** Extend the input bar with a context attachment toolbar (file upload, web search, add from knowledge base) and a visible "/" button that opens the slash-command picker as a structured grouped panel. Both features extend the existing input bar built in Task 4.3.
+
+**Requirements Covered:** REQ-215, REQ-216
+
+**Dependencies:** Task 4.3, Task 2.1
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. Add a "+" attachment button to the left of the input textarea that opens a context action popover with three options: **Upload file**, **Browse web**, **Add from knowledge base**
+2. Implement file upload action: open a file picker (PDF, DOCX, TXT, MD), show selected file as a dismissible chip above the input, include the file content/reference in the query context payload
+3. Implement "Browse web" action: show a URL input popover, fetch a lightweight summary via `POST /console/context/web`, attach result as a chip labeled with the page title
+4. Implement "Add from knowledge base" action: open a searchable list of ingested documents, multi-select to add document references as chips
+5. Render attached context chips above the input with a remove (×) button on each; include chip metadata in the query payload as `context_attachments[]`
+6. Add a "/" button to the right of the "+" button that opens the slash-command picker panel
+7. Build the slash-command picker panel as a structured grouped display (categories: Conversation, Context, Display); re-use the catalog data already fetched from `GET /console/commands`
+8. Implement keyboard navigation in the command picker (↑/↓ to move, Enter to execute/insert, Esc to dismiss); also support mouse/touch selection
+9. For commands that accept arguments, insert the command into the input and leave cursor positioned for argument entry; for no-argument commands, execute immediately
+
+**Risks:** File upload and web fetch are new backend surface areas — define `POST /console/context/upload` and `POST /console/context/web` endpoints with appropriate size/rate limits before implementing the frontend. The "Browse web" feature requires a backend proxy to avoid browser CORS issues and to apply content sanitization.
+
+---
+
 ## Phase 5 — Conversation Management
 
 > Shared between both consoles with console-specific presentation.

@@ -15,7 +15,16 @@ from src.ingest.common.types import IngestState
 
 
 def document_ingestion_node(state: IngestState) -> dict:
-    """Read source content, compute hash, and determine whether to skip processing."""
+    """Read source content, compute hash, and determine whether to skip processing.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing raw text, content hash, skip decision, and
+        updated processing log. On read failure, returns an error payload with
+        ``should_skip=True`` to short-circuit the workflow.
+    """
     source_path = Path(state["source_path"])
     try:
         raw_text = read_text_with_fallbacks(source_path)

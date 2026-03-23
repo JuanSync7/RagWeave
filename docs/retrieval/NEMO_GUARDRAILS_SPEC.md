@@ -9,7 +9,7 @@ Version: 1.0 | Status: Draft | Domain: Retrieval Pipeline — Safety & Intent Ma
 
 > **Document intent:** This is a normative requirements/specification document for integrating NVIDIA NeMo Guardrails into the AION RAG retrieval pipeline.
 > For currently implemented retrieval behavior, refer to `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md` and `src/retrieval/README.md`.
-> For the parent retrieval spec, refer to `docs/retrieval/RETRIEVAL_SPEC.md`.
+> For the parent retrieval spec, refer to `docs/retrieval/RETRIEVAL_QUERY_SPEC.md`.
 
 ---
 
@@ -111,9 +111,9 @@ Requirements are grouped by section with the following ID ranges:
 The following are explicitly **not covered** by this specification:
 
 **Out of scope — this spec:**
-- Retrieval pipeline stages (query processing, KG expansion, hybrid search, reranking, generation) — covered by `RETRIEVAL_SPEC.md`
+- Retrieval pipeline stages (query processing, KG expansion, hybrid search, reranking, generation) — covered by `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`
 - Ingestion pipeline safety — covered by embedding pipeline specs
-- Authentication, authorization, and rate limiting — covered by `BACKEND_PLATFORM_SPEC.md`
+- Authentication, authorization, and rate limiting — covered by `PLATFORM_SERVICES_SPEC.md`
 
 **Out of scope — this project:**
 - Training custom NeMo Guardrails models
@@ -134,45 +134,45 @@ User Query (raw natural language)
     ▼                                              ▼
 ┌──────────────────────────────────┐  ┌───────────────────────────────────┐
 │ EXISTING QUERY PROCESSING        │  │ NEMO INPUT RAILS (parallel)       │
-│   Sanitize → Reformulate →      │  │                                   │
+│   Sanitize → Reformulate →       │  │                                   │
 │   Evaluate → Route               │  │  [A] Canonical Intent Classifier  │
 │                                  │  │  [B] Injection/Jailbreak Rail     │
 │   (LangGraph state machine)      │  │  [C] PII Detection & Redaction    │
 │                                  │  │  [D] Toxicity Filter              │
 └──────────────┬───────────────────┘  └──────────────┬────────────────────┘
-               │                                      │
-               ▼                                      ▼
+               │                                     │
+               ▼                                     ▼
         ┌──────────────────────────────────────────────────┐
-        │ RAIL MERGE GATE                                   │
-        │   Combine query processing result + rail verdicts │
-        │   Route: search / reject / off-topic / greet      │
+        │ RAIL MERGE GATE                                  │
+        │   Combine query processing result + rail verdicts│
+        │   Route: search / reject / off-topic / greet     │
         └──────────────┬───────────────────────────────────┘
                        │
                        ▼  (if action = search)
         ┌──────────────────────────────────────┐
-        │ RETRIEVAL STAGES 2-5                  │
+        │ RETRIEVAL STAGES 2-5                 │
         │   KG Expand → Embed → Search → Rerank│
         └──────────────┬───────────────────────┘
                        │
                        ▼
         ┌──────────────────────────────────────┐
-        │ GENERATION (Stage 6)                  │
-        │   Ollama LLM answer synthesis         │
+        │ GENERATION (Stage 6)                 │
+        │   Ollama LLM answer synthesis        │
         └──────────────┬───────────────────────┘
                        │
                        ▼
         ┌──────────────────────────────────────────────────┐
-        │ NEMO OUTPUT RAILS (sequential)                    │
-        │                                                   │
-        │  [E] Faithfulness / Hallucination Check           │
-        │  [F] Output PII Detection & Redaction             │
-        │  [G] Output Toxicity Filter                       │
+        │ NEMO OUTPUT RAILS (sequential)                   │
+        │                                                  │
+        │  [E] Faithfulness / Hallucination Check          │
+        │  [F] Output PII Detection & Redaction            │
+        │  [G] Output Toxicity Filter                      │
         └──────────────┬───────────────────────────────────┘
                        │
                        ▼
         ┌──────────────────────────────────────┐
-        │ FINAL RESPONSE                        │
-        │   RAGResponse with rail metadata      │
+        │ FINAL RESPONSE                       │
+        │   RAGResponse with rail metadata     │
         └──────────────────────────────────────┘
 ```
 
@@ -528,10 +528,10 @@ User Query (raw natural language)
 
 | Document | Purpose |
 |----------|---------|
-| `docs/retrieval/RETRIEVAL_SPEC.md` | Parent retrieval pipeline specification — defines the 8-stage pipeline this integration extends |
+| `docs/retrieval/RETRIEVAL_QUERY_SPEC.md` | Parent retrieval pipeline specification — defines the 8-stage pipeline this integration extends |
 | `docs/retrieval/RETRIEVAL_IMPLEMENTATION.md` | Retrieval implementation guide — provides the phased task breakdown this integration builds upon |
 | `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md` | As-built retrieval documentation — describes current runtime behavior |
-| `docs/retrieval/BACKEND_PLATFORM_SPEC.md` | Backend platform specification — covers auth, rate limiting, and other platform concerns |
+| `docs/server/PLATFORM_SERVICES_SPEC.md` | Backend platform specification — covers auth, rate limiting, and other platform concerns |
 | NVIDIA NeMo Guardrails Documentation | Official SDK documentation for NeMo Guardrails configuration, Colang syntax, and rail types |
 
 ---

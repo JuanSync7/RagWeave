@@ -27,7 +27,12 @@ from src.ingest.common.types import IngestState
 
 
 def build_graph():
-    """Compose and compile the 13-node LangGraph ingestion workflow."""
+    """Compose and compile the ingestion workflow graph.
+
+    Returns:
+        A compiled LangGraph graph that can be invoked with an `IngestState`
+        payload.
+    """
     graph = StateGraph(IngestState)
     graph.add_node("document_ingestion", document_ingestion_node)
     graph.add_node("structure_detection", structure_detection_node)

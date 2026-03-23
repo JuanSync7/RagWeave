@@ -1,0 +1,98 @@
+# Inference routing policy for the Privacy Router.
+#
+# This policy is referenced by sandbox policies that enable inference routing.
+# It classifies outbound inference API calls based on content and metadata,
+# routing sensitive data to local models and general queries to cloud providers.
+#
+# Composition with LiteLLM Router:
+#   App code → LiteLLM Router (alias resolution) → Network layer
+#                                                     ↓
+#                                           OpenShell Privacy Router (this policy)
+#                                                     ↓
+#                                   ┌─────────────────┴─────────────────┐
+#                                   ▼                                   ▼
+#                            Local Nemotron                       Cloud API
+#                         (PII/regulated data)               (general queries)
+
+apiVersion: openshell.nvidia.com/v1
+kind: InferencePolicy
+metadata:
+  name: rag-privacy-router
+  labels:
+    stack: rag
+spec:
+  # ── Routing Rules ─────────────────────────────────────────────
+  # Rules are evaluated in order. First match wins.
+  rules:
+    - name: pii-detected
+      description: "Route queries containing PII to local inference"
+      match:
+        content_contains_pii: true
+      action:
+        route_to: local
+        model: nemotron-mini
+      audit:
+        reason: "PII detected in query content"
+        log_level: info
+
+    - name: healthcare-tenant
+      description: "Healthcare tenants have data residency requirements"
+      match:
+        metadata:
+          tenant_id_pattern: "healthcare-*"
+      action:
+        route_to: local
+        model: nemotron-mini
+      audit:
+        reason: "Healthcare tenant — data residency policy"
+        log_level: info
+
+    - name: financial-tenant
+      description: "Financial services tenants have regulatory requirements"
+      match:
+        metadata:
+          tenant_id_pattern: "finance-*"
+      action:
+        route_to: local
+        model: nemotron-mini
+      audit:
+        reason: "Financial tenant — regulatory compliance"
+        log_level: info
+
+    - name: default-upstream
+      description: "General queries route to configured cloud LLM provider"
+      match:
+        default: true
+      action:
+        route_to: upstream
+      audit:
+        reason: "No sensitive data detected — upstream routing"
+        log_level: debug
+
+  # ── Local Inference Configuration ─────────────────────────────
+  local_inference:
+    endpoint: http://host.docker.internal:11434
+    model: nemotron-mini
+    timeout_seconds: 120
+    max_retries: 2
+    fallback_on_failure: deny
+    # If local inference fails, deny the request rather than sending
+    # sensitive data to cloud. Change to "upstream" only if data
+    # residency requirements allow fallback to cloud providers.
+
+  # ── PII Detection Configuration ───────────────────────────────
+  pii_detection:
+    # Patterns that trigger local routing
+    patterns:
+      - type: ssn
+        regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+      - type: email
+        regex: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+      - type: phone
+        regex: "\\b(?:\\+1)?\\s*\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4}\\b"
+      - type: credit_card
+        regex: "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b"
+    # Integration with NeMo Guardrails PII detection
+    nemo_guardrails_integration: true
+    # If NeMo Guardrails flags PII in its pre-route hook, the Privacy Router
+    # respects that classification for routing decisions.

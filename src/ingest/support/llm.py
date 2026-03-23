@@ -23,7 +23,14 @@ def _llm_json(
 ) -> dict[str, object]:
     """Execute a JSON-only LLM chat call via LiteLLM and parse the response.
 
-    Returns parsed JSON dict, or empty dict on failure or when LLM is disabled.
+    Args:
+        prompt: User prompt to send to the LLM.
+        config: Ingestion configuration controlling whether LLM metadata is enabled.
+        max_tokens: Maximum tokens to request for the completion.
+
+    Returns:
+        Parsed JSON object as a dictionary, or an empty dictionary when LLM
+        metadata is disabled or the call fails.
     """
     if not config.enable_llm_metadata:
         return {}

@@ -9,8 +9,8 @@ Version: 1.0 | Status: Initial Specification | Domain: CLI Interface
 
 > **Document intent:** This is a normative requirements/specification document for the CLI interface layer.
 > The RAG system exposes three CLI entry points — a local interactive CLI, a remote HTTP-based CLI client, and a standalone ingestion CLI — all sharing a common infrastructure layer.
-> For server API behavior, see `SERVER_API_SPEC.md`. For retrieval pipeline behavior, see `RETRIEVAL_SPEC.md`.
-> For platform-level auth/quotas/observability, see `BACKEND_PLATFORM_SPEC.md`. For web console behavior, see `WEB_CONSOLE_SPEC.md`.
+> For server API behavior, see `SERVER_API_SPEC.md`. For retrieval pipeline behavior, see `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`.
+> For platform-level auth/quotas/observability, see `PLATFORM_SERVICES_SPEC.md`. For web console behavior, see `WEB_CONSOLE_SPEC.md`.
 
 ---
 
@@ -93,11 +93,11 @@ Requirements are grouped by section with the following ID ranges:
 
 ### 1.8 Out of Scope
 
-- Retrieval pipeline internals (see `RETRIEVAL_SPEC.md`)
+- Retrieval pipeline internals (see `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`)
 - Server API endpoint contracts (see `SERVER_API_SPEC.md`)
 - Web console UI behavior (see `WEB_CONSOLE_SPEC.md`)
 - Model loading and inference behavior
-- Ingestion pipeline internals (see `RAG_embedding_pipeline_spec.md`)
+- Ingestion pipeline internals (see `INGESTION_PIPELINE_SPEC.md`)
 
 ---
 
@@ -116,24 +116,24 @@ User Terminal
 │     CLI      │  │     CLI        │  │     CLI       │
 │  (cli.py)    │  │ (cli_client.py)│  │  (ingest.py)  │
 │              │  │                │  │               │
-│  REPL Mode   │  │  REPL Mode    │  │  Batch Mode   │
-│  query/ingest│  │  query only   │  │  ingest only  │
+│  REPL Mode   │  │  REPL Mode     │  │  Batch Mode   │
+│  query/ingest│  │  query only    │  │  ingest only  │
 └──────┬───────┘  └───────┬────────┘  └───────┬───────┘
-       │                  │                    │
-       ▼                  │                    │
+       │                  │                   │
+       ▼                  │                   │
 ┌──────────────────────────────────────────────────────┐
 │ SHARED CLI INFRASTRUCTURE                            │
 │                                                      │
 │  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │ command_catalog   │  │ cli_interactive          │  │
-│  │ (command registry │  │ (input handling, menus,  │  │
-│  │  shared w/ web)   │  │  tab completion)         │  │
+│  │ command_catalog  │  │ cli_interactive          │  │
+│  │ (command registry│  │ (input handling, menus,  │  │
+│  │  shared w/ web)  │  │  tab completion)         │  │
 │  └──────────────────┘  └──────────────────────────┘  │
 │                                                      │
 │  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │ command_runtime   │  │ cli_log_formatting       │  │
-│  │ (slash command    │  │ (ANSI colors, badges,    │  │
-│  │  dispatch)        │  │  styled output)          │  │
+│  │ command_runtime  │  │ cli_log_formatting       │  │
+│  │ (slash command   │  │ (ANSI colors, badges,    │  │
+│  │  dispatch)       │  │  styled output)          │  │
 │  └──────────────────┘  └──────────────────────────┘  │
 └──────────────────────────────────────────────────────┘
        │                  │

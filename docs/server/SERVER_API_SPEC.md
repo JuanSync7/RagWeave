@@ -8,7 +8,7 @@ Version: 1.0 | Status: Implemented Baseline | Domain: Server API
 | 1.0 | 2026-03-13 | AI Assistant | Initial specification reverse-engineered from implemented server layer |
 
 > **Document intent:** This is a normative requirements/specification document for the HTTP API server and service layer.
-> For retrieval pipeline behavior, see `RETRIEVAL_SPEC.md`. For platform-level auth/quotas/observability, see `BACKEND_PLATFORM_SPEC.md`.
+> For retrieval pipeline behavior, see `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`. For platform-level auth/quotas/observability, see `PLATFORM_SERVICES_SPEC.md`.
 > For as-built runtime behavior, refer to `server/README.md` and `src/retrieval/README.md`.
 
 ---
@@ -89,9 +89,9 @@ Requirements are grouped by section with the following ID ranges:
 
 ### 1.8 Out of Scope
 
-- Retrieval pipeline behavior (see `RETRIEVAL_SPEC.md`)
-- Auth, quotas, and admission control policies (see `BACKEND_PLATFORM_SPEC.md`)
-- Ingestion pipeline behavior (see `RAG_embedding_pipeline_spec.md`)
+- Retrieval pipeline behavior (see `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`)
+- Auth, quotas, and admission control policies (see `PLATFORM_SERVICES_SPEC.md`)
+- Ingestion pipeline behavior (see `INGESTION_PIPELINE_SPEC.md`)
 - Web console UI behavior (see `WEB_CONSOLE_SPEC.md`)
 - CLI client behavior (see `CLI_SPEC.md`)
 

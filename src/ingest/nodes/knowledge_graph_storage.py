@@ -12,7 +12,16 @@ from src.ingest.common.types import IngestState
 
 
 def knowledge_graph_storage_node(state: IngestState) -> dict:
-    """Store processed chunks into the runtime knowledge graph builder."""
+    """Store processed chunks into the runtime knowledge graph builder.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing an updated ``processing_log``. When the
+        stage is disabled or the runtime has no KG builder, returns only a
+        skipped log entry.
+    """
     config = state["runtime"].config
     kg_builder = state["runtime"].kg_builder
     if not config.enable_knowledge_graph_storage or kg_builder is None:

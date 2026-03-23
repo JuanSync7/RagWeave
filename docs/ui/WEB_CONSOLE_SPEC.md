@@ -216,9 +216,9 @@ User (Browser)                    Operator (Browser)
 > **Acceptance Criteria:** The User Console renders with a left sidebar, center chat area, and bottom input bar. The layout is visually clean and modern with no exposed debug or diagnostic elements.
 
 > **REQ-202** | Priority: MUST
-> **Description:** The User Console sidebar MUST display a scrollable conversation list, a "New Chat" button at the top, and a settings gear icon. Each conversation entry MUST show the conversation title (or first message preview) and a timestamp.
-> **Rationale:** The sidebar provides conversation lifecycle management and quick access to settings without leaving the chat view.
-> **Acceptance Criteria:** The sidebar shows all conversations for the current user. Clicking "New Chat" creates a new conversation and clears the chat area. Clicking a conversation entry loads its history. The settings gear opens the settings panel.
+> **Description:** The User Console sidebar MUST contain: a brand header with a collapse toggle button (inside the sidebar itself), a "New Chat" button displaying a `+` icon, a primary navigation rail with at minimum four items — **Conversations**, **Projects**, **Search**, and **Customize** — each represented by an icon and a text label. Each navigation item MUST switch the sidebar content area to its corresponding panel. The Settings action MUST appear in the sidebar footer. Each conversation entry in the Conversations panel MUST show the conversation title and a timestamp.
+> **Rationale:** A structured navigation rail makes the sidebar a first-class feature surface rather than just a conversation list. Dedicated Project, Search, and Customize sections provide discoverability for features that would otherwise require navigating to separate panels.
+> **Acceptance Criteria:** All four nav items are visible and clickable. Clicking each switches the sidebar content panel accordingly. Clicking "New Chat" creates a new conversation. The settings footer opens the settings panel. Icon and label are both visible in expanded state; only the icon is visible in collapsed (icon-rail) state.
 
 > **REQ-203** | Priority: MUST
 > **Description:** The User Console main area MUST render a chat thread with message bubbles. User messages MUST appear as right-aligned bubbles. Assistant messages MUST appear as left-aligned bubbles. Each bubble MUST display the message text and a timestamp.
@@ -274,6 +274,26 @@ User (Browser)                    Operator (Browser)
 > **Description:** The User Console SHOULD display a status bar or subtle indicator showing the current connection status (connected/disconnected) and the active API endpoint.
 > **Rationale:** Users need awareness of connection state to understand when queries may fail, without the visual weight of a full operator status bar.
 > **Acceptance Criteria:** A connection indicator is visible (e.g., a small dot or subtle text). Disconnection is reflected within 5 seconds. The active endpoint is visible on hover or in a tooltip.
+
+> **REQ-214** | Priority: SHOULD
+> **Description:** The User Console SHOULD display a context window usage indicator that shows the estimated percentage of the LLM's context window consumed by the current conversation (system prompt + memory + retrieved chunks + turn history). The indicator MUST update after each completed turn and MUST surface a warning state when usage exceeds 80%.
+> **Rationale:** Users have no visibility into context saturation without this indicator. When context usage is high, generation quality silently degrades. An inline indicator allows users to decide when to compact, reduce retrieval depth, or start a new conversation — without requiring them to understand token mechanics. Ties into the token budget tracker subsystem defined in `TOKEN_BUDGET_SPEC.md`.
+> **Acceptance Criteria:** After each completed turn, a context usage percentage (e.g., "42% context used") is visible in the chat header or near the input bar. The indicator shows a warning color at ≥80% and a critical color at ≥95%. The percentage is sourced from the `context_usage_pct` field returned by the query endpoint (see `TOKEN_BUDGET_SPEC.md`). Clicking or hovering the indicator shows a breakdown tooltip (memory, chunks, query).
+
+> **REQ-215** | Priority: SHOULD
+> **Description:** The User Console input bar SHOULD include a context attachment toolbar with actions for attaching files to the query context, initiating a web search to add retrieved content to context, and selecting previously ingested documents to include. The toolbar MUST be accessible via a clearly labeled attachment/add-context button adjacent to the text input. Each attached item MUST be visible as a removable chip above the input before sending.
+> **Rationale:** Modern RAG users need to augment queries with ad-hoc context (uploaded documents, live web content) beyond the static knowledge base. Providing these actions directly in the input bar follows established UX patterns (Perplexity, Claude, ChatGPT file attachment) and eliminates the need to pre-ingest everything. Web search enrichment allows queries to reference current information.
+> **Acceptance Criteria:** An attachment button (paperclip or "+" icon) in the input bar opens a context action menu with at minimum: "Upload file", "Browse web", "Add from knowledge base". Each selected item appears as a dismissible chip above the input. The file upload supports common formats (PDF, DOCX, TXT, MD). Attached items are included in the query context payload sent to the backend. Items can be removed before sending.
+
+> **REQ-217** | Priority: MUST
+> **Description:** The User Console sidebar MUST support an **icon-rail collapsed state** (≈56px wide) toggled by a collapse button located inside the sidebar header. In the collapsed state: all text labels MUST be hidden, only icons remain visible, the conversation list and panel content MUST be hidden, and hovering any icon MUST display a tooltip showing the item's label. The collapsed state MUST persist across page reloads (local storage). On tablet and mobile viewports, the sidebar MUST continue to behave as a full-width overlay drawer; the icon-rail mode MUST only apply on desktop (>1024px).
+> **Rationale:** Icon-rail sidebars are a standard pattern (VS Code, Slack, Notion) that recovers horizontal space without hiding navigation entirely. Tooltips on hover ensure discoverability is not lost in the collapsed state. Internal placement of the collapse toggle (inside the sidebar) is cleaner than an external toggle and allows the button to remain visible when collapsed.
+> **Acceptance Criteria:** Clicking the collapse button shrinks the sidebar to the icon rail. Hovering any icon in collapsed state shows a tooltip with the label. Clicking the collapse button again restores the full sidebar. Collapsed state is persisted in local storage. On viewports ≤1024px, icon-rail mode is not triggered; the sidebar uses overlay behavior.
+
+> **REQ-216** | Priority: MUST
+> **Description:** The User Console input bar MUST include a visible "/" button that opens the slash-command menu as a structured visual picker, in addition to the existing keyboard-triggered "/" autocomplete. The picker MUST display commands grouped by category with descriptions, and MUST be navigable by keyboard (arrow keys, Enter to execute, Escape to dismiss) and by mouse/touch.
+> **Rationale:** Keyboard-triggered "/" autocomplete (REQ-208) requires users to know the feature exists. A visible "/" button provides discoverability for new users and serves as a secondary entry point on touch devices where typing "/" and immediately getting the menu may be unreliable. The structured grouped display (vs. a flat autocomplete list) improves scanability when the command catalog is large.
+> **Acceptance Criteria:** A "/" icon button is visible in the input bar toolbar. Clicking/tapping it opens the command picker panel. Commands are grouped by category (e.g., Conversation, Context, Display). Each entry shows command name and description. Keyboard navigation (↑/↓/Enter/Esc) and mouse/touch selection both work. Selecting a command inserts it into the input (or executes immediately for commands with no arguments). The panel is dismissed by Escape, clicking outside, or after execution.
 
 ---
 
@@ -465,6 +485,10 @@ User (Browser)                    Operator (Browser)
 | REQ-211 | 4 | MUST | User Console |
 | REQ-212 | 4 | SHOULD | User Console |
 | REQ-213 | 4 | SHOULD | User Console |
+| REQ-214 | 4 | SHOULD | User Console |
+| REQ-215 | 4 | SHOULD | User Console |
+| REQ-216 | 4 | MUST | User Console |
+| REQ-217 | 4 | MUST | User Console |
 | REQ-301 | 5 | MUST | Admin Console |
 | REQ-302 | 5 | MUST | Admin Console |
 | REQ-303 | 5 | MUST | Admin Console |
@@ -492,8 +516,8 @@ User (Browser)                    Operator (Browser)
 | REQ-904 | 7 | MUST | Non-Functional |
 | REQ-905 | 7 | SHOULD | Non-Functional |
 
-**Total Requirements: 48**
+**Total Requirements: 52**
 
-- MUST: 38
-- SHOULD: 10
+- MUST: 40
+- SHOULD: 12
 - MAY: 0

@@ -66,7 +66,7 @@ def _quality_score(text: str) -> float:
         text: Chunk text.
 
     Returns:
-        A score in \(0.0, 1.0\] where higher implies "more complete" content.
+        A score in ``(0.0, 1.0]`` where higher implies "more complete" content.
     """
     score = 0.4 + (0.2 if len(text) >= 120 else 0)
     score += min(0.2, len(re.findall(r"\d", text)) * 0.01)
@@ -125,7 +125,7 @@ def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
 
     Returns:
         Tuple of ``(start, end, ratio)`` where ``ratio`` is a similarity score
-        in \([0.0, 1.0]\).
+        in ``[0.0, 1.0]``.
     """
     if not text.strip() or not anchor.strip():
         return -1, -1, 0.0

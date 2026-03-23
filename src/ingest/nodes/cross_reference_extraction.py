@@ -12,7 +12,16 @@ from src.ingest.common.types import IngestState
 
 
 def cross_reference_extraction_node(state: IngestState) -> dict:
-    """Extract document cross-reference patterns when this stage is enabled."""
+    """Extract document cross-reference patterns when this stage is enabled.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``cross_references`` (when enabled) and
+        an updated ``processing_log``. When disabled, returns only a skipped log
+        entry.
+    """
     if not state["runtime"].config.enable_cross_reference_extraction:
         return {
             "processing_log": append_processing_log(

@@ -13,7 +13,18 @@ from src.ingest.common.types import IngestState
 
 
 def chunk_enrichment_node(state: IngestState) -> dict:
-    """Attach stable chunk IDs and enriched content fields to chunk metadata."""
+    """Attach stable chunk IDs and enriched content fields to chunk metadata.
+
+    This node assigns a deterministic chunk ID, adds retrieval/citation fields,
+    and attempts to map each chunk back to source offsets for provenance.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing the enriched ``chunks`` list and an
+        updated ``processing_log``.
+    """
     config = state["runtime"].config
     original_text = state["raw_text"]
     refactored_text = state["refactored_text"] or state["cleaned_text"] or state["raw_text"]

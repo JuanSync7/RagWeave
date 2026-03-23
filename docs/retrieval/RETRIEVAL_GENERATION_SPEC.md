@@ -192,7 +192,7 @@ Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Generation
 
 ## 11. Non-Functional Requirements
 
-> **Note:** Performance-specific requirements (fast-path routing, per-stage timeout budgets, evaluation harness, load testing, and capacity validation) are defined in the companion document `RAG_RETRIEVAL_PERFORMANCE_SPEC.md`. Requirements in this section cover general pipeline non-functional concerns.
+> **Note:** Performance-specific requirements (fast-path routing, per-stage timeout budgets, evaluation harness, load testing, and capacity validation) are defined in the companion document `docs/performance/RAG_RETRIEVAL_PERFORMANCE_SPEC.md`. Requirements in this section cover general pipeline non-functional concerns.
 
 > **REQ-901** | Priority: SHOULD
 > **Description:** The system SHOULD meet the following latency targets for each pipeline stage under standard load:

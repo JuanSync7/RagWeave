@@ -1,8 +1,8 @@
 # Podman Migration — Implementation Guide
 
-**Spec**: `docs/operations/LITELLM_PODMAN_SPEC.md`
+**Spec**: `docs/operations/PODMAN_SPEC.md`
 **Date**: 2026-03-14
-**Updated**: 2026-03-17 — LiteLLM SDK integration (Phases 1-2) has been implemented. See `docs/llm/LITELLM_INTEGRATION.md`. This guide now covers Podman migration only.
+**Updated**: 2026-03-17
 
 ---
 

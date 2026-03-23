@@ -13,7 +13,19 @@ from src.ingest.common.types import IngestState
 
 
 def metadata_generation_node(state: IngestState) -> dict:
-    """Generate document summary/keywords and project them into chunk metadata."""
+    """Generate document summary/keywords and project them into chunk metadata.
+
+    This node uses an LLM (when enabled) to produce a short summary and a list
+    of keywords for the document, falling back to deterministic extraction when
+    LLM metadata is disabled or unavailable.
+
+    Args:
+        state: Ingestion pipeline state.
+
+    Returns:
+        Partial state update containing ``metadata_summary``, ``metadata_keywords``,
+        and an updated ``processing_log``.
+    """
     config = state["runtime"].config
     prompt = (
         'Return {"summary":"...","keywords":[]} for:\n'

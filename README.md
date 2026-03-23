@@ -228,14 +228,20 @@ make all-check          # full check (npm ci + py-compile + TS check)
 
 ## Engineering Docs
 
+| Directory | Contents |
+|-----------|----------|
+| `docs/ingestion/` | Ingestion pipeline spec (split: pipeline nodes + platform/cross-cutting), implementation guide, engineering guide, onboarding checklist |
+| `docs/retrieval/` | Retrieval pipeline specs (split: query/ranking + generation/safety), NeMo Guardrails, engineering guide, onboarding checklist |
+| `docs/server/` | Server API spec + implementation, platform services spec (auth, tenancy, rate limits, caching) |
+| `docs/ui/` | CLI spec + implementation, web console spec + implementation, token budget spec + implementation |
+| `docs/performance/` | Retrieval performance spec (runtime controls, benchmarking, load testing) |
+| `docs/operations/` | Operations platform spec (deployment, scaling, monitoring, DR, CI/CD), 100-user plan, Podman migration |
+| `docs/llm/` | LiteLLM SDK integration guide |
+
+Key starting points:
+- Ingestion: `docs/ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
 - Retrieval: `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`
-- Retrieval onboarding: `docs/retrieval/RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
-- Ingestion: `docs/embedding/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
-- Ingestion onboarding: `docs/embedding/INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
-- LLM integration: `docs/llm/LITELLM_INTEGRATION.md`
-- Server/runtime operations: `server/README.md`
-- Web console: `docs/operations/WEB_CONSOLE_SPEC.md`, `docs/operations/WEB_CONSOLE_IMPLEMENTATION.md`
-- CLI spec: `docs/retrieval/CLI_SPEC.md`, `docs/retrieval/CLI_IMPLEMENTATION.md`
+- Server/runtime: `server/README.md`
 
 ## License
 
