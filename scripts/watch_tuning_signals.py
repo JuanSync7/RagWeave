@@ -59,7 +59,7 @@ def _query_prometheus(base_url: str, promql: str, timeout_s: int = 5) -> Optiona
         return None
 
 
-def _docker_worker_stats() -> list[tuple[str, float, float]]:
+def _container_worker_stats() -> list[tuple[str, float, float]]:
     try:
         proc = subprocess.run(
             [
@@ -267,7 +267,7 @@ def _print_report(snapshot: dict, alerts: list[Alert]) -> None:
 
 
 def _collect_snapshot(args: argparse.Namespace) -> dict:
-    workers = _docker_worker_stats()
+    workers = _container_worker_stats()
     worker_max_cpu = max((cpu for _, cpu, _ in workers), default=0.0) if workers else None
     worker_max_mem = max((mem for _, _, mem in workers), default=0.0) if workers else None
 

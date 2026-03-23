@@ -922,7 +922,7 @@ def main() -> None:
     else:
         print(f"\r  {B_YELLOW}⚠{RESET} Could not reach {server}              ")
         print(f"    {DIM}Make sure the server stack is running:{RESET}")
-        print(f"    {B_WHITE}1.{RESET} {DIM}docker compose up -d{RESET}")
+        print(f"    {B_WHITE}1.{RESET} {DIM}./scripts/compose.sh up -d{RESET}")
         print(f"    {B_WHITE}2.{RESET} {DIM}.venv/bin/python -m server.worker{RESET}")
         print(f"    {B_WHITE}3.{RESET} {DIM}.venv/bin/uvicorn server.api:app --port 8000{RESET}")
         print()

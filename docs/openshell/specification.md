@@ -83,7 +83,7 @@ The LiteLLM Router continues handling operational routing. OpenShell operates at
 
 ### 3.1 Temporal Workers (`server/worker.py`)
 
-**Current state:** Workers run in Docker containers (`docker/Dockerfile.runtime`) with access to mounted volumes (`/models:ro`, `/seed_weaviate:ro`), outbound network to Temporal, Redis, Ollama, and Langfuse. No kernel-level restrictions exist — the worker process can access any path in the container and reach any network host.
+**Current state:** Workers run in Docker containers (`containers/Dockerfile.runtime`) with access to mounted volumes (`/models:ro`, `/seed_weaviate:ro`), outbound network to Temporal, Redis, Ollama, and Langfuse. No kernel-level restrictions exist — the worker process can access any path in the container and reach any network host.
 
 **With OpenShell:**
 
@@ -413,10 +413,10 @@ openshell:
 **Profile-based rollout:** Teams can enable OpenShell independently:
 ```bash
 # Without OpenShell (current behavior)
-docker compose --profile workers up -d
+./scripts/compose.sh --profile workers up -d
 
 # With OpenShell
-docker compose --profile workers --profile sandbox up -d
+./scripts/compose.sh --profile workers --profile sandbox up -d
 ```
 
 ### 8.3 Observability Integration
@@ -476,9 +476,9 @@ Organizations already testing or deploying OpenShell: Adobe, Atlassian, Amdocs, 
 
 ### 10.2 Rollback Plan
 
-OpenShell runs as a separate Docker Compose profile. Rollback is:
+OpenShell runs as a separate compose profile. Rollback is:
 ```bash
-docker compose --profile workers up -d  # without --profile sandbox
+./scripts/compose.sh --profile workers up -d  # without --profile sandbox
 ```
 
-No application code changes are required. The only difference is whether agents run inside OpenShell sandboxes or in standard Docker containers.
+No application code changes are required. The only difference is whether agents run inside OpenShell sandboxes or in standard containers.

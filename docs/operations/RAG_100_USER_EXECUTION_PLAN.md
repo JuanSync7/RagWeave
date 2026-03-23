@@ -76,8 +76,8 @@ Tune worker replicas and concurrency based on observed saturation points.
 # Watch tuning signals
 python scripts/watch_tuning_signals.py --interval-seconds 30
 
-# Scale worker replicas (docker compose example)
-docker compose --profile workers up -d --scale rag-worker=3
+# Scale worker replicas
+./scripts/compose.sh --profile workers up -d --scale rag-worker=3
 
 # Run conservative autoscaling loop
 python scripts/auto_scale_workers.py --min-replicas 1 --max-replicas 6

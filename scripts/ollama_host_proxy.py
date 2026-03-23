@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # @summary
-# TCP proxy to expose host-local Ollama (127.0.0.1:11434) to Docker containers.
+# TCP proxy to expose host-local Ollama (127.0.0.1:11434) to containers (Podman/Docker).
 # Exports: main
 # Deps: argparse, asyncio
 # @end-summary
@@ -60,7 +60,7 @@ def main() -> int:
     import os
 
     parser = argparse.ArgumentParser(
-        description="Expose localhost Ollama to Docker via host-gateway reachable port."
+        description="Expose localhost Ollama to containers via host-gateway reachable port."
     )
     parser.add_argument("--listen-host", default="0.0.0.0")
     parser.add_argument(

@@ -88,7 +88,7 @@ exec $COMPOSE_CMD "$@"
 security risk — if a container is compromised, the attacker has root inside it. The API
 Dockerfile (`Dockerfile.api`) already runs as non-root user `app`; we mirror that pattern.
 
-**File:** `docker/Dockerfile.runtime`
+**File:** `containers/Dockerfile.runtime`
 
 **What to add** (after the `COPY` directives, before any `CMD`):
 
@@ -159,7 +159,7 @@ examples in `.env.example` documents this without affecting Docker users.
 in rootless Podman the generated files need explicit permissions so the container user
 can read them. Adding a `chmod` ensures certs work regardless of the user's umask.
 
-**File:** `docker/generate-certs.sh`
+**File:** `containers/generate-certs.sh`
 
 **Add at the end of the script, after the `echo` line:**
 ```bash
@@ -246,7 +246,7 @@ Replace `docker compose` references in the comment block with `./scripts/compose
 | 6 | Health check | `curl -fsS http://localhost:${RAG_API_PORT:-8000}/health` | `{"status":"healthy",...}` |
 | 7 | Monitoring | `./scripts/compose.sh --profile monitoring up -d` | Dozzle + Prometheus + Grafana up |
 | 8 | Worker non-root | `$CONTAINER_RT exec <worker> whoami` | `app` (not `root`) |
-| 9 | Cert generation | `bash docker/generate-certs.sh` | Certs created in `.runtime/certs/` |
+| 9 | Cert generation | `bash containers/generate-certs.sh` | Certs created in `.runtime/certs/` |
 | 10 | Backup script | `./scripts/backup_all.sh test-run` | Backup files created |
 | 11 | Python runtime detection | `python3 -c "from scripts.auto_scale_workers import CONTAINER_RT; print(CONTAINER_RT)"` | `podman` or `docker` |
 
@@ -265,9 +265,9 @@ Replace `docker compose` references in the comment block with `./scripts/compose
 
 | File | Change | Spec Requirement |
 |------|--------|-----------------|
-| `docker/Dockerfile.runtime` | Add non-root user (`app`) with `USER` directive | R-B4 |
+| `containers/Dockerfile.runtime` | Add non-root user (`app`) with `USER` directive | R-B4 |
 | `docker-compose.yml` | Dozzle socket via `CONTAINER_SOCK` env var; update header comments | R-B3, R-B2 |
-| `docker/generate-certs.sh` | Add explicit `chmod` for cert permissions | R-B5 |
+| `containers/generate-certs.sh` | Add explicit `chmod` for cert permissions | R-B5 |
 | `.env.example` | Add `CONTAINER_SOCK` documentation | R-B5 |
 | `scripts/backup_all.sh` | Source `container-runtime.sh`, use `$CONTAINER_RT` | R-B7 |
 | `scripts/restore_all.sh` | Source `container-runtime.sh`, use `$CONTAINER_RT` | R-B7 |

@@ -1,9 +1,10 @@
 # @summary
-# Console routes for web UX endpoints, including UI page, query wrapper, ingestion wrapper, and source preview/view.
+# Console routes for dual web console (User Console at /console, Admin Console at /console/admin).
+# Includes UI page serving, query wrapper, ingestion wrapper, conversation management, and source preview.
 # Exports: create_console_router
 # Deps: fastapi, server.schemas, server.console.services
 # @end-summary
-"""Console route module."""
+"""Console route module — dual-console architecture."""
 
 from __future__ import annotations
 
@@ -19,11 +20,13 @@ from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 from server.common.schemas import ApiErrorResponse
 from server.console.services import (
     CONSOLE_HTML_PATH,
+    USER_CONSOLE_HTML_PATH,
     build_source_preview_payload,
     is_ollama_reachable,
     render_source_document_html,
     resolve_console_static_asset,
     resolve_console_source_path,
+    resolve_user_console_static_asset,
     tail_log_lines,
 )
 from server.routes import build_health_response, run_query
@@ -77,10 +80,33 @@ def create_console_router(
     }
     router = APIRouter()
 
+    # --- User Console (modern chat interface at /console) ---
+    # NOTE: User Console static route (/console/static/user/) must be registered
+    # before the general static route (/console/static/) to avoid catch-all matching.
+
     @router.get("/console", response_class=HTMLResponse)
-    async def console_ui():
+    async def user_console_ui():
+        if not USER_CONSOLE_HTML_PATH.exists():
+            raise HTTPException(status_code=404, detail="User Console UI file not found")
+        return HTMLResponse(
+            USER_CONSOLE_HTML_PATH.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    @router.get("/console/static/user/{asset_path:path}")
+    async def user_console_static_asset(asset_path: str):
+        asset = resolve_user_console_static_asset(asset_path)
+        return FileResponse(
+            path=asset,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    # --- Admin Console (tabbed debug/ops interface at /console/admin) ---
+
+    @router.get("/console/admin", response_class=HTMLResponse)
+    async def admin_console_ui():
         if not CONSOLE_HTML_PATH.exists():
-            raise HTTPException(status_code=404, detail="Console UI file not found")
+            raise HTTPException(status_code=404, detail="Admin Console UI file not found")
         return HTMLResponse(
             CONSOLE_HTML_PATH.read_text(encoding="utf-8"),
             headers={"Cache-Control": "no-store, max-age=0"},

@@ -1,1004 +1,2022 @@
-# Embedding Pipeline — Implementation Guide
+# Embedding Pipeline — Implementation Plan
 
-| Field | Value |
-|-------|-------|
-| **Document** | Embedding Pipeline Implementation Guide |
-| **Version** | 1.0.0 |
-| **Status** | Active |
-| **Spec Reference** | `EMBEDDING_PIPELINE_SPEC.md` v1.0.0 (FR-591–FR-1304) |
-| **Companion Documents** | `EMBEDDING_PIPELINE_SPEC.md`, `EMBEDDING_PIPELINE_SPEC_SUMMARY.md`, `DOCUMENT_PROCESSING_IMPLEMENTATION.md`, `INGESTION_PIPELINE_ENGINEERING_GUIDE.md`, `INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`, `INGESTION_PLATFORM_SPEC.md` |
-| **Created** | 2026-03-20 |
-| **Last Updated** | 2026-03-20 |
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | 2026-03-20 | Split from `INGESTION_PIPELINE_IMPLEMENTATION.md` v1.1.0 — Embedding Pipeline phase tasks only. |
+**Goal:** Implement the full Embedding Pipeline (FR-591–FR-1304) using a three-phase contract-first workflow that prevents test bias by isolating agent contexts.
 
-> **Document Intent.** This guide translates the requirements defined in `EMBEDDING_PIPELINE_SPEC.md`
-> (FR-591–FR-1304) into a phased, task-oriented implementation plan. Each task maps to one or more
-> specification requirements and includes subtasks, complexity estimates, dependencies, and testing
-> strategies.
->
-> The Embedding Pipeline reads clean Markdown documents from the **Clean Document Store** (produced
-> by the Document Processing Pipeline) and transforms them into vector embeddings and knowledge
-> graph triples stored in the vector database and graph store.
->
-> **Entry point:** `{source_key}.md` + `{source_key}.meta.json` in the Clean Document Store.
-> See `DOCUMENT_PROCESSING_IMPLEMENTATION.md` → Task S.1 for the writer implementation.
->
-> Part A is organised in four groups:
-> - **Part A0 — Clean Document Store (Reader):** Task S.2 reads the boundary artifact written by the
->   Document Processing Pipeline.
-> - **Phase 1 — Core Embedding (MVP):** Rule-based chunking → enrichment → embedding → storage.
-> - **Phase 2 — LLM Enhancement:** Semantic chunking, metadata generation, knowledge enrichment.
-> - **Phase 3 — Extended Features:** Cross-references, knowledge graph, review tiers.
-> - **Phase 4 — Quality & Operations:** Evaluation, observability, batch hardening, schema migration.
+**Architecture:** The Embedding Pipeline is a LangGraph `StateGraph` DAG with 8 nodes processing clean Markdown documents from the Clean Document Store into vector embeddings (Weaviate) and optional knowledge graph triples. Nodes are plain functions (`def node_name(state: EmbeddingPipelineState) -> dict`), not classes. State flows through a single `EmbeddingPipelineState` TypedDict. Three nodes are conditional (cross-reference extraction, KG extraction, KG storage); the remaining five are mandatory. The pipeline is decoupled from the Document Processing Pipeline at the Clean Document Store boundary, enabling independent re-runs.
+
+**Tech Stack:** Python 3.11+, LangGraph StateGraph, Weaviate (vector DB + v1 KG via cross-references), BAAI/bge-large-en-v1.5 (default embedding model, 1024 dimensions), LiteLLM Router (LLM calls), orjson (JSON), pytest (testing), Langfuse (observability).
 
 ---
 
-# Part A: Task-Oriented Overview
+## File Structure
 
-## Part A0: Clean Document Store (Reader)
+All files that will be created or modified, organized by directory.
 
-The Clean Document Store is the storage boundary between the Document Processing Pipeline and this
-pipeline. The Document Processing Pipeline writes the store (Task S.1 in
-`DOCUMENT_PROCESSING_IMPLEMENTATION.md`); this pipeline reads it. Change detection is based on
-`clean_hash` — the SHA-256 of the clean Markdown content — not on the source file hash.
+### Contracts (Phase 0)
 
----
+```
+src/ingest/
+├── pipeline_types.py              # MODIFY — add EmbeddingPipelineState TypedDict, PipelineConfig extensions
+├── schemas.py                     # CREATE — ChunkRecord, EnrichedChunk, KGTriple, QualityScore, EmbeddingReport
+├── exceptions.py                  # MODIFY — add embedding-specific exception types
+└── clean_store.py                 # CREATE — CleanDocumentStore reader + change detection
+```
 
-### Task S.2 — Clean Document Store Reader and Change Detection
+### Nodes (Phase B implementation)
 
-**Description:** Implement the Clean Document Store reader in `src/ingest/clean_store.py`.
-Reads and validates metadata envelopes from the Clean Document Store; compares `clean_hash`
-against the stored embedding-run manifest to determine whether re-embedding is needed.
+```
+src/ingest/nodes/
+├── chunking.py                    # MODIFY — new Embedding Pipeline chunking node
+├── chunk_enrichment.py            # MODIFY — new Embedding Pipeline enrichment node
+├── metadata_generation.py         # MODIFY — LLM keyword/entity extraction + TF-IDF fallback
+├── cross_reference_extraction.py  # MODIFY — inter-document reference detection
+├── knowledge_graph_extraction.py  # MODIFY — triple extraction + entity normalization
+├── quality_validation.py          # MODIFY — quality scoring + dedup filtering
+├── embedding_storage.py           # MODIFY — embedding generation + Weaviate upsert
+└── knowledge_graph_storage.py     # MODIFY — graph store writer
+```
 
-**Requirements Covered:** FR-591, FR-592, FR-593, FR-594, FR-595
+### Pipeline orchestration (Phase B)
 
-**Dependencies:** None (reads from disk; no pipeline dependency)
+```
+src/ingest/
+├── pipeline/
+│   ├── workflow.py                # MODIFY — build_embedding_pipeline_graph() factory
+│   └── impl.py                    # MODIFY — EmbeddingPipelineRuntime orchestrator
+└── support/
+    ├── vocabulary.py              # CREATE — domain vocabulary loader
+    └── entity.py                  # CREATE — entity consolidation support
+```
 
-**Complexity:** S
+### Tests (Phase A)
 
-**Subtasks:**
-1. Implement `read(source_key) → (md_content, CleanDocumentMetadata)` raising
-   `MissingCleanDocumentError` if the `.md` file is absent (FR-591).
-2. Implement metadata validation: check all required fields are present; raise
-   `InvalidMetadataError` on schema violation (FR-592).
-3. Implement `clean_hash` change detection: load the embedding run manifest (keyed by
-   `source_key`); compare stored `clean_hash` with the metadata value — skip if unchanged
-   (FR-593).
-4. Implement `propagate_metadata_to_chunk(chunk, metadata)` helper: attaches `source_key`,
-   `source_path`, `review_tier`, and `extraction_confidence` from the metadata envelope to a
-   chunk record (FR-594).
-5. Optionally verify that the actual SHA-256 of `{source_key}.md` matches the `clean_hash`
-   in metadata; log a warning on mismatch without halting (FR-595).
+```
+tests/ingest/
+├── test_clean_store_reader.py     # CREATE
+├── test_embedding_report.py       # CREATE
+├── test_reingestion.py            # CREATE
+└── nodes/
+    ├── __init__.py                # CREATE
+    ├── test_chunking.py           # CREATE
+    ├── test_chunk_enrichment.py   # CREATE
+    ├── test_metadata_generation.py # CREATE
+    ├── test_cross_reference.py    # CREATE
+    ├── test_kg_extraction.py      # CREATE
+    ├── test_entity_consolidation.py # CREATE
+    ├── test_quality_validation.py # CREATE
+    ├── test_embedding_storage.py  # CREATE
+    ├── test_kg_storage.py         # CREATE
+    ├── test_review_tiers.py       # CREATE
+    └── test_pipeline_dag.py       # CREATE
+```
 
-**Testing Strategy:** Unit tests for missing file, malformed JSON, and hash mismatch scenarios.
-Verify `propagate_metadata_to_chunk` attaches all required fields.
+### Supporting files
 
----
-
-## Phase 1 — Core Embedding Pipeline (MVP)
-
-The goal of Phase 1 is a working end-to-end Embedding Pipeline: clean documents are read from
-the store, split into chunks with deterministic IDs, enriched, embedded, and stored in the
-vector database. Re-ingestion detection (skipping unchanged documents) must work from day one.
-
----
-
-### Task 1.2 — Embedding Pipeline DAG Skeleton
-
-**Description:** Build the LangGraph `StateGraph` for the Embedding Pipeline in
-`src/ingest/pipeline_workflow.py`. Phase 1 wires only the MVP nodes (clean store read,
-chunking, chunk enrichment, quality validation, embedding/storage); optional nodes
-(cross-reference, KG extraction, KG storage) are no-op pass-throughs until their tasks are
-complete.
-
-**Requirements Covered:** FR-591, FR-901, FR-1001, FR-1301
-
-**Dependencies:** Task S.2
-
-**Complexity:** M
-
-**Subtasks:**
-1. Define `EmbeddingPipelineState` TypedDict in `pipeline_types.py` with all required state
-   keys (source key, chunks, enriched chunks, metadata, embeddings, KG triples, errors, timings).
-2. Create `build_embedding_pipeline_graph()` factory in `pipeline_workflow.py`.
-3. Implement conditional routing: post-enrichment optional cross-reference stage (FR-901);
-   post-quality optional KG extraction stage (FR-1001); post-storage optional KG write stage
-   (FR-1301).
-4. Register no-op stubs for Phase 2/3 nodes.
-5. Expose `compile()` → `CompiledGraph` via the public API facade in
-   `src/ingest/pipeline/__init__.py`.
-
-**Testing Strategy:** Verify graph topology; run a synthetic document through the stub graph
-and assert all state keys are preserved end-to-end.
-
-**Risks:** LangGraph API surface evolves; pin the dependency version.
+```
+tests/ingest/
+├── test_domain_vocabulary.py      # CREATE
+├── test_evaluation_framework.py   # CREATE
+├── test_langfuse_integration.py   # CREATE
+├── test_batch_processing.py       # CREATE
+└── test_schema_migration.py       # CREATE
+```
 
 ---
 
-### Task 1.6 — Node 6: Chunking (Rule-Based MVP)
+## Phase 0 — Contract Definitions
 
-**Description:** Implement the chunking node in `src/ingest/nodes/chunking.py`. Phase 1 uses
-deterministic, rule-based chunking: split on Markdown heading boundaries first, then
-recursive character splitting with configurable `chunk_size` and `overlap`. Each chunk
-receives a deterministic ID derived from the document `source_key` and chunk ordinal.
+**Purpose:** Define all TypedDicts, dataclasses, function signatures, and exception types BEFORE any tests or implementation. This is the shared contract that both the test agent (Phase A) and the implementation agent (Phase B) work against. Phase 0 output contains NO business logic — only type shapes, field names, and stub signatures.
 
-**Requirements Covered:** FR-601, FR-602, FR-603, FR-604, FR-605
-
-**Dependencies:** Task S.2, Task 1.2
-
-**Complexity:** M
-
-**Subtasks:**
-1. Implement heading-aware structural splitting: respect Markdown `#`/`##`/`###` boundaries
-   as primary split points.
-2. Implement recursive character splitter as secondary fallback when a section exceeds the
-   configured chunk size.
-3. Generate deterministic chunk IDs: `SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]`
-   where `content_hash = SHA-256(chunk_text)[:16]` — same input always produces the same IDs
-   (see Part B, Snippet B.3). The content hash component ensures that if a chunk's content
-   changes during re-chunking (while keeping the same ordinal position), the ID changes
-   accordingly, enabling accurate change detection per FR-605.
-4. Attach chunk metadata: ordinal, `source_key`, character offsets, heading path context.
-5. Validate chunk sizes against configured `min_chunk_tokens` and `max_chunk_tokens`; split
-   oversized chunks and log undersized ones.
-6. **Table atomic chunking (FR-604):** Treat tables as indivisible chunks. If a table exceeds
-   `max_chunk_tokens`, split by row groups while prepending the header row to each resulting
-   chunk. Respect the `tables.keep_atomic` configuration flag.
-7. **Adjacency links (FR-606):** After chunking, assign `previous_chunk_id` and
-   `next_chunk_id` to each chunk. First chunk has `previous_chunk_id = null`; last chunk has
-   `next_chunk_id = null`. These links enable sequential navigation at retrieval time.
-
-**Testing Strategy:** Unit tests asserting deterministic output (same input always produces
-same chunk IDs); property tests on chunk size bounds.
+**Review gate:** Phase 0 output must be human-reviewed and approved before Phase A begins. Any schema change after approval requires re-review.
 
 ---
 
-### Task 1.7 — Node 12: Embedding Generation
+### Task 0.1 — State Contract (`EmbeddingPipelineState`)
 
-**Description:** Implement the embedding generation node in `src/ingest/nodes/embedding_storage.py`.
-Sends `enriched_content` from each chunk to the configured embedding model with batching,
-retry, and rate-limit handling. In BYOM mode, accepts pre-computed vectors instead of calling
-the embedding API.
+**Files:**
+- Modify: `src/ingest/pipeline_types.py` (add `EmbeddingPipelineState`)
 
-**Requirements Covered:** FR-1201, FR-1202, FR-1203, FR-1204
+**Depends on:** Nothing
 
-**Dependencies:** Task 1.6 (or Task 2.2a when enrichment is enabled)
+- [ ] Step 1: Define `EmbeddingPipelineState` TypedDict with ALL fields:
 
-**Complexity:** M
+```python
+from __future__ import annotations
 
-**Subtasks:**
-1. Implement batched embedding calls with configurable batch size.
-2. Add exponential backoff retry with jitter on transient errors (429, 5xx).
-3. Add token-count pre-validation: reject chunks exceeding model context window before sending.
-4. Implement BYOM mode: when `config.byom_mode = true`, accept pre-computed vector field from
-   chunk state instead of calling the API.
-5. Attach embedding vectors and model metadata (`model_name`, `dimension`) to chunk state.
-6. **Dimensionality validation (FR-1203):** After generating embeddings, validate that the
-   output vector dimension matches the expected dimension from model configuration. If mismatch
-   detected, halt the pipeline with a clear error message naming the expected vs actual
-   dimensions.
+from typing import Any, TypedDict
 
-**Testing Strategy:** Unit tests with mocked embedding API; integration test with live API
-behind a feature flag. Verify BYOM mode bypasses the API call entirely.
 
-**Risks:** Rate limits under batch load; mitigate with configurable concurrency and backoff.
+class EmbeddingPipelineState(TypedDict, total=False):
+    """LangGraph state schema for the Embedding Pipeline.
 
----
+    Each node reads from upstream-populated fields and writes only to its
+    own designated output fields. Fields use ``total=False`` so that the
+    initial state can be constructed with only the entry-point fields.
+    """
 
-### Task 1.8 — Node 12: Vector Store Upsert
+    # ── Entry-point fields (populated before graph invocation) ───────
+    config: PipelineConfig
+    source_key: str
+    md_content: str
+    metadata: CleanDocumentMetadata
 
-**Description:** Implement the vector store write step within `src/ingest/nodes/embedding_storage.py`.
-Writes embedded chunks to the vector store (Weaviate). Uses deterministic IDs so that
-re-ingestion overwrites existing vectors without creating duplicates. On re-ingestion, deletes
-all existing chunks for the document before inserting fresh ones.
+    # ── Chunking output (Node 6) ─────────────────────────────────────
+    chunks: list[ChunkRecord]
 
-**Requirements Covered:** FR-1205, FR-1206, FR-1207, FR-1208, FR-1209
+    # ── Chunk Enrichment output (Node 7) ─────────────────────────────
+    enriched_chunks: list[EnrichedChunk]
 
-**Dependencies:** Task 1.7
+    # ── Metadata Generation output (Node 8) ──────────────────────────
+    chunk_metadata: list[dict[str, Any]]
 
-**Complexity:** M
+    # ── Cross-Reference Extraction output (Node 9, optional) ─────────
+    cross_references: list[dict[str, Any]]
 
-**Subtasks:**
-1. Implement Weaviate upsert with full chunk payload (embedding + metadata + review tier).
-2. Implement batched upsert with configurable batch size.
-3. Implement re-ingestion delete-and-reinsert: before inserting, delete all existing vectors
-   keyed by `source_key` filter; this ensures stale chunks from a previous version do not
-   persist.
-4. Add retry logic for transient vector store errors.
-5. Verify idempotency: re-upserting the same chunk ID overwrites, not duplicates. Verify point
-   count does not increase on re-run of an unchanged document.
-6. **Asymmetric embedding prefixes (FR-1206):** Support configurable document and query
-   prefixes for asymmetric embedding models (e.g., `passage:` for documents, `query:` for
-   queries). Read prefix configuration from `embedding.document_prefix` and
-   `embedding.query_prefix` config keys. Apply document prefix during ingestion; query prefix
-   is applied at retrieval time.
-7. **Hybrid search setup (FR-1207):** Configure BM25 keyword indexing alongside vector
-   indexing in the vector store. Enable via `storage.enable_bm25` configuration flag (default:
-   `true`). The BM25 index uses the same `enriched_content` text as the vector embedding.
+    # ── KG Extraction output (Node 10, optional) ─────────────────────
+    kg_triples: list[KGTriple]
 
-**Testing Strategy:** Integration tests against a Weaviate test collection; verify point count
-does not increase on re-upsert; verify stale chunks are gone after re-ingestion of a changed
-document.
+    # ── Quality Validation output (Node 11) ──────────────────────────
+    quality_scores: list[float]
+
+    # ── Embedding & Storage output (Node 12) ─────────────────────────
+    embeddings: list[list[float]]
+
+    # ── Cross-cutting ────────────────────────────────────────────────
+    errors: list[dict[str, Any]]
+    timings: dict[str, float]
+```
+
+- [ ] Step 2: Add forward references for `PipelineConfig`, `CleanDocumentMetadata`, `ChunkRecord`, `EnrichedChunk`, `KGTriple` (these are defined in Tasks 0.2 and 0.5).
 
 ---
 
-### Task 1.9 — Result Reporting
+### Task 0.2 — Chunk and Triple Schemas
 
-**Description:** Implement the reporting node in `src/ingest/nodes/embedding_storage.py` (or
-a dedicated `report.py`). Collects per-document statistics (chunks produced, chunks embedded,
-chunks upserted, quality-filter rejections, errors, timings) and writes a structured JSON
-report. Logs a human-readable summary.
+**Files:**
+- Create: `src/ingest/schemas.py`
 
-**Requirements Covered:** FR-1201 (storage completeness reporting)
+**Depends on:** Nothing
 
-**Dependencies:** Task 1.8
+- [ ] Step 1: Define `ChunkRecord` TypedDict:
 
-**Complexity:** S
+```python
+from __future__ import annotations
 
-**Subtasks:**
-1. Define `EmbeddingReport` dataclass with all relevant metrics.
-2. Aggregate statistics from `EmbeddingPipelineState`.
-3. Emit structured JSON report to the configured output path.
-4. Log human-readable summary at INFO level.
+from typing import Any, TypedDict
 
-**Testing Strategy:** Unit tests asserting report structure and completeness.
 
----
+class ChunkRecord(TypedDict):
+    """A single chunk produced by the Chunking node (Node 6).
 
-### Task 1.10 — Re-Ingestion Flow (Delete-and-Reinsert)
+    Chunk ID formula:
+        content_hash = SHA-256(chunk_text)[:16]
+        chunk_id     = SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]
 
-**Description:** Implement the re-ingestion path in `src/ingest/pipeline_impl.py`. When a
-document's `clean_hash` has changed, the pipeline first deletes all existing chunks for that
-document from the vector store, then proceeds with normal embedding. A dry-run mode reports
-what would be deleted without executing.
+    The content_hash component ensures that if a chunk's content changes during
+    re-chunking (while keeping the same ordinal position), the chunk_id changes
+    accordingly, enabling accurate change detection.
+    """
 
-**Requirements Covered:** FR-593, FR-1205, FR-1208
+    chunk_id: str           # Deterministic: SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]
+    source_key: str         # Stable document identifier from Clean Document Store
+    ordinal: int            # 0-based position within the document's chunk sequence
+    text: str               # Raw chunk text before enrichment
+    content_hash: str       # SHA-256(chunk_text)[:16]
+    char_start: int         # Character offset of chunk start in source markdown
+    char_end: int           # Character offset of chunk end in source markdown
+    heading_path: list[str] # Section hierarchy, e.g. ["# Title", "## Section", "### Subsection"]
+    content_type: str       # One of: text, table, figure, code, equation, list, heading
+    previous_chunk_id: str | None  # Adjacency link to preceding chunk (null for first chunk)
+    next_chunk_id: str | None      # Adjacency link to following chunk (null for last chunk)
+```
 
-**Dependencies:** Task S.2, Task 1.8
+- [ ] Step 2: Define `EnrichedChunk` TypedDict:
 
-**Complexity:** M
+```python
+class EnrichedChunk(TypedDict):
+    """An enriched chunk produced by the Chunk Enrichment node (Node 7)
+    and progressively populated by Metadata Generation (Node 8).
 
-**Subtasks:**
-1. Implement document-level deletion from Weaviate by `source_key` filter.
-2. Wire the `clean_hash` comparison (Task S.2) into the pipeline runtime: if unchanged, skip
-   the entire embedding graph invocation.
-3. Implement `force` flag to bypass hash comparison and always re-embed.
-4. Add dry-run mode: report what would be deleted without executing.
+    Key invariant:
+        enriched_content = chunk_text + boundary_context
+        context_header is stored but NOT embedded.
+    """
 
-**Testing Strategy:** Integration test: ingest a document, modify the clean Markdown, re-ingest,
-verify old chunks are gone and new ones are present.
+    chunk_id: str               # Carried forward from ChunkRecord
+    chunk_text: str             # Original chunk text (from ChunkRecord.text)
+    boundary_context: str       # Text from adjacent chunks (previous tail + next head)
+    context_header: str         # Metadata header (title, section path, tier) — stored, NOT embedded
+    enriched_content: str       # = chunk_text + boundary_context — THIS is what gets embedded
+    keywords: list[str]         # LLM-extracted or TF-IDF fallback keywords
+    entities: list[dict[str, str]]  # Named entities: [{"name": ..., "type": ...}, ...]
+    summary: str                # Chunk-level summary
+    quality_score: float        # Quality score from Node 11 (0.0–1.0)
+    review_tier: str            # Propagated from CleanDocumentMetadata: FULLY_REVIEWED | PARTIALLY_REVIEWED | SELF_REVIEWED
+```
 
-**Risks:** Race condition if two re-ingestions of the same document run concurrently; mitigate
-with advisory locking.
+- [ ] Step 3: Define `KGTriple` TypedDict:
 
----
+```python
+class KGTriple(TypedDict):
+    """A knowledge graph triple extracted by Node 10.
 
-## Part A0 ends — Phase 2 begins
+    Represents a subject-predicate-object relationship with provenance
+    tracking back to the source chunk.
+    """
 
----
+    subject: str                # Normalized entity (canonical form)
+    predicate: str              # Relationship type from controlled vocabulary
+    object: str                 # Normalized entity (canonical form)
+    source_chunk_id: str        # chunk_id of the chunk this triple was extracted from
+    confidence: float           # Extraction confidence (0.0–1.0)
+    provenance: dict[str, Any]  # Extraction metadata: model, prompt version, method (llm/structural)
+```
 
-## Phase 2 — LLM Enhancement
+- [ ] Step 4: Define `QualityScore` TypedDict:
 
-Phase 2 adds LLM-powered intelligence to chunking, chunk enrichment, and metadata generation,
-improving retrieval quality through semantic boundary detection and structured keyword/entity
-extraction.
+```python
+class QualityScore(TypedDict):
+    """Quality assessment for a single chunk, produced by Node 11."""
 
----
+    chunk_id: str
+    score: float                # Overall quality score (0.0–1.0)
+    completeness: float         # Content completeness sub-score
+    coherence: float            # Coherence sub-score
+    keyword_density: float      # Keyword density sub-score
+    is_duplicate: bool          # True if flagged as near-duplicate
+    duplicate_of: str | None    # chunk_id of the original if duplicate
+    passed: bool                # True if score >= min_quality_score and not duplicate
+```
 
-### Task 2.1 — Node 6: LLM-Assisted Chunking
+- [ ] Step 5: Define `EmbeddingReport` dataclass:
 
-**Description:** Extend the chunking node to support an LLM-assisted mode. When enabled via
-config, the node sends text segments to an LLM to identify semantically coherent chunk
-boundaries. Falls back to rule-based chunking on LLM failure or timeout.
+```python
+from dataclasses import dataclass, field
 
-**Requirements Covered:** FR-606, FR-607, FR-608, FR-609, FR-610, FR-611
 
-**Dependencies:** Task 1.6
+@dataclass
+class EmbeddingReport:
+    """Structured report for a single document embedding run."""
 
-**Complexity:** L
-
-**Subtasks:**
-1. Design the LLM prompt for boundary detection: given a document section, identify where
-   semantic topic transitions occur.
-2. Implement LLM chunking strategy behind the same strategy interface used by the rule-based
-   chunker.
-3. Add fallback: on LLM error, degrade to rule-based chunking transparently.
-4. Cache LLM chunking decisions keyed by `clean_hash` + section ordinal to avoid redundant
-   calls on unchanged documents.
-5. Add token usage tracking to the run report.
-6. **Content type tagging (FR-609):** Tag each chunk with its dominant content type: `text`,
-   `table`, `figure`, `code`, `equation`, `list`, or `heading`. Derive the tag from the
-   chunk's source structure (e.g., Markdown table syntax -> `table`, code fences -> `code`).
-   Store as `content_type` field in chunk metadata.
-
-**Testing Strategy:** Unit tests with mocked LLM; A/B evaluation comparing rule-based vs. LLM
-chunk quality on a held-out document set.
-
-**Risks:** LLM latency adds significant wall-clock time; mitigate with caching and
-section-level parallelism.
-
----
-
-### Task 2.2a — Node 7: Chunk Enrichment (FR-701–FR-705)
-
-**Description:** Implement Node 7 (`src/ingest/nodes/chunk_enrichment.py`) for boundary
-context attachment, metadata header construction, and cross-chunk overlap. This stage
-prepares the enriched content that will be embedded.
-
-**Requirements Covered:** FR-701, FR-702, FR-703, FR-704, FR-705
-
-**Dependencies:** Task 1.6
-
-**Complexity:** M
-
-**Subtasks:**
-1. **Boundary context window:** Attach `context_header` to each chunk: a brief text header
-   summarising the document source, section path, and review tier (FR-701, FR-702).
-2. **Enriched content computation:** Compute `enriched_content = chunk_text + boundary_context`
-   — this is the text that will be embedded (FR-703). The `context_header` (document title,
-   section path, source metadata) is stored alongside the chunk for retrieval display but is
-   NOT included in the embedding input by default (FR-702). Only the chunk text plus boundary
-   context from adjacent sections is embedded. A configuration flag `embed_context_header`
-   (default: `false`) can override this behavior.
-3. **Context header assembly:** Store `context_header` separately in metadata for retrieval
-   display (FR-704).
-4. **Section path breadcrumb:** Include the full heading path (e.g., `# Title > ## Section >
-   ### Subsection`) in the context header for hierarchical context (FR-701).
-5. **Cross-chunk overlap:** Add boundary overlap: include the last N tokens from the previous
-   chunk and first N tokens from the next chunk as optional context (FR-705).
-
-**Testing Strategy:** Unit tests verifying `enriched_content` contains chunk text plus boundary
-context but not context header by default; integration test verifying context header is stored
-in metadata payload.
+    source_key: str
+    chunks_produced: int = 0
+    chunks_enriched: int = 0
+    chunks_passed_quality: int = 0
+    chunks_filtered: int = 0
+    chunks_deduplicated: int = 0
+    chunks_embedded: int = 0
+    chunks_stored: int = 0
+    triples_extracted: int = 0
+    triples_stored: int = 0
+    cross_references_found: int = 0
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    timings: dict[str, float] = field(default_factory=dict)
+    skipped: bool = False
+    dry_run: bool = False
+```
 
 ---
 
-### Task 2.2b — Node 8: Metadata Generation (FR-801–FR-806)
+### Task 0.3 — Exception Types
 
-**Description:** Implement Node 8 (`src/ingest/nodes/metadata_generation.py`) for LLM-based
-keyword and entity extraction, domain vocabulary validation, and document-level summary
-aggregation. This stage runs after chunk enrichment and adds structured metadata to each chunk.
+**Files:**
+- Create or Modify: `src/ingest/exceptions.py` (add embedding-specific exceptions)
 
-**Requirements Covered:** FR-801, FR-802, FR-803, FR-804, FR-805, FR-806
+**Depends on:** Nothing
 
-**Dependencies:** Task 2.2a
+- [ ] Step 1: Define embedding-specific exception hierarchy:
 
-**Complexity:** M
+```python
+class EmbeddingPipelineError(Exception):
+    """Base exception for all Embedding Pipeline errors."""
 
-**Subtasks:**
-1. **LLM keyword extraction:** Use an LLM to extract structured metadata per chunk:
-   title, summary, keywords, topic tags (FR-801).
-2. **TF-IDF fallback (FR-805):** When the LLM fails or times out, fall back to TF-IDF-based
-   keyword extraction to ensure every chunk has keywords.
-3. **BM25 keyword validation (FR-803):** Validate extracted keywords against the domain
-   vocabulary; retain only vocabulary-validated keywords for the BM25 index field
-   (FR-802, FR-803, FR-804).
-4. **Domain vocabulary injection (FR-806):** Inject domain vocabulary terms that appear in the
-   chunk text but were not extracted by the LLM, ensuring domain coverage.
-5. **Document-level summary aggregation:** Generate a document-level summary by aggregating
-   chunk summaries (FR-805, FR-806).
 
-**Testing Strategy:** Unit tests with mocked LLM verifying JSON schema compliance; integration
-test verifying keywords appear in the Weaviate payload; test TF-IDF fallback activates on LLM
-failure.
+class MissingCleanDocumentError(EmbeddingPipelineError):
+    """Raised when the .md file for a source_key is absent from the Clean Document Store."""
 
----
+    def __init__(self, source_key: str, expected_path: str):
+        self.source_key = source_key
+        self.expected_path = expected_path
+        super().__init__(f"Clean document not found: {expected_path} (source_key={source_key})")
 
-### Task 2.4 — Domain Vocabulary System
 
-**Description:** Implement the domain vocabulary loader and management utilities. The vocabulary
-is a curated list of domain-specific terms used for keyword validation (Task 2.2b) and query
-expansion in retrieval. Stored as a versioned YAML file (`domain_vocabulary.yaml`).
+class InvalidMetadataError(EmbeddingPipelineError):
+    """Raised when .meta.json is missing, malformed, or fails schema validation."""
 
-**Requirements Covered:** FR-803, FR-804
+    def __init__(self, source_key: str, reason: str):
+        self.source_key = source_key
+        self.reason = reason
+        super().__init__(f"Invalid metadata for {source_key}: {reason}")
 
-**Dependencies:** None
 
-**Complexity:** S
+class EmbeddingDimensionMismatchError(EmbeddingPipelineError):
+    """Raised when embedding vector dimension does not match model configuration."""
 
-**Subtasks:**
-1. Define vocabulary schema: term, synonyms, category, weight.
-2. Implement vocabulary loader with hot-reload on file change.
-3. Add CLI subcommand for vocabulary management: `add`, `remove`, `list`, `validate`.
-4. Seed initial vocabulary from existing document corpus via frequency analysis.
+    def __init__(self, expected: int, actual: int, model: str):
+        self.expected = expected
+        self.actual = actual
+        self.model = model
+        super().__init__(
+            f"Embedding dimension mismatch: model {model} expected {expected}, got {actual}"
+        )
 
-**Testing Strategy:** Unit tests for loading, validation, and lookup; test hot-reload triggers
-correctly on file modification.
 
----
+class ChunkSizeViolationError(EmbeddingPipelineError):
+    """Raised when a chunk violates min/max token constraints and cannot be corrected."""
 
-## Phase 3 — Extended Features
+    def __init__(self, chunk_id: str, token_count: int, min_tokens: int, max_tokens: int):
+        self.chunk_id = chunk_id
+        self.token_count = token_count
+        super().__init__(
+            f"Chunk {chunk_id} has {token_count} tokens "
+            f"(allowed: {min_tokens}–{max_tokens})"
+        )
 
-Phase 3 adds cross-document relationship detection, knowledge graph construction, and the review
-tier system — enabling relationship-aware retrieval and trust-filtered search results.
 
----
+class VectorStoreWriteError(EmbeddingPipelineError):
+    """Raised when a vector store write fails after exhausting retries."""
 
-### Task 3.2 — Node 9: Cross-Reference Extraction
+    def __init__(self, source_key: str, reason: str):
+        self.source_key = source_key
+        self.reason = reason
+        super().__init__(f"Vector store write failed for {source_key}: {reason}")
 
-**Description:** Implement Node 9 in `src/ingest/nodes/cross_reference_extraction.py`. Detects
-explicit references between documents (citations, hyperlinks, "see also" patterns) and stores
-them as edge metadata in chunk records. Enables retrieval-time expansion across related
-documents.
 
-**Requirements Covered:** FR-901, FR-902, FR-903, FR-904, FR-905
+class GraphStoreWriteError(EmbeddingPipelineError):
+    """Raised when a graph store write fails after exhausting retries."""
 
-**Dependencies:** Task 2.2b
-
-**Complexity:** M
-
-**Subtasks:**
-1. Implement reference pattern detection using a regex + LLM hybrid approach (FR-901).
-2. Resolve detected references to existing `source_key` values in the vector store (FR-902).
-3. Store cross-reference edges in chunk metadata payload as a list of `{target_source_key,
-   reference_type}` objects (FR-903).
-4. Handle dangling references gracefully: log a warning and store the unresolved reference
-   text, but do not fail (FR-904, FR-905).
-
-**Testing Strategy:** Unit tests with synthetic cross-referencing documents; verify edge
-creation in Weaviate payload.
+    def __init__(self, source_key: str, reason: str):
+        self.source_key = source_key
+        self.reason = reason
+        super().__init__(f"Graph store write failed for {source_key}: {reason}")
+```
 
 ---
 
-### Task 3.3a — Node 10: Triple Extraction (FR-1001–FR-1009)
+### Task 0.4 — Node Function Signatures (Stubs)
 
-**Description:** Implement Node 10 (`src/ingest/nodes/knowledge_graph_extraction.py`) for
-LLM-based entity and relation triple extraction. Extracts structured (subject, predicate,
-object) triples from enriched chunks with provenance tracking and structural fallback.
+**Files:**
+- Modify: All 8 node files under `src/ingest/nodes/` (add Embedding Pipeline stub functions)
+- Create: `src/ingest/clean_store.py` (stub)
+- Create: `src/ingest/report.py` (stub)
 
-**Requirements Covered:** FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009
+**Depends on:** Task 0.1, Task 0.2, Task 0.3
 
-**Dependencies:** Task 2.2a
+- [ ] Step 1: Create `src/ingest/clean_store.py` with reader stub:
 
-**Complexity:** L
+```python
+def read(source_key: str) -> tuple[str, CleanDocumentMetadata]:
+    """Read clean document and metadata from the Clean Document Store.
 
-**Subtasks:**
-1. **LLM-based triple extraction:** Design the entity/relation extraction prompt: output
-   structured JSON triples with subject, predicate, object, and provenance chunk ID (FR-1001,
-   FR-1002).
-2. **Entity normalization:** Normalize entity surface forms to canonical representations
-   (e.g., casing, abbreviation expansion) (FR-1003, FR-1004).
-3. **Relation typing:** Classify extracted relations into a controlled vocabulary of relation
-   types (FR-1005, FR-1006).
-4. **Provenance tracking:** Each triple includes the chunk ID from which it was extracted
-   (FR-1008).
-5. **Structural triple fallback (FR-1007):** When the LLM fails or times out, extract triples
-   from structural cues (e.g., Markdown headings as entities, list items as relations) to
-   ensure baseline coverage.
-6. **Conditional activation:** Wire Node 10 into the graph with conditional activation via
-   feature flag (FR-1009).
+    Returns (md_content, metadata). Raises MissingCleanDocumentError if absent,
+    InvalidMetadataError if metadata is malformed.
+    """
+    raise NotImplementedError
 
-**Testing Strategy:** Unit tests with mocked LLM verifying triple JSON schema; evaluate
-extraction precision on annotated test set.
+def validate_metadata(meta: dict) -> CleanDocumentMetadata:
+    """Validate raw metadata dict against the CleanDocumentMetadata schema."""
+    raise NotImplementedError
 
-**Risks:** Entity deduplication is inherently noisy; plan for iterative prompt refinement.
+def check_clean_hash_changed(source_key: str, current_hash: str) -> bool:
+    """Compare current clean_hash against the embedding run manifest.
 
----
+    Returns True if re-embedding is needed.
+    """
+    raise NotImplementedError
 
-### Task 3.3b — Entity Consolidation
+def propagate_metadata_to_chunk(chunk: dict, metadata: CleanDocumentMetadata) -> dict:
+    """Attach source_key, source_path, review_tier, extraction_confidence to chunk."""
+    raise NotImplementedError
+```
 
-**Description:** Implement entity consolidation as a support module used by both triple
-extraction and graph storage. Handles entity deduplication, alias resolution, and confidence
-scoring for entity merges across chunks and documents.
+- [ ] Step 2: Create Embedding Pipeline node stubs (one per node). Each stub follows:
 
-**Requirements Covered:** FR-1003, FR-1004, FR-1005
+```python
+def embedding_chunking_node(state: EmbeddingPipelineState) -> dict:
+    """Node 6: Structure-aware chunking with deterministic IDs."""
+    raise NotImplementedError
 
-**Dependencies:** Task 3.3a
+def embedding_chunk_enrichment_node(state: EmbeddingPipelineState) -> dict:
+    """Node 7: Boundary context + metadata header construction."""
+    raise NotImplementedError
 
-**Complexity:** M
+def embedding_metadata_generation_node(state: EmbeddingPipelineState) -> dict:
+    """Node 8: LLM keyword/entity extraction with TF-IDF fallback."""
+    raise NotImplementedError
 
-**Subtasks:**
-1. **Entity deduplication:** Detect and merge duplicate entities across chunks using
-   string similarity and embedding-based matching.
-2. **Alias resolution:** Maintain an alias table mapping variant surface forms to canonical
-   entity identifiers (e.g., "ML" -> "Machine Learning").
-3. **Confidence scoring for entity merges:** Assign confidence scores to proposed entity merges
-   based on string similarity, co-occurrence frequency, and context overlap. Only merge above
-   a configurable confidence threshold.
+def embedding_cross_reference_node(state: EmbeddingPipelineState) -> dict:
+    """Node 9: Inter-document reference detection (optional)."""
+    raise NotImplementedError
 
-**Testing Strategy:** Unit tests with known duplicate entity sets; verify merge decisions and
-confidence scores on synthetic entity pairs.
+def embedding_kg_extraction_node(state: EmbeddingPipelineState) -> dict:
+    """Node 10: Triple extraction with entity normalization (optional)."""
+    raise NotImplementedError
 
----
+def embedding_quality_validation_node(state: EmbeddingPipelineState) -> dict:
+    """Node 11: Quality scoring + deduplication filtering."""
+    raise NotImplementedError
 
-### Task 3.3c — Node 13: Graph Store Writer (FR-1301–FR-1304)
+def embedding_storage_node(state: EmbeddingPipelineState) -> dict:
+    """Node 12: Embedding generation + Weaviate upsert."""
+    raise NotImplementedError
 
-**Description:** Implement Node 13 (`src/ingest/nodes/knowledge_graph_storage.py`) for writing
-consolidated triples to the graph store. Supports Weaviate cross-references as the primary
-backend with an optional Neo4j backend, and handles re-ingestion cleanup.
+def embedding_kg_storage_node(state: EmbeddingPipelineState) -> dict:
+    """Node 13: Graph store writer (optional)."""
+    raise NotImplementedError
+```
 
-**Requirements Covered:** FR-1301, FR-1302, FR-1303, FR-1304
+- [ ] Step 3: Create `src/ingest/report.py` with report stub:
 
-**Dependencies:** Task 3.3a, Task 3.3b
-
-**Complexity:** M
-
-**Subtasks:**
-1. **Weaviate cross-reference writing:** Implement the graph store writer using Weaviate
-   cross-references as v1 backend (FR-1301).
-2. **Optional Neo4j backend:** Implement Neo4j as a planned v2 upgrade path for richer graph
-   query capabilities (FR-1302).
-3. **Backend swapping via config (FR-1303):** Support switching between Weaviate and Neo4j
-   backends via `graph_store.backend` configuration key without code changes.
-4. **Re-ingestion cleanup:** On re-embedding, delete all existing triples for the document
-   before inserting fresh ones to prevent stale graph data (FR-1304).
-
-**Testing Strategy:** Integration tests verifying triples in graph store; verify re-ingestion
-deletes old triples before inserting new ones; test backend swapping via config.
-
-**Risks:** Graph store migration (Weaviate -> Neo4j v2) must be treated as a schema migration
-event.
+```python
+def build_embedding_report(state: EmbeddingPipelineState) -> EmbeddingReport:
+    """Collect per-document statistics from final pipeline state."""
+    raise NotImplementedError
+```
 
 ---
 
-### Task 3.4 — Review Tier System
+### Task 0.5 — Embedding-Specific Config Extensions
 
-**Description:** Implement a configurable review tier system that gates documents for human
-review before they become fully searchable. Tiers (`Fully Reviewed`, `Partially Reviewed`,
-`Self Reviewed`) are read from the `review_tier` field in the Clean Document Store metadata
-envelope and propagated to every chunk from that document.
+**Files:**
+- Modify: `src/ingest/pipeline_types.py` (extend `PipelineConfig` frozen dataclass or `IngestionConfig`)
 
-**Requirements Covered:** FR-594, FR-803
+**Depends on:** Nothing
 
-**Dependencies:** Task S.2, Task 2.2b
+- [ ] Step 1: Add embedding-specific config fields. These extend the existing `IngestionConfig` dataclass:
 
-**Complexity:** M
+```python
+# ── Chunking configuration ───────────────────────────────────────
+chunk_size: int              # Target chunk size in tokens (default: 450)
+chunk_overlap: int           # Overlap tokens between adjacent chunks (default: 50)
+min_chunk_tokens: int        # Minimum acceptable chunk size (default: 30)
+max_chunk_tokens: int        # Maximum acceptable chunk size (default: 512)
+splitting_strategy: str      # "recursive" | "document_aware" | "semantic" (default: "document_aware")
+boundary_context_tokens: int # Tokens from adjacent chunks for boundary context (default: 60)
 
-**Subtasks:**
-1. Read `review_tier` from `CleanDocumentMetadata` and attach to every chunk via
-   `propagate_metadata_to_chunk` (FR-594).
-2. Ensure `review_tier` is stored as a Weaviate filterable field on every chunk record (FR-803).
-3. Implement review queue: a database-backed list of documents at `Self Reviewed` tier pending
-   promotion.
-4. Add CLI subcommand for review management: `approve`, `reject`, `list-pending`.
+# ── Enrichment configuration ─────────────────────────────────────
+embed_context_header: bool   # Include context_header in embedding input (default: False)
 
-**Testing Strategy:** Unit tests for tier propagation; integration test for the full review
-lifecycle (ingest → self-reviewed → approve → fully-reviewed visible in search).
+# ── Embedding model configuration ────────────────────────────────
+embedding_model: str         # Model identifier (default: "BAAI/bge-large-en-v1.5")
+embedding_dimension: int     # Expected vector dimension (default: 1024)
+byom_mode: bool              # Bring Your Own Model — accept pre-computed vectors (default: False)
+document_prefix: str         # Asymmetric prefix for documents (default: "passage: ")
+query_prefix: str            # Asymmetric prefix for queries (default: "query: ")
 
----
+# ── Optional stage toggles ───────────────────────────────────────
+enable_cross_references: bool     # Enable Node 9 (default: False)
+enable_knowledge_graph: bool      # Enable Nodes 10 + 13 (default: False)
+graph_store_backend: str          # "weaviate" | "neo4j" (default: "weaviate")
 
-## Phase 4 — Quality and Operations
+# ── Quality validation ───────────────────────────────────────────
+min_quality_score: float     # Discard threshold (default: 0.45)
+dedup_threshold: float       # Near-duplicate cosine similarity threshold (default: 0.95)
 
-Phase 4 hardens the pipeline for production: quality validation, evaluation, observability,
-batch processing at scale, and schema evolution.
+# ── Hybrid search ────────────────────────────────────────────────
+enable_bm25: bool            # Enable BM25 keyword indexing alongside vectors (default: True)
 
----
+# ── Clean Document Store ─────────────────────────────────────────
+clean_docs_dir: str          # Path to Clean Document Store directory
+weaviate_collection: str     # Weaviate collection name for chunk storage
+```
 
-### Task 4.0 — Node 11: Quality Validation
+- [ ] Step 2: Define `CleanDocumentMetadata` dataclass:
 
-**Description:** Implement Node 11 in `src/ingest/nodes/quality_validation.py`. Filters
-low-quality chunks (below a configurable quality score threshold), deduplicates near-identical
-chunks, and assigns quality scores to all surviving chunks.
+```python
+@dataclass(frozen=True)
+class CleanDocumentMetadata:
+    """Metadata envelope read from {source_key}.meta.json in the Clean Document Store."""
 
-**Requirements Covered:** FR-1101, FR-1102, FR-1103, FR-1104, FR-1105
+    source_key: str
+    source_path: str
+    clean_hash: str               # SHA-256 of the clean Markdown content
+    review_tier: str              # FULLY_REVIEWED | PARTIALLY_REVIEWED | SELF_REVIEWED
+    extraction_confidence: float  # From document processing pipeline
+    title: str
+    page_count: int
+    processing_timestamp: str
+```
 
-**Dependencies:** Task 2.2b
-
-**Complexity:** S
-
-**Subtasks:**
-1. Implement quality scoring: combine chunk length, keyword density, and structural
-   completeness into a [0.0–1.0] quality score.
-2. Filter chunks below `config.min_quality_score` — rejected chunks are logged but not
-   embedded.
-3. Implement near-duplicate detection: hash-based deduplication for exact duplicates; optional
-   cosine similarity deduplication for near-duplicates.
-4. Attach `quality_score` field to all surviving chunk records for downstream filtering.
-
-**Testing Strategy:** Unit tests with known-quality fixture chunks; assert filter thresholds
-behave correctly at boundary values.
-
----
-
-### Task 4.1 — Evaluation Framework and Dataset
-
-**Description:** Build an evaluation framework that measures embedding pipeline quality across
-dimensions: chunking coherence, metadata accuracy, embedding fidelity, and end-to-end retrieval
-relevance. Includes a curated evaluation dataset with ground-truth annotations.
-
-**Requirements Covered:** (cross-cutting — no dedicated FR in this spec)
-
-**Dependencies:** Phase 1 complete
-
-**Complexity:** L
-
-**Subtasks:**
-1. Define evaluation metrics: chunk coherence score, metadata precision/recall, retrieval MRR.
-2. Curate an evaluation dataset (minimum 50 documents with annotations and expected retrieval
-   results).
-3. Implement automated evaluation harness runnable via CLI.
-4. Add regression detection: alert if metrics drop below configured thresholds.
-5. Integrate evaluation into CI pipeline.
-
-**Testing Strategy:** The evaluation framework is itself the testing strategy for the pipeline.
+- [ ] Step 3: Add config validation: contradictory settings should fail fast (e.g., `byom_mode=True` with `embedding_model` set, `enable_knowledge_graph=True` with `graph_store_backend` unset).
 
 ---
 
-### Task 4.2 — Langfuse Observability Integration
+## Phase A — Tests (Isolated from Implementation)
 
-**Description:** Integrate Langfuse for end-to-end pipeline observability. Each pipeline run
-creates a trace; each node creates a span. LLM calls are captured with token counts, latencies,
-and costs. Errors are tagged and searchable.
+**Agent isolation contract:** The test agent receives ONLY the following for each task:
+1. The spec requirements (FR numbers + exact acceptance criteria text)
+2. The contract files from Phase 0 (TypedDicts, function signatures, exception types)
+3. The task description from this plan
 
-**Requirements Covered:** (cross-cutting — no dedicated FR in this spec)
+**Must NOT receive:**
+- Any implementation code from `src/ingest/nodes/`
+- Any Part B code appendix snippets from `EMBEDDING_PIPELINE_DESIGN.md`
+- Any implementation code from other Phase B tasks
+- Any existing node implementations from the Document Processing Pipeline
 
-**Dependencies:** Task 1.2
-
-**Complexity:** M
-
-**Subtasks:**
-1. Add Langfuse SDK dependency and configuration.
-2. Instrument the pipeline runtime (`pipeline_impl.py`) with trace creation per document.
-3. Instrument each node with span creation and metadata tagging (node name, input size, output
-   size).
-4. Capture LLM calls via the shared LLM helper (`pipeline_llm.py`): token counts, model,
-   latency, cost.
-5. Add error tagging and alerting rules for failed node executions.
-
-**Testing Strategy:** Integration test verifying traces appear in Langfuse; unit tests with
-mocked Langfuse client.
+This isolation prevents the test agent from reverse-engineering implementation details into the tests, ensuring tests validate behavior against the specification, not against a particular implementation strategy.
 
 ---
 
-### Task 4.3 — Batch Processing Hardening
+### Task A-S.2 — Tests for Clean Document Store Reader
 
-**Description:** Harden the pipeline for large batch runs (1000+ documents). Add concurrency
-controls, progress checkpointing, partial failure recovery, and memory management for large
-documents.
+**Agent input (ONLY these):**
+- FR-591: The pipeline MUST read clean Markdown from `{source_key}.md` in the Clean Document Store
+- FR-592: The pipeline MUST validate the `.meta.json` metadata envelope; raise `InvalidMetadataError` on schema violation
+- FR-593: The pipeline MUST compare `clean_hash` against the embedding run manifest; skip if unchanged
+- FR-594: The pipeline MUST propagate `source_key`, `source_path`, `review_tier`, and `extraction_confidence` from metadata to every chunk
+- FR-595: The pipeline SHOULD verify actual SHA-256 of `.md` matches `clean_hash`; log warning on mismatch without halting
+- `CleanDocumentMetadata` dataclass from Phase 0 (Task 0.5)
+- `MissingCleanDocumentError`, `InvalidMetadataError` from Phase 0 (Task 0.3)
+- Function signatures: `read()`, `validate_metadata()`, `check_clean_hash_changed()`, `propagate_metadata_to_chunk()` from Phase 0 (Task 0.4)
 
-**Requirements Covered:** (cross-cutting — no dedicated FR in this spec)
+**Must NOT receive:** Any implementation code from `src/ingest/clean_store.py`, any Part B snippets.
 
-**Dependencies:** Task 1.10
+**Files:**
+- Create: `tests/ingest/test_clean_store_reader.py`
 
-**Complexity:** L
+- [ ] Step 1: Write tests covering:
+  - Read existing clean document returns `(md_content, CleanDocumentMetadata)` (FR-591)
+  - Read missing `.md` file raises `MissingCleanDocumentError` (FR-591)
+  - Read missing `.meta.json` raises `InvalidMetadataError` (FR-592)
+  - Malformed JSON in `.meta.json` raises `InvalidMetadataError` (FR-592)
+  - Missing required fields in metadata raises `InvalidMetadataError` (FR-592)
+  - `clean_hash` unchanged returns skip signal (FR-593)
+  - `clean_hash` changed returns reprocess signal (FR-593)
+  - `propagate_metadata_to_chunk` attaches `source_key`, `source_path`, `review_tier`, `extraction_confidence` (FR-594)
+  - SHA-256 mismatch between `.md` content and `clean_hash` logs warning but does not raise (FR-595)
 
-**Subtasks:**
-1. Implement configurable concurrency: async semaphore for parallel document processing.
-2. Add progress checkpointing: persist completed `source_key` values so a crashed batch can
-   resume without re-processing completed documents.
-3. Implement partial failure isolation: a single document failure does not abort the batch;
-   log the failure and continue.
-4. Add per-document memory limits for large files; implement streaming chunking to avoid
-   loading the full document into memory.
-5. Add batch-level reporting: aggregate statistics across all documents in a run.
+- [ ] Step 2: Run tests to confirm stubs raise `NotImplementedError`:
 
-**Testing Strategy:** Load test with 500+ synthetic documents; verify checkpoint recovery after
-a simulated crash at the midpoint.
+```bash
+pytest tests/ingest/test_clean_store_reader.py -v
+```
 
-**Risks:** Memory pressure from large documents; mitigate with streaming chunk-at-a-time
-processing rather than whole-document state.
+Expected: ALL FAIL with `NotImplementedError`
 
 ---
 
-### Task 4.4 — Schema Migration
+### Task A-1.2 — Tests for Embedding Pipeline DAG Skeleton
 
-**Description:** Implement schema migration tooling for the vector store and chunk metadata
-payloads. As the pipeline evolves, chunk metadata schemas change; this task ensures existing
-data can be migrated forward without full re-ingestion.
+**Agent input (ONLY these):**
+- FR-591: Pipeline reads from Clean Document Store
+- FR-901: Cross-reference extraction is conditional on `enable_cross_references` config
+- FR-1001: KG extraction is conditional on `enable_knowledge_graph` config
+- FR-1301: KG storage fires only when KG triples exist AND `enable_knowledge_graph` is true
+- `EmbeddingPipelineState` TypedDict from Phase 0 (Task 0.1)
+- `PipelineConfig` config fields from Phase 0 (Task 0.5)
+- Node stub function signatures from Phase 0 (Task 0.4)
 
-**Requirements Covered:** (cross-cutting — no dedicated FR in this spec)
+**Must NOT receive:** Any `build_embedding_pipeline_graph()` implementation, any Part B DAG snippet.
 
-**Dependencies:** Task 1.8
+**Files:**
+- Create: `tests/ingest/nodes/test_pipeline_dag.py`
 
-**Complexity:** M
+- [ ] Step 1: Write tests covering:
+  - Graph compiles without error
+  - All 8 nodes are registered in the graph
+  - Entry point is `chunking`
+  - Mandatory path: chunking -> chunk_enrichment -> metadata_generation -> quality_validation -> embedding_storage
+  - When `enable_cross_references=False` and `enable_knowledge_graph=False`, cross-ref and KG nodes are skipped
+  - When `enable_cross_references=True`, cross-reference node executes after metadata_generation
+  - When `enable_knowledge_graph=True`, KG extraction executes; KG storage executes after embedding_storage
+  - When `enable_knowledge_graph=True` but no triples produced, KG storage is skipped
+  - State keys are preserved end-to-end through a synthetic document run
 
-**Subtasks:**
-1. Define a `metadata_schema_version` field in all chunk payloads.
-2. Implement migration registry: `{version → migration_function}`.
-3. Implement `ingest.py migrate` CLI subcommand.
-4. Add dry-run mode for migrations.
-5. Add rollback support for failed migrations.
+- [ ] Step 2: Run tests:
 
-**Testing Strategy:** Unit tests for each migration function; integration test verifying
-migration on a populated Weaviate test collection.
+```bash
+pytest tests/ingest/nodes/test_pipeline_dag.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-1.6 — Tests for Chunking Node
+
+**Agent input (ONLY these):**
+- FR-601: Structure-aware splitting respects Markdown heading boundaries (`#`, `##`, `###`)
+- FR-602: Recursive character splitter as fallback when a section exceeds `max_chunk_tokens`
+- FR-603: Deterministic chunk IDs: `SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]` where `content_hash = SHA-256(chunk_text)[:16]`
+- FR-604: Tables are indivisible chunks; oversized tables split by row groups with header row prepended
+- FR-605: Chunk ID changes when content changes (content_hash component ensures this)
+- FR-606: Adjacency links: `previous_chunk_id` / `next_chunk_id` on every chunk; first chunk has `previous_chunk_id = None`; last has `next_chunk_id = None`
+- `EmbeddingPipelineState` TypedDict from Phase 0 (Task 0.1)
+- `ChunkRecord` TypedDict from Phase 0 (Task 0.2)
+- Function signature: `def embedding_chunking_node(state: EmbeddingPipelineState) -> dict`
+- Chunk ID formula: `SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]` where `content_hash = SHA-256(chunk_text)[:16]`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/chunking.py`, `src/ingest/support/markdown.py`, or Part B snippets.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_chunking.py`
+
+- [ ] Step 1: Write tests covering:
+  - Heading-aware splitting: input with `# A` and `## B` sections produces chunks at heading boundaries (FR-601)
+  - Recursive fallback: section exceeding `max_chunk_tokens` is split into multiple chunks (FR-602)
+  - Deterministic chunk IDs: same input produces identical chunk IDs across runs (FR-603)
+  - Content-hash component: changing chunk text changes the chunk_id even at the same ordinal (FR-605)
+  - Chunk ID formula verification: manually compute `SHA-256(source_key + ":" + str(ordinal) + ":" + SHA-256(chunk_text)[:16])[:24]` and assert match (FR-603)
+  - Table atomic chunking: Markdown table preserved as a single chunk (FR-604)
+  - Oversized table: table exceeding `max_chunk_tokens` split by rows with header prepended to each sub-chunk (FR-604)
+  - Adjacency links: first chunk has `previous_chunk_id = None` (FR-606)
+  - Adjacency links: last chunk has `next_chunk_id = None` (FR-606)
+  - Adjacency links: middle chunks link to both neighbors (FR-606)
+  - Chunk size validation: all chunks within `min_chunk_tokens`–`max_chunk_tokens` range
+  - `char_start` and `char_end` offsets are correct for each chunk
+  - `heading_path` reflects the section hierarchy
+  - `content_type` is assigned correctly (text, table, code, etc.)
+  - Single-section document produces chunks without unnecessary heading splits
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_chunking.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-2.2a — Tests for Chunk Enrichment Node
+
+**Agent input (ONLY these):**
+- FR-701: Attach boundary context from adjacent chunks (configurable window of `boundary_context_tokens`)
+- FR-702: Build `context_header` from document title, section path, review tier — stored but NOT embedded by default
+- FR-703: `enriched_content = chunk_text + boundary_context` — this is what gets embedded
+- FR-704: `context_header` is stored separately in chunk metadata for retrieval display
+- FR-705: Cross-chunk overlap: last N tokens from previous chunk + first N tokens from next chunk as boundary context
+- `EmbeddingPipelineState` TypedDict, `ChunkRecord`, `EnrichedChunk` from Phase 0
+- Function signature: `def embedding_chunk_enrichment_node(state: EmbeddingPipelineState) -> dict`
+- Config fields: `boundary_context_tokens`, `embed_context_header`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/chunk_enrichment.py`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_chunk_enrichment.py`
+
+- [ ] Step 1: Write tests covering:
+  - `enriched_content` equals `chunk_text + boundary_context` (FR-703)
+  - `context_header` is NOT included in `enriched_content` by default (FR-702)
+  - When `embed_context_header=True`, `context_header` IS included in `enriched_content` (FR-702 override)
+  - `context_header` includes document title, section path, review tier (FR-702, FR-704)
+  - `context_header` is stored as a separate field in `EnrichedChunk` (FR-704)
+  - Boundary context: first chunk gets only next-chunk context (no previous) (FR-705)
+  - Boundary context: last chunk gets only previous-chunk context (no next) (FR-705)
+  - Boundary context: middle chunks get both previous and next context (FR-705)
+  - Boundary context respects `boundary_context_tokens` configuration (FR-701)
+  - Single-chunk document: boundary context is empty (FR-705)
+  - Enrichment failure falls back to unenriched chunk (FR-705)
+  - `chunk_id` is carried forward from `ChunkRecord` to `EnrichedChunk`
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_chunk_enrichment.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-2.2b — Tests for Metadata Generation Node
+
+**Agent input (ONLY these):**
+- FR-801: LLM extracts keywords at document and chunk level
+- FR-802: LLM extracts named entities per chunk
+- FR-803: Keywords validated against domain vocabulary before use
+- FR-804: Domain vocabulary terms appearing in chunk text but not extracted by LLM are injected
+- FR-805: TF-IDF fallback when LLM call fails or times out
+- FR-806: Document-level summary generated by aggregating chunk summaries
+- `EmbeddingPipelineState` TypedDict, `EnrichedChunk` from Phase 0
+- Function signature: `def embedding_metadata_generation_node(state: EmbeddingPipelineState) -> dict`
+- Config fields: `max_keywords`, `enable_llm_metadata`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/metadata_generation.py` or `src/ingest/common/shared.py`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_metadata_generation.py`
+
+- [ ] Step 1: Write tests covering:
+  - LLM produces keywords list per chunk (FR-801)
+  - LLM produces entities list per chunk (FR-802)
+  - Keywords validated against domain vocabulary — non-vocabulary keywords are retained but flagged (FR-803)
+  - Domain vocabulary injection: terms in chunk text not extracted by LLM are added (FR-804)
+  - TF-IDF fallback activates when LLM call raises exception (FR-805)
+  - TF-IDF fallback activates when LLM call times out (FR-805)
+  - TF-IDF fallback produces keyword list (non-empty for non-trivial text) (FR-805)
+  - Document-level summary is generated (FR-806)
+  - Configurable `max_keywords` limits keyword count
+  - Empty chunk text produces empty keywords list
+  - LLM failure on one chunk does not fail the entire node
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_metadata_generation.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-1.7 — Tests for Embedding Generation
+
+**Agent input (ONLY these):**
+- FR-1201: Embedding model is configurable; default BAAI/bge-large-en-v1.5, 1024 dimensions
+- FR-1202: Batched embedding calls with configurable batch size
+- FR-1203: Dimensionality validation: output vector dimension must match `embedding_dimension` config; halt on mismatch
+- FR-1204: BYOM mode: when `byom_mode=True`, accept pre-computed vectors instead of calling embedding API
+- `EmbeddingPipelineState` TypedDict, `EnrichedChunk` from Phase 0
+- `EmbeddingDimensionMismatchError` from Phase 0 (Task 0.3)
+- Function signature: `def embedding_storage_node(state: EmbeddingPipelineState) -> dict`
+- Config fields: `embedding_model`, `embedding_dimension`, `byom_mode`, `document_prefix`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/embedding_storage.py`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_embedding_storage.py`
+
+- [ ] Step 1: Write tests for embedding generation covering:
+  - Embeddings are generated for all enriched chunks (FR-1201)
+  - Embedding dimension matches `embedding_dimension` config (FR-1203)
+  - Dimension mismatch raises `EmbeddingDimensionMismatchError` (FR-1203)
+  - BYOM mode skips embedding API call entirely (FR-1204)
+  - BYOM mode uses pre-computed vectors from chunk state (FR-1204)
+  - Batched calls respect configured batch size (FR-1202)
+  - Document prefix is prepended to `enriched_content` before embedding (FR-1206)
+  - Token count exceeding model context window is rejected before API call
+  - Transient API errors trigger retry with backoff
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_embedding_storage.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-1.8 — Tests for Vector Store Upsert
+
+**Agent input (ONLY these):**
+- FR-1205: Delete-and-reinsert on re-ingestion: delete all chunks by `source_key` before inserting
+- FR-1206: Asymmetric embedding prefixes (`document_prefix` for documents, `query_prefix` for queries)
+- FR-1207: BM25 keyword indexing alongside vector indexing; enabled via `enable_bm25` (default: true)
+- FR-1208: Atomic storage: no partial writes on failure (rollback or no-commit)
+- FR-1209: Vector dimensionality validation against model output
+- `EmbeddingPipelineState` TypedDict from Phase 0
+- `VectorStoreWriteError` from Phase 0 (Task 0.3)
+- Config fields: `weaviate_collection`, `enable_bm25`, `document_prefix`, `query_prefix`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/embedding_storage.py` or Part B re-ingestion snippet.
+
+**Files:**
+- Modify: `tests/ingest/nodes/test_embedding_storage.py` (add upsert tests to same file)
+
+- [ ] Step 1: Write tests for vector store upsert covering:
+  - Chunks are stored with full metadata envelope in Weaviate (FR-1205)
+  - Re-ingestion: existing chunks for source_key are deleted before insert (FR-1205)
+  - Idempotency: re-upserting same chunks does not increase point count (FR-1205)
+  - Asymmetric prefix: document_prefix is applied at ingestion time (FR-1206)
+  - BM25 index: when `enable_bm25=True`, `enriched_content` text is indexed for keyword search (FR-1207)
+  - Atomic write: partial failure rolls back all writes for the document (FR-1208)
+  - Transient Weaviate errors trigger retry (FR-1208)
+  - `VectorStoreWriteError` raised after exhausting retries (FR-1208)
+  - Stale chunks are gone after re-ingestion of a changed document (FR-1205)
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_embedding_storage.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-1.9 — Tests for Result Reporting
+
+**Agent input (ONLY these):**
+- FR-1201: Storage completeness reporting
+- `EmbeddingPipelineState` TypedDict from Phase 0
+- `EmbeddingReport` dataclass from Phase 0 (Task 0.2)
+- Function signature: `def build_embedding_report(state: EmbeddingPipelineState) -> EmbeddingReport`
+
+**Must NOT receive:** Any implementation from `src/ingest/report.py`.
+
+**Files:**
+- Create: `tests/ingest/test_embedding_report.py`
+
+- [ ] Step 1: Write tests covering:
+  - Report contains correct `chunks_produced` count
+  - Report contains correct `chunks_embedded` count
+  - Report contains correct `chunks_stored` count
+  - Report contains correct `chunks_filtered` count (quality-rejected)
+  - Report contains correct `chunks_deduplicated` count
+  - Report contains `triples_extracted` and `triples_stored` when KG is enabled
+  - Report contains timing data for each stage
+  - Report contains errors list for any failed operations
+  - Report `skipped=True` when document hash unchanged
+  - Report `dry_run=True` when dry-run mode is active
+  - Report serializes to valid JSON
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_embedding_report.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-1.10 — Tests for Re-Ingestion Flow
+
+**Agent input (ONLY these):**
+- FR-593: `clean_hash` comparison determines re-embedding; skip if unchanged
+- FR-1205: Delete-and-reinsert strategy for changed documents
+- FR-1208: Atomic re-ingestion (delete old + insert new as a unit)
+- `EmbeddingPipelineState` TypedDict, `CleanDocumentMetadata` from Phase 0
+- `EmbeddingPipelineRuntime` class signature from Phase 0
+- Config fields: `force` flag, `dry_run` flag
+
+**Must NOT receive:** Any implementation from `src/ingest/pipeline/impl.py` or Part B re-ingestion snippet.
+
+**Files:**
+- Create: `tests/ingest/test_reingestion.py`
+
+- [ ] Step 1: Write tests covering:
+  - Unchanged `clean_hash` skips entire pipeline (FR-593)
+  - Changed `clean_hash` triggers full re-embedding (FR-593)
+  - `force=True` bypasses hash comparison and always re-embeds (FR-593)
+  - Delete-and-reinsert: old chunks removed before new chunks inserted (FR-1205)
+  - Dry-run mode reports what would be deleted without executing (FR-1205)
+  - Dry-run mode does not modify vector store (FR-1205)
+  - After re-ingestion, old chunk IDs are gone and new chunk IDs are present (FR-1205)
+  - Manifest is updated with new `clean_hash` after successful embedding (FR-593)
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_reingestion.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-2.1 — Tests for LLM-Assisted Chunking
+
+**Agent input (ONLY these):**
+- FR-606: Adjacency links (already tested in A-1.6, but verify under LLM mode too)
+- FR-607: LLM-assisted semantic boundary detection when `splitting_strategy="semantic"`
+- FR-608: Fallback to rule-based chunking on LLM failure or timeout
+- FR-609: Content type tagging: `text`, `table`, `figure`, `code`, `equation`, `list`, `heading`
+- FR-610: Domain vocabulary compound-term boundary respect
+- FR-611: Maximum chunk count limit per document
+- `EmbeddingPipelineState` TypedDict, `ChunkRecord` from Phase 0
+- Config fields: `splitting_strategy`, `max_chunk_tokens`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/chunking.py`, any LLM prompt text.
+
+**Files:**
+- Modify: `tests/ingest/nodes/test_chunking.py` (add LLM-specific test class)
+
+- [ ] Step 1: Write tests covering:
+  - Semantic splitting produces coherent topic-based chunks (FR-607)
+  - LLM failure degrades to rule-based chunking transparently (FR-608)
+  - LLM timeout degrades to rule-based chunking transparently (FR-608)
+  - Content type tagging: code fences tagged as `code` (FR-609)
+  - Content type tagging: Markdown table tagged as `table` (FR-609)
+  - Content type tagging: heading-only chunk tagged as `heading` (FR-609)
+  - Domain vocabulary terms not split across chunk boundaries (FR-610)
+  - Maximum chunk count limit enforced (FR-611)
+  - Adjacency links correct under LLM mode (FR-606)
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_chunking.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-2.4 — Tests for Domain Vocabulary System
+
+**Agent input (ONLY these):**
+- FR-803: Keywords validated against domain vocabulary
+- FR-804: Domain vocabulary terms appearing in chunk text injected into keywords
+- Vocabulary schema: term, synonyms, category, weight
+- Function signatures: `load_vocabulary()`, `validate_keywords()`, `inject_vocabulary_terms()`
+
+**Must NOT receive:** Any implementation from `src/ingest/support/vocabulary.py`.
+
+**Files:**
+- Create: `tests/ingest/test_domain_vocabulary.py`
+
+- [ ] Step 1: Write tests covering:
+  - Load vocabulary from YAML file
+  - Validate keywords against loaded vocabulary
+  - Inject vocabulary terms found in text but not in keyword list
+  - Synonym resolution (e.g., "ML" matches "Machine Learning")
+  - Hot-reload on file change
+  - Invalid YAML raises descriptive error
+  - Empty vocabulary file returns empty set
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_domain_vocabulary.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-3.2 — Tests for Cross-Reference Extraction Node
+
+**Agent input (ONLY these):**
+- FR-901: Detect inter-document references and standard citations
+- FR-902: Resolve references to existing `source_key` values
+- FR-903: Store cross-references as `{target_source_key, reference_type}` in chunk metadata
+- FR-904: Dangling references logged as warnings, not failures
+- FR-905: Regex fallback when LLM detection fails
+- `EmbeddingPipelineState` TypedDict from Phase 0
+- Config fields: `enable_cross_references`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/cross_reference_extraction.py` or `src/ingest/common/shared.py` `_cross_refs()`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_cross_reference.py`
+
+- [ ] Step 1: Write tests covering:
+  - Detect explicit document references (e.g., "see DOC-123") (FR-901)
+  - Detect standard references (e.g., "RFC 2119", "Section 3.2") (FR-901)
+  - Resolve detected reference to known `source_key` (FR-902)
+  - Store as `{target_source_key, reference_type}` (FR-903)
+  - Dangling reference (unknown target) logged but not raised (FR-904)
+  - Regex fallback activates on LLM failure (FR-905)
+  - Regex fallback extracts basic patterns (document IDs, section refs) (FR-905)
+  - Node is no-op when `enable_cross_references=False`
+  - Empty document produces empty cross-reference list
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_cross_reference.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-3.3a — Tests for Triple Extraction Node
+
+**Agent input (ONLY these):**
+- FR-1001: Extract subject-predicate-object triples from enriched chunks
+- FR-1002: Structured JSON output with provenance chunk ID
+- FR-1003: Entity normalization (casing, abbreviation expansion)
+- FR-1004: Alias resolution to canonical entity identifiers
+- FR-1005: Relation typing into controlled vocabulary
+- FR-1006: Configurable ontology of relationship types
+- FR-1007: Structural triple fallback on LLM failure (headings as entities, list items as relations)
+- FR-1008: Each triple includes `source_chunk_id` provenance
+- FR-1009: Conditional activation via `enable_knowledge_graph` config flag
+- `EmbeddingPipelineState` TypedDict, `KGTriple` TypedDict from Phase 0
+- Config fields: `enable_knowledge_graph`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/knowledge_graph_extraction.py`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_kg_extraction.py`
+
+- [ ] Step 1: Write tests covering:
+  - LLM extracts triples from enriched chunk text (FR-1001)
+  - Triple output matches `KGTriple` schema (FR-1002)
+  - Each triple has `source_chunk_id` matching the source chunk (FR-1008)
+  - Entity normalization: "machine learning" and "Machine Learning" resolve to same form (FR-1003)
+  - Alias resolution: "ML" resolves to "Machine Learning" (FR-1004)
+  - Relation typing: extracted predicates mapped to controlled vocabulary (FR-1005)
+  - Configurable ontology: custom predicate set is respected (FR-1006)
+  - Structural fallback: headings become entities when LLM fails (FR-1007)
+  - Structural fallback: list items become relations when LLM fails (FR-1007)
+  - Node is no-op when `enable_knowledge_graph=False` (FR-1009)
+  - Confidence score is assigned to each triple (0.0–1.0)
+  - LLM failure on one chunk does not fail the entire node
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_kg_extraction.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-3.3b — Tests for Entity Consolidation
+
+**Agent input (ONLY these):**
+- FR-1003: Entity deduplication across chunks
+- FR-1004: Alias resolution mapping variant forms to canonical identifiers
+- FR-1005: Confidence scoring for entity merges
+- `KGTriple` TypedDict from Phase 0
+- Function signatures: `deduplicate_entities()`, `resolve_aliases()`, `score_merge_confidence()`
+
+**Must NOT receive:** Any implementation from `src/ingest/support/entity.py`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_entity_consolidation.py`
+
+- [ ] Step 1: Write tests covering:
+  - Exact duplicate entities are merged (FR-1003)
+  - Near-duplicate entities (fuzzy string match) are merged above threshold (FR-1003)
+  - Alias table maps variant forms to canonical ID (FR-1004)
+  - Merge confidence score reflects string similarity and context overlap (FR-1005)
+  - Below-threshold entity pairs are NOT merged (FR-1005)
+  - Consolidation across multiple chunks produces consistent canonical forms
+  - Empty triple list returns empty consolidation result
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_entity_consolidation.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-3.3c — Tests for Graph Store Writer Node
+
+**Agent input (ONLY these):**
+- FR-1301: Persist triples to graph store (Weaviate cross-references in v1)
+- FR-1302: Neo4j planned as v2 upgrade path
+- FR-1303: Backend swapping via `graph_store_backend` config key without code changes
+- FR-1304: Delete-and-reinsert on re-ingestion: delete existing triples for document before inserting
+- `EmbeddingPipelineState` TypedDict, `KGTriple` TypedDict from Phase 0
+- `GraphStoreWriteError` from Phase 0 (Task 0.3)
+- Config fields: `enable_knowledge_graph`, `graph_store_backend`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/knowledge_graph_storage.py`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_kg_storage.py`
+
+- [ ] Step 1: Write tests covering:
+  - Triples are persisted to Weaviate as cross-references (FR-1301)
+  - Re-ingestion deletes existing triples for document before inserting (FR-1304)
+  - Node is no-op when `enable_knowledge_graph=False` or no triples in state
+  - Backend config set to "weaviate" uses Weaviate writer (FR-1303)
+  - Backend config set to "neo4j" uses Neo4j writer (FR-1303)
+  - `GraphStoreWriteError` raised after exhausting retries
+  - Successful write returns triple count in state
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_kg_storage.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-3.4 — Tests for Review Tier System
+
+**Agent input (ONLY these):**
+- FR-594: `review_tier` propagated from `CleanDocumentMetadata` to every chunk
+- FR-803: `review_tier` stored as Weaviate filterable field
+- Review tiers: `FULLY_REVIEWED`, `PARTIALLY_REVIEWED`, `SELF_REVIEWED`
+- Default tier for new documents: `SELF_REVIEWED`
+- `CleanDocumentMetadata` dataclass from Phase 0 (Task 0.5)
+
+**Must NOT receive:** Any implementation from `src/ingest/clean_store.py` or node files.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_review_tiers.py`
+
+- [ ] Step 1: Write tests covering:
+  - `review_tier` from metadata is attached to every chunk (FR-594)
+  - `FULLY_REVIEWED` tier propagates correctly
+  - `PARTIALLY_REVIEWED` tier propagates correctly
+  - `SELF_REVIEWED` tier propagates correctly
+  - Missing `review_tier` defaults to `SELF_REVIEWED`
+  - `review_tier` is stored as a filterable field in Weaviate payload (FR-803)
+  - Review tier is preserved through quality validation (not stripped)
+  - Review tier update does not require re-embedding
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_review_tiers.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-4.0 — Tests for Quality Validation Node
+
+**Agent input (ONLY these):**
+- FR-1101: Quality score assignment based on content completeness and coherence (0.0–1.0)
+- FR-1102: Configurable discard threshold (`min_quality_score`); chunks below are filtered
+- FR-1103: Near-duplicate detection against stored chunks using hash and cosine similarity
+- FR-1104: Configurable deduplication threshold (`dedup_threshold`)
+- FR-1105: `review_tier` metadata passes through regardless of quality score
+- `EmbeddingPipelineState` TypedDict, `QualityScore` TypedDict from Phase 0
+- Function signature: `def embedding_quality_validation_node(state: EmbeddingPipelineState) -> dict`
+- Config fields: `min_quality_score`, `dedup_threshold`
+
+**Must NOT receive:** Any implementation from `src/ingest/nodes/quality_validation.py` or `src/ingest/common/shared.py` `_quality_score()`.
+
+**Files:**
+- Create: `tests/ingest/nodes/test_quality_validation.py`
+
+- [ ] Step 1: Write tests covering:
+  - Quality score assigned to each chunk in range [0.0, 1.0] (FR-1101)
+  - Chunk below `min_quality_score` is filtered out (FR-1102)
+  - Chunk at exactly `min_quality_score` passes (FR-1102, boundary test)
+  - Chunk above `min_quality_score` passes (FR-1102)
+  - Near-duplicate detected by content hash match (FR-1103)
+  - Near-duplicate detected by cosine similarity above `dedup_threshold` (FR-1103)
+  - Non-duplicate chunks with similar but distinct content pass (FR-1104)
+  - `review_tier` is preserved on all chunks regardless of quality score (FR-1105)
+  - Filtered chunks are logged but not embedded
+  - Empty chunk list returns empty output
+  - All-low-quality chunks: node returns empty list, no error
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_quality_validation.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-4.1 — Tests for Evaluation Framework
+
+**Agent input (ONLY these):**
+- No dedicated FR (cross-cutting)
+- Evaluation metrics: chunk coherence score, metadata precision/recall, retrieval MRR
+- Evaluation dataset: minimum 50 documents with annotations
+- Function signatures: `evaluate_chunking()`, `evaluate_metadata()`, `evaluate_retrieval()`
+
+**Must NOT receive:** Any implementation code.
+
+**Files:**
+- Create: `tests/ingest/test_evaluation_framework.py`
+
+- [ ] Step 1: Write tests covering:
+  - Evaluation harness loads annotated dataset
+  - Chunk coherence metric returns score in [0.0, 1.0]
+  - Metadata precision metric returns score in [0.0, 1.0]
+  - Retrieval MRR metric returns score in [0.0, 1.0]
+  - Regression detection: alert when metric drops below threshold
+  - Empty dataset raises descriptive error
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_evaluation_framework.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-4.2 — Tests for Langfuse Observability Integration
+
+**Agent input (ONLY these):**
+- No dedicated FR (cross-cutting)
+- Each pipeline run creates a Langfuse trace
+- Each node creates a span with metadata (node name, input size, output size)
+- LLM calls captured with token counts, latency, cost
+
+**Must NOT receive:** Any implementation code.
+
+**Files:**
+- Create: `tests/ingest/test_langfuse_integration.py`
+
+- [ ] Step 1: Write tests covering:
+  - Pipeline run creates a Langfuse trace (mocked client)
+  - Each node invocation creates a span
+  - Span metadata includes node name, input size, output size
+  - LLM calls are captured with token counts
+  - Errors are tagged and searchable in trace
+  - Langfuse SDK unavailable degrades gracefully (no crash)
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_langfuse_integration.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-4.3 — Tests for Batch Processing Hardening
+
+**Agent input (ONLY these):**
+- No dedicated FR (cross-cutting)
+- Configurable concurrency via async semaphore
+- Progress checkpointing: persist completed source_keys for crash recovery
+- Partial failure isolation: single document failure does not abort batch
+- Per-document memory limits
+
+**Must NOT receive:** Any implementation code.
+
+**Files:**
+- Create: `tests/ingest/test_batch_processing.py`
+
+- [ ] Step 1: Write tests covering:
+  - Batch processes multiple documents
+  - Concurrency limit respected (no more than N parallel)
+  - Checkpoint persisted after each document completes
+  - Resume from checkpoint after simulated crash
+  - Single document failure does not abort remaining documents
+  - Batch-level report aggregates per-document statistics
+  - Memory limit prevents OOM on oversized document
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_batch_processing.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+### Task A-4.4 — Tests for Schema Migration
+
+**Agent input (ONLY these):**
+- No dedicated FR (cross-cutting)
+- `metadata_schema_version` field in all chunk payloads
+- Migration registry: `{version -> migration_function}`
+- Dry-run and rollback support
+
+**Must NOT receive:** Any implementation code.
+
+**Files:**
+- Create: `tests/ingest/test_schema_migration.py`
+
+- [ ] Step 1: Write tests covering:
+  - All chunk payloads contain `metadata_schema_version` field
+  - Migration from v1 to v2 transforms payload correctly
+  - Dry-run mode reports changes without modifying data
+  - Rollback on failed migration restores original state
+  - Unknown version raises descriptive error
+  - Sequential migration (v1 -> v2 -> v3) applies both migrations in order
+
+- [ ] Step 2: Run tests:
+
+```bash
+pytest tests/ingest/test_schema_migration.py -v
+```
+
+Expected: FAIL (stubs raise `NotImplementedError`)
+
+---
+
+## Phase B — Implementation (Against Tests)
+
+**Agent input per task:**
+1. The task description from `EMBEDDING_PIPELINE_DESIGN.md` (Part A section for that task)
+2. The test file from Phase A (the target to pass)
+3. The contract files from Phase 0 (TypedDicts, signatures, exceptions)
+4. The spec requirements (FR numbers + acceptance criteria)
+
+**Must NOT receive:** Test files for OTHER tasks. Each implementation task receives only its own test file.
+
+---
+
+### Task B-S.2 — Implement Clean Document Store Reader
+
+**Agent input:**
+- Task S.2 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 50–77)
+- `tests/ingest/test_clean_store_reader.py` (from Phase A-S.2)
+- Contract files: `CleanDocumentMetadata`, `MissingCleanDocumentError`, `InvalidMetadataError`
+- FR-591, FR-592, FR-593, FR-594, FR-595
+
+**Files:**
+- Modify: `src/ingest/clean_store.py` (replace stubs with implementation)
+
+- [ ] Step 1: Implement `read(source_key)` — locate and read `{source_key}.md` + `{source_key}.meta.json`
+- [ ] Step 2: Implement `validate_metadata(meta)` — schema validation against `CleanDocumentMetadata`
+- [ ] Step 3: Implement `check_clean_hash_changed(source_key, current_hash)` — manifest comparison
+- [ ] Step 4: Implement `propagate_metadata_to_chunk(chunk, metadata)` — field attachment
+- [ ] Step 5: Implement optional SHA-256 integrity check (FR-595)
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/test_clean_store_reader.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-1.2 — Implement Embedding Pipeline DAG Skeleton
+
+**Agent input:**
+- Task 1.2 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 89–117)
+- `tests/ingest/nodes/test_pipeline_dag.py` (from Phase A-1.2)
+- Contract files: `EmbeddingPipelineState`, `PipelineConfig`, node stubs
+- FR-591, FR-901, FR-1001, FR-1301
+
+**Files:**
+- Modify: `src/ingest/pipeline/workflow.py` (add `build_embedding_pipeline_graph()`)
+- Modify: `src/ingest/pipeline/__init__.py` (expose public API)
+
+- [ ] Step 1: Implement `build_embedding_pipeline_graph(config)` with all 8 nodes
+- [ ] Step 2: Implement conditional routing functions for Nodes 9, 10, 13
+- [ ] Step 3: Wire no-op stubs for Phase 2/3 nodes
+- [ ] Step 4: Expose `compile()` via public API facade
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_pipeline_dag.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
+
+---
+
+### Task B-1.6 — Implement Chunking Node (Rule-Based MVP)
+
+**Agent input:**
+- Task 1.6 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 121–156)
+- `tests/ingest/nodes/test_chunking.py` (from Phase A-1.6, rule-based tests only)
+- Contract files: `EmbeddingPipelineState`, `ChunkRecord`
+- FR-601, FR-602, FR-603, FR-604, FR-605, FR-606
+
+**Files:**
+- Modify: `src/ingest/nodes/chunking.py` (add Embedding Pipeline chunking function)
+
+- [ ] Step 1: Implement heading-aware structural splitting
+- [ ] Step 2: Implement recursive character splitter fallback
+- [ ] Step 3: Implement deterministic chunk ID generation: `SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]` where `content_hash = SHA-256(chunk_text)[:16]`
+- [ ] Step 4: Implement table atomic chunking with header-row prepending for oversized tables
+- [ ] Step 5: Implement adjacency links (`previous_chunk_id`, `next_chunk_id`)
+- [ ] Step 6: Implement chunk metadata: ordinal, source_key, char_start, char_end, heading_path, content_type
+- [ ] Step 7: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_chunking.py -v -k "not LLM"
+```
+
+Expected: ALL PASS (rule-based tests only)
+
+- [ ] Step 8: Commit
+
+---
+
+### Task B-2.2a — Implement Chunk Enrichment Node
+
+**Agent input:**
+- Task 2.2a description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 325–356)
+- `tests/ingest/nodes/test_chunk_enrichment.py` (from Phase A-2.2a)
+- Contract files: `EmbeddingPipelineState`, `ChunkRecord`, `EnrichedChunk`
+- FR-701, FR-702, FR-703, FR-704, FR-705
+
+**Files:**
+- Modify: `src/ingest/nodes/chunk_enrichment.py` (add Embedding Pipeline enrichment function)
+
+- [ ] Step 1: Implement boundary context attachment (previous tail + next head)
+- [ ] Step 2: Implement `enriched_content = chunk_text + boundary_context`
+- [ ] Step 3: Implement `context_header` assembly (title, section path, review tier)
+- [ ] Step 4: Implement `embed_context_header` config flag (default: false)
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_chunk_enrichment.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
+
+---
+
+### Task B-2.2b — Implement Metadata Generation Node
+
+**Agent input:**
+- Task 2.2b description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 359–387)
+- `tests/ingest/nodes/test_metadata_generation.py` (from Phase A-2.2b)
+- Contract files: `EmbeddingPipelineState`, `EnrichedChunk`
+- FR-801, FR-802, FR-803, FR-804, FR-805, FR-806
+
+**Files:**
+- Modify: `src/ingest/nodes/metadata_generation.py` (add Embedding Pipeline metadata function)
+
+- [ ] Step 1: Implement LLM keyword extraction per chunk
+- [ ] Step 2: Implement LLM entity extraction per chunk
+- [ ] Step 3: Implement TF-IDF fallback on LLM failure
+- [ ] Step 4: Implement domain vocabulary validation and injection
+- [ ] Step 5: Implement document-level summary aggregation
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_metadata_generation.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-1.7 — Implement Embedding Generation
+
+**Agent input:**
+- Task 1.7 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 159–187)
+- `tests/ingest/nodes/test_embedding_storage.py` (from Phase A-1.7, embedding generation tests only)
+- Contract files: `EmbeddingPipelineState`, `EnrichedChunk`, `EmbeddingDimensionMismatchError`
+- FR-1201, FR-1202, FR-1203, FR-1204
+
+**Files:**
+- Modify: `src/ingest/nodes/embedding_storage.py` (add embedding generation)
+
+- [ ] Step 1: Implement batched embedding calls
+- [ ] Step 2: Implement exponential backoff retry with jitter
+- [ ] Step 3: Implement token-count pre-validation
+- [ ] Step 4: Implement BYOM mode
+- [ ] Step 5: Implement dimensionality validation
+- [ ] Step 6: Implement document prefix application
+- [ ] Step 7: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_embedding_storage.py -v -k "embedding_generation"
+```
+
+Expected: ALL PASS (embedding generation tests only)
+
+- [ ] Step 8: Commit
+
+---
+
+### Task B-1.8 — Implement Vector Store Upsert
+
+**Agent input:**
+- Task 1.8 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 191–226)
+- `tests/ingest/nodes/test_embedding_storage.py` (from Phase A-1.8, upsert tests only)
+- Contract files: `EmbeddingPipelineState`, `VectorStoreWriteError`
+- FR-1205, FR-1206, FR-1207, FR-1208, FR-1209
+
+**Files:**
+- Modify: `src/ingest/nodes/embedding_storage.py` (add upsert logic)
+
+- [ ] Step 1: Implement Weaviate upsert with full metadata envelope
+- [ ] Step 2: Implement batched upsert
+- [ ] Step 3: Implement delete-and-reinsert for re-ingestion
+- [ ] Step 4: Implement retry logic for transient errors
+- [ ] Step 5: Implement asymmetric prefix handling
+- [ ] Step 6: Implement BM25 keyword indexing
+- [ ] Step 7: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_embedding_storage.py -v -k "vector_store"
+```
+
+Expected: ALL PASS (upsert tests only)
+
+- [ ] Step 8: Commit
+
+---
+
+### Task B-1.9 — Implement Result Reporting
+
+**Agent input:**
+- Task 1.9 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 228–248)
+- `tests/ingest/test_embedding_report.py` (from Phase A-1.9)
+- Contract files: `EmbeddingPipelineState`, `EmbeddingReport`
+- FR-1201
+
+**Files:**
+- Modify: `src/ingest/report.py` (replace stub with implementation)
+
+- [ ] Step 1: Implement `build_embedding_report()` statistics aggregation
+- [ ] Step 2: Implement JSON serialization
+- [ ] Step 3: Implement human-readable summary logging
+- [ ] Step 4: Run tests:
+
+```bash
+pytest tests/ingest/test_embedding_report.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 5: Commit
+
+---
+
+### Task B-1.10 — Implement Re-Ingestion Flow
+
+**Agent input:**
+- Task 1.10 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 251–276)
+- `tests/ingest/test_reingestion.py` (from Phase A-1.10)
+- Contract files: `EmbeddingPipelineState`, `CleanDocumentMetadata`
+- FR-593, FR-1205, FR-1208
+
+**Files:**
+- Modify: `src/ingest/pipeline/impl.py` (add `EmbeddingPipelineRuntime`)
+
+- [ ] Step 1: Implement `_delete_existing_chunks()` by source_key filter
+- [ ] Step 2: Wire `clean_hash` comparison into runtime
+- [ ] Step 3: Implement `force` flag bypass
+- [ ] Step 4: Implement dry-run mode
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/test_reingestion.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
+
+---
+
+### Task B-2.1 — Implement LLM-Assisted Chunking
+
+**Agent input:**
+- Task 2.1 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 291–321)
+- `tests/ingest/nodes/test_chunking.py` (from Phase A-2.1, LLM-specific tests only)
+- Contract files: `EmbeddingPipelineState`, `ChunkRecord`
+- FR-606, FR-607, FR-608, FR-609, FR-610, FR-611
+
+**Files:**
+- Modify: `src/ingest/nodes/chunking.py` (add LLM chunking strategy)
+
+- [ ] Step 1: Implement LLM boundary detection prompt
+- [ ] Step 2: Implement LLM chunking behind strategy interface
+- [ ] Step 3: Implement fallback to rule-based on LLM failure
+- [ ] Step 4: Implement content type tagging
+- [ ] Step 5: Implement domain vocabulary boundary respect
+- [ ] Step 6: Implement chunk count limit
+- [ ] Step 7: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_chunking.py -v
+```
+
+Expected: ALL PASS (both rule-based and LLM tests)
+
+- [ ] Step 8: Commit
+
+---
+
+### Task B-2.4 — Implement Domain Vocabulary System
+
+**Agent input:**
+- Task 2.4 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 390–409)
+- `tests/ingest/test_domain_vocabulary.py` (from Phase A-2.4)
+- FR-803, FR-804
+
+**Files:**
+- Create: `src/ingest/support/vocabulary.py`
+
+- [ ] Step 1: Define vocabulary schema (term, synonyms, category, weight)
+- [ ] Step 2: Implement vocabulary loader from YAML
+- [ ] Step 3: Implement hot-reload on file change
+- [ ] Step 4: Implement keyword validation against vocabulary
+- [ ] Step 5: Implement vocabulary injection for text terms
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/test_domain_vocabulary.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-3.2 — Implement Cross-Reference Extraction Node
+
+**Agent input:**
+- Task 3.2 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 420–442)
+- `tests/ingest/nodes/test_cross_reference.py` (from Phase A-3.2)
+- Contract files: `EmbeddingPipelineState`
+- FR-901, FR-902, FR-903, FR-904, FR-905
+
+**Files:**
+- Modify: `src/ingest/nodes/cross_reference_extraction.py`
+
+- [ ] Step 1: Implement regex + LLM hybrid reference detection
+- [ ] Step 2: Implement reference resolution to existing source_keys
+- [ ] Step 3: Implement cross-reference edge storage in chunk metadata
+- [ ] Step 4: Implement dangling reference handling (warn, don't fail)
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_cross_reference.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
+
+---
+
+### Task B-3.3a — Implement Triple Extraction Node
+
+**Agent input:**
+- Task 3.3a description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 446–477)
+- `tests/ingest/nodes/test_kg_extraction.py` (from Phase A-3.3a)
+- Contract files: `EmbeddingPipelineState`, `KGTriple`
+- FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009
+
+**Files:**
+- Modify: `src/ingest/nodes/knowledge_graph_extraction.py`
+
+- [ ] Step 1: Implement LLM triple extraction prompt
+- [ ] Step 2: Implement entity normalization
+- [ ] Step 3: Implement relation typing
+- [ ] Step 4: Implement provenance tracking (source_chunk_id)
+- [ ] Step 5: Implement structural triple fallback
+- [ ] Step 6: Implement conditional activation via config
+- [ ] Step 7: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_kg_extraction.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 8: Commit
+
+---
+
+### Task B-3.3b — Implement Entity Consolidation
+
+**Agent input:**
+- Task 3.3b description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 481–503)
+- `tests/ingest/nodes/test_entity_consolidation.py` (from Phase A-3.3b)
+- Contract files: `KGTriple`
+- FR-1003, FR-1004, FR-1005
+
+**Files:**
+- Create: `src/ingest/support/entity.py`
+
+- [ ] Step 1: Implement entity deduplication (string similarity + embedding match)
+- [ ] Step 2: Implement alias resolution table
+- [ ] Step 3: Implement confidence scoring for merges
+- [ ] Step 4: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_entity_consolidation.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 5: Commit
+
+---
+
+### Task B-3.3c — Implement Graph Store Writer Node
+
+**Agent input:**
+- Task 3.3c description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 507–533)
+- `tests/ingest/nodes/test_kg_storage.py` (from Phase A-3.3c)
+- Contract files: `EmbeddingPipelineState`, `KGTriple`, `GraphStoreWriteError`
+- FR-1301, FR-1302, FR-1303, FR-1304
+
+**Files:**
+- Modify: `src/ingest/nodes/knowledge_graph_storage.py`
+
+- [ ] Step 1: Implement Weaviate cross-reference writing (v1 backend)
+- [ ] Step 2: Implement Neo4j backend interface (v2 planned)
+- [ ] Step 3: Implement backend swapping via config
+- [ ] Step 4: Implement re-ingestion cleanup (delete before insert)
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_kg_storage.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
+
+---
+
+### Task B-3.4 — Implement Review Tier System
+
+**Agent input:**
+- Task 3.4 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 537–559)
+- `tests/ingest/nodes/test_review_tiers.py` (from Phase A-3.4)
+- Contract files: `CleanDocumentMetadata`
+- FR-594, FR-803
+
+**Files:**
+- Modify: `src/ingest/clean_store.py` (review tier propagation)
+- Modify: `src/ingest/nodes/embedding_storage.py` (Weaviate filterable field)
+
+- [ ] Step 1: Implement review tier propagation via `propagate_metadata_to_chunk`
+- [ ] Step 2: Implement Weaviate filterable field storage
+- [ ] Step 3: Implement default tier assignment (`SELF_REVIEWED`)
+- [ ] Step 4: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_review_tiers.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 5: Commit
+
+---
+
+### Task B-4.0 — Implement Quality Validation Node
+
+**Agent input:**
+- Task 4.0 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 570–593)
+- `tests/ingest/nodes/test_quality_validation.py` (from Phase A-4.0)
+- Contract files: `EmbeddingPipelineState`, `QualityScore`
+- FR-1101, FR-1102, FR-1103, FR-1104, FR-1105
+
+**Files:**
+- Modify: `src/ingest/nodes/quality_validation.py`
+
+- [ ] Step 1: Implement quality scoring (completeness, coherence, keyword density)
+- [ ] Step 2: Implement threshold filtering
+- [ ] Step 3: Implement near-duplicate detection (hash + cosine similarity)
+- [ ] Step 4: Attach quality_score to surviving chunks
+- [ ] Step 5: Ensure review_tier passes through regardless
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_quality_validation.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-4.1 — Implement Evaluation Framework
+
+**Agent input:**
+- Task 4.1 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 596–616)
+- `tests/ingest/test_evaluation_framework.py` (from Phase A-4.1)
+- No dedicated FR
+
+**Files:**
+- Create: `src/ingest/evaluation/` directory with evaluation harness
+
+- [ ] Step 1: Define evaluation metrics
+- [ ] Step 2: Implement chunk coherence scoring
+- [ ] Step 3: Implement metadata precision/recall
+- [ ] Step 4: Implement retrieval MRR
+- [ ] Step 5: Implement regression detection
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/test_evaluation_framework.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-4.2 — Implement Langfuse Observability Integration
+
+**Agent input:**
+- Task 4.2 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 620–642)
+- `tests/ingest/test_langfuse_integration.py` (from Phase A-4.2)
+- No dedicated FR
+
+**Files:**
+- Modify: `src/ingest/pipeline/impl.py` (trace creation)
+- Modify: Node files (span creation)
+
+- [ ] Step 1: Add Langfuse SDK dependency
+- [ ] Step 2: Instrument pipeline runtime with trace creation per document
+- [ ] Step 3: Instrument each node with span creation
+- [ ] Step 4: Capture LLM calls with token counts
+- [ ] Step 5: Add error tagging
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/test_langfuse_integration.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-4.3 — Implement Batch Processing Hardening
+
+**Agent input:**
+- Task 4.3 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 646–672)
+- `tests/ingest/test_batch_processing.py` (from Phase A-4.3)
+- No dedicated FR
+
+**Files:**
+- Modify: `src/ingest/pipeline/impl.py` (batch processing, concurrency, checkpointing)
+
+- [ ] Step 1: Implement configurable concurrency (async semaphore)
+- [ ] Step 2: Implement progress checkpointing
+- [ ] Step 3: Implement partial failure isolation
+- [ ] Step 4: Implement per-document memory limits
+- [ ] Step 5: Implement batch-level reporting
+- [ ] Step 6: Run tests:
+
+```bash
+pytest tests/ingest/test_batch_processing.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 7: Commit
+
+---
+
+### Task B-4.4 — Implement Schema Migration
+
+**Agent input:**
+- Task 4.4 description from `EMBEDDING_PIPELINE_DESIGN.md` (lines 676–697)
+- `tests/ingest/test_schema_migration.py` (from Phase A-4.4)
+- No dedicated FR
+
+**Files:**
+- Create: `src/ingest/migration.py`
+
+- [ ] Step 1: Define `metadata_schema_version` field convention
+- [ ] Step 2: Implement migration registry
+- [ ] Step 3: Implement dry-run mode
+- [ ] Step 4: Implement rollback support
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/test_schema_migration.py -v
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
 
 ---
 
 ## Task Dependency Graph
 
 ```
-Part A0 (Clean Document Store — Boundary)
-└── Task S.2: Clean Store Reader ────────────────────────────────────┐
-
-Phase 1 (Core Embedding — MVP)                                       │
-├── Task 1.2: Embedding Pipeline DAG Skeleton ◄─── Task S.2 ────────┤ [CRITICAL]
-├── Task 1.6: Node 6 Chunking ◄─── Task S.2, Task 1.2              │ [CRITICAL]
-├── Task 1.7: Node 12 Embedding Generation ◄─── Task 1.6           │ [CRITICAL]
-├── Task 1.8: Vector Store Upsert ◄─── Task 1.7                    │ [CRITICAL]
-├── Task 1.9: Result Reporting ◄─── Task 1.8                        │
-└── Task 1.10: Re-Ingestion Flow ◄─── Task S.2, Task 1.8            │
-
-Phase 2 (LLM Enhancement)                                            │
-├── Task 2.1: LLM-Assisted Chunking ◄─── Task 1.6 ─────────────────┤
-├── Task 2.2a: Chunk Enrichment ◄─── Task 1.6                      │ [CRITICAL if LLM enabled]
-├── Task 2.2b: Metadata Generation ◄─── Task 2.2a                  │ [CRITICAL if LLM enabled]
-└── Task 2.4: Domain Vocabulary ◄─── None (parallel with Phase 1)   │
-
-Phase 3 (Extended Features)                                          │
-├── Task 3.2: Node 9 Cross-Reference Extraction ◄─── Task 2.2b     │
-├── Task 3.3a: Node 10 Triple Extraction ◄─── Task 2.2a            │
-├── Task 3.3b: Entity Consolidation ◄─── Task 3.3a                 │
-├── Task 3.3c: Node 13 Graph Store Writer ◄─── Task 3.3a, 3.3b     │
-└── Task 3.4: Review Tier System ◄─── Task S.2, Task 2.2b          │
-
-Phase 4 (Quality & Operations)                                       │
-├── Task 4.0: Node 11 Quality Validation ◄─── Task 2.2b            │ [CRITICAL]
-├── Task 4.1: Evaluation Framework ◄─── Phase 1 complete            │
-├── Task 4.2: Langfuse Observability ◄─── Task 1.2                  │
-├── Task 4.3: Batch Processing Hardening ◄─── Task 1.10             │
-└── Task 4.4: Schema Migration ◄─── Task 1.8                        │
-
-Critical path (MVP): S.2 → 1.2 → 1.6 → 1.7 → 1.8
-Critical path (full): + 2.2a → 2.2b → 4.0 → (embedding of enriched content)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         PHASE 0 — CONTRACTS                             │
+│                                                                         │
+│  Task 0.1 (State) ─┐                                                   │
+│  Task 0.2 (Schemas) ├──→ Task 0.4 (Stubs) ──→ [HUMAN REVIEW GATE]     │
+│  Task 0.3 (Exceptions)┘           ↑                                    │
+│  Task 0.5 (Config) ──────────────┘                                     │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    ▼                         ▼
+┌───────────────────────────┐  ┌──────────────────────────────────────────┐
+│    PHASE A — TESTS        │  │  (Phase A completes before Phase B)      │
+│                           │  │                                          │
+│  A-S.2 (Clean Store)     │  │                                          │
+│  A-1.2 (DAG Skeleton)    │  │                                          │
+│  A-1.6 (Chunking)        │  │                                          │
+│  A-2.2a (Enrichment)     │  │                                          │
+│  A-2.2b (Metadata Gen)   │  │                                          │
+│  A-1.7 (Embedding Gen)   │  │                                          │
+│  A-1.8 (Vector Upsert)   │  │                                          │
+│  A-1.9 (Reporting)       │  │                                          │
+│  A-1.10 (Re-Ingestion)   │  │                                          │
+│  A-2.1 (LLM Chunking)    │  │                                          │
+│  A-2.4 (Vocabulary)      │  │                                          │
+│  A-3.2 (Cross-Refs)      │  │                                          │
+│  A-3.3a (Triple Extract)  │  │                                          │
+│  A-3.3b (Entity Consol)  │  │                                          │
+│  A-3.3c (Graph Writer)   │  │                                          │
+│  A-3.4 (Review Tiers)    │  │                                          │
+│  A-4.0 (Quality Valid)   │  │                                          │
+│  A-4.1 (Eval Framework)  │  │                                          │
+│  A-4.2 (Langfuse)        │  │                                          │
+│  A-4.3 (Batch Hardening) │  │                                          │
+│  A-4.4 (Schema Migration)│  │                                          │
+└───────────────────────────┘  └──────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PHASE B — IMPLEMENTATION                             │
+│                                                                         │
+│  Part A0 (Clean Document Store — Boundary)                              │
+│  └── B-S.2: Clean Store Reader ────────────────────────────────────┐    │
+│                                                                    │    │
+│  Phase 1 (Core Embedding — MVP)                                    │    │
+│  ├── B-1.2: DAG Skeleton ◄─── B-S.2 ──────────────────────────────┤    │
+│  ├── B-1.6: Chunking ◄─── B-S.2, B-1.2                  [CRITICAL]│    │
+│  ├── B-1.7: Embedding Generation ◄─── B-1.6             [CRITICAL]│    │
+│  ├── B-1.8: Vector Store Upsert ◄─── B-1.7              [CRITICAL]│    │
+│  ├── B-1.9: Result Reporting ◄─── B-1.8                           │    │
+│  └── B-1.10: Re-Ingestion Flow ◄─── B-S.2, B-1.8                 │    │
+│                                                                    │    │
+│  Phase 2 (LLM Enhancement)                                        │    │
+│  ├── B-2.1: LLM-Assisted Chunking ◄─── B-1.6                     │    │
+│  ├── B-2.2a: Chunk Enrichment ◄─── B-1.6                [CRITICAL]│    │
+│  ├── B-2.2b: Metadata Generation ◄─── B-2.2a            [CRITICAL]│    │
+│  └── B-2.4: Domain Vocabulary ◄─── None (parallel)                │    │
+│                                                                    │    │
+│  Phase 3 (Extended Features)                                       │    │
+│  ├── B-3.2: Cross-Reference Extraction ◄─── B-2.2b                │    │
+│  ├── B-3.3a: Triple Extraction ◄─── B-2.2a                        │    │
+│  ├── B-3.3b: Entity Consolidation ◄─── B-3.3a                     │    │
+│  ├── B-3.3c: Graph Store Writer ◄─── B-3.3a, B-3.3b               │    │
+│  └── B-3.4: Review Tier System ◄─── B-S.2, B-2.2b                 │    │
+│                                                                    │    │
+│  Phase 4 (Quality & Operations)                                    │    │
+│  ├── B-4.0: Quality Validation ◄─── B-2.2b              [CRITICAL]│    │
+│  ├── B-4.1: Evaluation Framework ◄─── Phase 1 complete             │    │
+│  ├── B-4.2: Langfuse Observability ◄─── B-1.2                     │    │
+│  ├── B-4.3: Batch Processing ◄─── B-1.10                          │    │
+│  └── B-4.4: Schema Migration ◄─── B-1.8                           │    │
+│                                                                         │
+│  Critical path (MVP): B-S.2 → B-1.2 → B-1.6 → B-1.7 → B-1.8         │
+│  Critical path (full): + B-2.2a → B-2.2b → B-4.0                      │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Task-to-Requirement Mapping
 
-| Task | Requirements Covered |
-|------|---------------------|
-| S.2 Clean Document Store Reader | FR-591, FR-592, FR-593, FR-594, FR-595 |
-| 1.2 Embedding Pipeline DAG Skeleton | FR-591, FR-901, FR-1001, FR-1301 |
-| 1.6 Node 6: Chunking (Rule-Based) | FR-601, FR-602, FR-603, FR-604, FR-605, FR-606 |
-| 1.7 Node 12: Embedding Generation | FR-1201, FR-1202, FR-1203, FR-1204 |
-| 1.8 Vector Store Upsert | FR-1205, FR-1206, FR-1207, FR-1208, FR-1209 |
-| 1.9 Result Reporting | FR-1201 |
-| 1.10 Re-Ingestion Flow | FR-593, FR-1205, FR-1208 |
-| 2.1 LLM-Assisted Chunking | FR-606, FR-607, FR-608, FR-609, FR-610, FR-611 |
-| 2.2a Node 7: Chunk Enrichment | FR-701, FR-702, FR-703, FR-704, FR-705 |
-| 2.2b Node 8: Metadata Generation | FR-801, FR-802, FR-803, FR-804, FR-805, FR-806 |
-| 2.4 Domain Vocabulary System | FR-803, FR-804 |
-| 3.2 Node 9: Cross-Reference Extraction | FR-901, FR-902, FR-903, FR-904, FR-905 |
-| 3.3a Node 10: Triple Extraction | FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009 |
-| 3.3b Entity Consolidation | FR-1003, FR-1004, FR-1005 |
-| 3.3c Node 13: Graph Store Writer | FR-1301, FR-1302, FR-1303, FR-1304 |
-| 3.4 Review Tier System | FR-594, FR-803 |
-| 4.0 Node 11: Quality Validation | FR-1101, FR-1102, FR-1103, FR-1104, FR-1105 |
-| 4.1 Evaluation Framework | — (cross-cutting) |
-| 4.2 Langfuse Observability | — (cross-cutting) |
-| 4.3 Batch Processing Hardening | — (cross-cutting) |
-| 4.4 Schema Migration | — (cross-cutting) |
-
-<!-- VERIFY: All FR-591–FR-1304 requirements from EMBEDDING_PIPELINE_SPEC.md appear above. -->
+| Task | Phase 0 | Phase A Test File | Phase B Requirements |
+|------|---------|-------------------|---------------------|
+| S.2 Clean Document Store Reader | 0.1, 0.3, 0.4, 0.5 | `tests/ingest/test_clean_store_reader.py` | FR-591, FR-592, FR-593, FR-594, FR-595 |
+| 1.2 Embedding Pipeline DAG Skeleton | 0.1, 0.4 | `tests/ingest/nodes/test_pipeline_dag.py` | FR-591, FR-901, FR-1001, FR-1301 |
+| 1.6 Node 6: Chunking (Rule-Based) | 0.1, 0.2 | `tests/ingest/nodes/test_chunking.py` | FR-601, FR-602, FR-603, FR-604, FR-605, FR-606 |
+| 2.2a Node 7: Chunk Enrichment | 0.1, 0.2 | `tests/ingest/nodes/test_chunk_enrichment.py` | FR-701, FR-702, FR-703, FR-704, FR-705 |
+| 2.2b Node 8: Metadata Generation | 0.1, 0.2 | `tests/ingest/nodes/test_metadata_generation.py` | FR-801, FR-802, FR-803, FR-804, FR-805, FR-806 |
+| 1.7 Node 12: Embedding Generation | 0.1, 0.2, 0.3 | `tests/ingest/nodes/test_embedding_storage.py` | FR-1201, FR-1202, FR-1203, FR-1204 |
+| 1.8 Vector Store Upsert | 0.1, 0.3 | `tests/ingest/nodes/test_embedding_storage.py` | FR-1205, FR-1206, FR-1207, FR-1208, FR-1209 |
+| 1.9 Result Reporting | 0.2 | `tests/ingest/test_embedding_report.py` | FR-1201 |
+| 1.10 Re-Ingestion Flow | 0.1, 0.5 | `tests/ingest/test_reingestion.py` | FR-593, FR-1205, FR-1208 |
+| 2.1 LLM-Assisted Chunking | 0.1, 0.2 | `tests/ingest/nodes/test_chunking.py` | FR-606, FR-607, FR-608, FR-609, FR-610, FR-611 |
+| 2.4 Domain Vocabulary System | — | `tests/ingest/test_domain_vocabulary.py` | FR-803, FR-804 |
+| 3.2 Node 9: Cross-Reference Extraction | 0.1 | `tests/ingest/nodes/test_cross_reference.py` | FR-901, FR-902, FR-903, FR-904, FR-905 |
+| 3.3a Node 10: Triple Extraction | 0.1, 0.2 | `tests/ingest/nodes/test_kg_extraction.py` | FR-1001–FR-1009 |
+| 3.3b Entity Consolidation | 0.2 | `tests/ingest/nodes/test_entity_consolidation.py` | FR-1003, FR-1004, FR-1005 |
+| 3.3c Node 13: Graph Store Writer | 0.1, 0.2, 0.3 | `tests/ingest/nodes/test_kg_storage.py` | FR-1301, FR-1302, FR-1303, FR-1304 |
+| 3.4 Review Tier System | 0.5 | `tests/ingest/nodes/test_review_tiers.py` | FR-594, FR-803 |
+| 4.0 Node 11: Quality Validation | 0.1, 0.2 | `tests/ingest/nodes/test_quality_validation.py` | FR-1101, FR-1102, FR-1103, FR-1104, FR-1105 |
+| 4.1 Evaluation Framework | — | `tests/ingest/test_evaluation_framework.py` | — (cross-cutting) |
+| 4.2 Langfuse Observability | — | `tests/ingest/test_langfuse_integration.py` | — (cross-cutting) |
+| 4.3 Batch Processing Hardening | — | `tests/ingest/test_batch_processing.py` | — (cross-cutting) |
+| 4.4 Schema Migration | — | `tests/ingest/test_schema_migration.py` | — (cross-cutting) |
 
 ---
 
-# Part B: Code Appendix
+## Requirement Coverage Verification
 
-The following snippets illustrate the key design patterns used in the Embedding Pipeline. They
-are representative, not exhaustive — consult the source code for the full implementation.
+All 57 requirements (FR-591 through FR-1304) are covered:
 
-For node base pattern and deterministic ID generation utilities, see
-`DOCUMENT_PROCESSING_IMPLEMENTATION.md` Part B (B.2 and B.3) — these are shared across both
-pipelines.
-
----
-
-## B.1 — Embedding Pipeline DAG (LangGraph StateGraph)
-
-Constructs the 8-stage Embedding Pipeline graph with three conditional routing points:
-cross-reference extraction (optional), KG extraction (optional), and KG storage (conditional
-on KG extraction having run). Supports Tasks 1.2, 3.2, 3.3, and 4.0.
-
-**Tasks:** Task 1.2, Task 3.2, Task 3.3a, Task 3.3c, Task 4.0
-**Requirements:** FR-901, FR-1001, FR-1301
-
-```python
-# src/ingest/pipeline_workflow.py  (Embedding Pipeline section)
-
-from langgraph.graph import StateGraph, END
-from src.ingest.pipeline_types import EmbeddingPipelineState, PipelineConfig
-from src.ingest.nodes.chunking import chunking_node
-from src.ingest.nodes.chunk_enrichment import chunk_enrichment_node
-from src.ingest.nodes.metadata_generation import metadata_generation_node
-from src.ingest.nodes.cross_reference_extraction import cross_reference_extraction_node
-from src.ingest.nodes.knowledge_graph_extraction import knowledge_graph_extraction_node
-from src.ingest.nodes.quality_validation import quality_validation_node
-from src.ingest.nodes.embedding_storage import embedding_storage_node
-from src.ingest.nodes.knowledge_graph_storage import knowledge_graph_storage_node
-
-
-def _route_after_metadata(state: EmbeddingPipelineState) -> str:
-    """Route to cross-reference extraction if enabled (FR-901)."""
-    if state["config"].enable_cross_references:
-        return "cross_reference_extraction"
-    return "knowledge_graph_extraction" if state["config"].enable_knowledge_graph else "quality_validation"
-
-
-def _route_after_crossref(state: EmbeddingPipelineState) -> str:
-    """Route to KG extraction if enabled (FR-1001)."""
-    if state["config"].enable_knowledge_graph:
-        return "knowledge_graph_extraction"
-    return "quality_validation"
-
-
-def _route_after_storage(state: EmbeddingPipelineState) -> str:
-    """Write KG triples only if KG extraction produced triples (FR-1301)."""
-    if state.get("kg_triples") and state["config"].enable_knowledge_graph:
-        return "knowledge_graph_storage"
-    return END
-
-
-def build_embedding_pipeline_graph(config: PipelineConfig) -> StateGraph:
-    """Construct the 8-node Embedding Pipeline DAG.
-
-    Flow:
-        chunking → chunk_enrichment → metadata_generation
-            → [cross_reference_extraction]  (conditional: enabled in config)
-            → [knowledge_graph_extraction]  (conditional: enabled in config)
-            → quality_validation
-            → embedding_storage
-            → [knowledge_graph_storage]     (conditional: KG triples produced)
-    """
-    graph = StateGraph(EmbeddingPipelineState)
-
-    graph.add_node("chunking", chunking_node)
-    graph.add_node("chunk_enrichment", chunk_enrichment_node)
-    graph.add_node("metadata_generation", metadata_generation_node)
-    graph.add_node("cross_reference_extraction", cross_reference_extraction_node)
-    graph.add_node("knowledge_graph_extraction", knowledge_graph_extraction_node)
-    graph.add_node("quality_validation", quality_validation_node)
-    graph.add_node("embedding_storage", embedding_storage_node)
-    graph.add_node("knowledge_graph_storage", knowledge_graph_storage_node)
-
-    graph.set_entry_point("chunking")
-    graph.add_edge("chunking", "chunk_enrichment")
-    graph.add_edge("chunk_enrichment", "metadata_generation")
-    graph.add_conditional_edges(
-        "metadata_generation",
-        _route_after_metadata,
-        {
-            "cross_reference_extraction": "cross_reference_extraction",
-            "knowledge_graph_extraction": "knowledge_graph_extraction",
-            "quality_validation": "quality_validation",
-        },
-    )
-    graph.add_conditional_edges(
-        "cross_reference_extraction",
-        _route_after_crossref,
-        {
-            "knowledge_graph_extraction": "knowledge_graph_extraction",
-            "quality_validation": "quality_validation",
-        },
-    )
-    graph.add_edge("knowledge_graph_extraction", "quality_validation")
-    graph.add_edge("quality_validation", "embedding_storage")
-    graph.add_conditional_edges(
-        "embedding_storage",
-        _route_after_storage,
-        {"knowledge_graph_storage": "knowledge_graph_storage", END: END},
-    )
-    graph.add_edge("knowledge_graph_storage", END)
-
-    return graph
-```
-
-**Key design decisions:**
-
-- **Three independent conditional branches** (cross-reference, KG extraction, KG storage) are
-  all driven by config flags, not by removing nodes. The topology is always the same; disabled
-  stages are simply never reached.
-- **KG storage is guarded by both a config flag AND the presence of triples** — if KG
-  extraction was disabled or produced nothing, the KG storage step is skipped without error.
-- **Quality validation always runs** — it is not optional. Every chunk that reaches embedding
-  must pass the quality gate.
+| Requirement Range | Count | Tasks |
+|-------------------|-------|-------|
+| FR-591–FR-595 (Clean Store Input) | 5 | S.2 |
+| FR-601–FR-611 (Chunking) | 11 | 1.6, 2.1 |
+| FR-701–FR-705 (Chunk Enrichment) | 5 | 2.2a |
+| FR-801–FR-806 (Metadata Generation) | 6 | 2.2b |
+| FR-901–FR-905 (Cross-Reference) | 5 | 3.2 |
+| FR-1001–FR-1009 (KG Extraction) | 9 | 3.3a, 3.3b |
+| FR-1101–FR-1105 (Quality Validation) | 5 | 4.0 |
+| FR-1201–FR-1209 (Embedding & Storage) | 9 | 1.7, 1.8 |
+| FR-1301–FR-1304 (KG Storage) | 4 | 3.3c |
+| **Total** | **57** | |
 
 ---
 
-## B.2 — Re-Ingestion Flow (Delete-and-Reinsert)
+## Companion Documents
 
-Implements the pipeline runtime's change-detection and re-ingestion logic. Reads `clean_hash`
-from the Clean Document Store metadata envelope and compares it against the stored embedding
-run manifest to decide whether to re-embed. Supports Tasks S.2, 1.10.
-
-**Tasks:** Task S.2, Task 1.10
-**Requirements:** FR-593, FR-1205, FR-1208
-
-```python
-# src/ingest/pipeline_impl.py  (excerpt)
-
-import logging
-from weaviate import WeaviateClient
-from weaviate.classes.query import Filter
-
-from src.ingest.clean_store import CleanDocumentStore
-from src.ingest.pipeline_types import PipelineConfig, EmbeddingPipelineState
-from src.ingest.pipeline_workflow import build_embedding_pipeline_graph
-
-logger = logging.getLogger(__name__)
-
-
-class EmbeddingPipelineRuntime:
-    """Orchestrates Embedding Pipeline execution with re-ingestion support."""
-
-    def __init__(self, config: PipelineConfig, weaviate: WeaviateClient):
-        self._config = config
-        self._weaviate = weaviate
-        self._store = CleanDocumentStore(config.clean_docs_dir)
-        self._graph = build_embedding_pipeline_graph(config).compile()
-
-    def _delete_existing_chunks(
-        self, source_key: str, *, dry_run: bool = False
-    ) -> int:
-        """Delete all chunks for a source_key. Returns count deleted."""
-        collection = self._weaviate.collections.get(self._config.weaviate_collection)
-        doc_filter = Filter.by_property("source_key").equal(source_key)
-        count = collection.aggregate.over_all(filters=doc_filter).total_count
-
-        if count == 0:
-            return 0
-
-        if dry_run:
-            logger.info("Dry-run: would delete %d chunks for %s", count, source_key)
-            return count
-
-        collection.data.delete_many(where=doc_filter)
-        logger.info("Deleted %d existing chunks for %s", count, source_key)
-        return count
-
-    def embed(
-        self,
-        source_key: str,
-        *,
-        force: bool = False,
-        dry_run: bool = False,
-    ) -> EmbeddingPipelineState:
-        """Run the Embedding Pipeline for a single clean document.
-
-        If clean_hash is unchanged since the last embedding run, the pipeline
-        skips entirely. The ``force`` flag bypasses the hash comparison.
-        """
-        md_content, metadata = self._store.read(source_key)
-
-        if not force:
-            stored_hash = self._load_manifest_hash(source_key)
-            if stored_hash == metadata.clean_hash:
-                logger.info(
-                    "Document %s unchanged (clean_hash match), skipping. "
-                    "Use --force to re-embed.",
-                    source_key,
-                )
-                return {"skipped": True, "source_key": source_key}
-
-        # Delete existing chunks before re-embedding (FR-1208)
-        self._delete_existing_chunks(source_key, dry_run=dry_run)
-
-        if dry_run:
-            logger.info("Dry-run: would embed %s", source_key)
-            return {"dry_run": True, "source_key": source_key}
-
-        initial_state: EmbeddingPipelineState = {
-            "config": self._config,
-            "source_key": source_key,
-            "md_content": md_content,
-            "metadata": metadata,
-        }
-        result = self._graph.invoke(initial_state)
-        self._save_manifest_hash(source_key, metadata.clean_hash)
-        return result
-
-    def _load_manifest_hash(self, source_key: str) -> str | None:
-        """Load the previously stored clean_hash for this source_key."""
-        # Implementation: read from a JSON manifest file keyed by source_key
-        ...
-
-    def _save_manifest_hash(self, source_key: str, clean_hash: str) -> None:
-        """Persist the clean_hash after a successful embedding run."""
-        ...
-```
-
-**Key design decisions:**
-
-- **`clean_hash` as the re-embedding signal** — the Embedding Pipeline is independent of the
-  source file. It only cares whether the clean Markdown has changed. This means Document
-  Processing can run more frequently (e.g., for config changes) without triggering unnecessary
-  re-embedding.
-- **Delete-before-insert, not update-in-place** — chunk count and boundaries can change when
-  a document changes. Deleting all old chunks and inserting fresh ones is simpler and more
-  correct than per-chunk diffing.
-- **Force flag** — overrides the hash comparison when the pipeline code has changed (e.g., new
-  chunking strategy) and all documents need re-processing regardless of content changes.
+| Document | Role |
+|----------|------|
+| `EMBEDDING_PIPELINE_SPEC.md` | Authoritative requirements baseline (FR-591–FR-1304) |
+| `EMBEDDING_PIPELINE_SPEC_SUMMARY.md` | Concise requirements digest |
+| `EMBEDDING_PIPELINE_DESIGN.md` | Task descriptions, subtasks, code appendix |
+| `EMBEDDING_PIPELINE_IMPLEMENTATION.md` (this document) | Three-phase implementation plan with test isolation |
+| `DOCUMENT_PROCESSING_DESIGN.md` | Phase 1 implementation (shared patterns) |
+| `INGESTION_PIPELINE_ENGINEERING_GUIDE.md` | Developer guide — architecture, extension steps |
+| `INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md` | Quick-start checklist |

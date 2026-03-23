@@ -1,13 +1,13 @@
 # @summary
-# Tests for Docker-to-Podman container runtime migration.
+# Tests for Podman container runtime integration.
 # Verifies that all scripts, Dockerfiles, compose config, and documentation
-# correctly support both Docker and Podman as container runtimes.
+# correctly support Podman (primary) and Docker (fallback) as container runtimes.
 # Exports: TestShellScripts, TestDockerfiles, TestDockerCompose,
 #          TestScriptMigration, TestEnvironmentAndDocs, TestCrossFileConsistency
 # Deps: pytest, pathlib, re, yaml, subprocess, os, stat
 # @end-summary
 """
-Tests for Docker-to-Podman container runtime migration.
+Tests for Podman container runtime integration.
 
 These tests verify the CODE and file content, not runtime behavior.
 They do not require Docker or Podman to be installed or running.
@@ -49,14 +49,14 @@ def compose_sh(project_root: Path) -> str:
 
 @pytest.fixture
 def dockerfile_runtime(project_root: Path) -> str:
-    """Return the content of docker/Dockerfile.runtime."""
-    return (project_root / "docker" / "Dockerfile.runtime").read_text()
+    """Return the content of containers/Dockerfile.runtime."""
+    return (project_root / "containers" / "Dockerfile.runtime").read_text()
 
 
 @pytest.fixture
 def dockerfile_api(project_root: Path) -> str:
-    """Return the content of docker/Dockerfile.api."""
-    return (project_root / "docker" / "Dockerfile.api").read_text()
+    """Return the content of containers/Dockerfile.api."""
+    return (project_root / "containers" / "Dockerfile.api").read_text()
 
 
 @pytest.fixture
@@ -98,8 +98,8 @@ def watch_tuning_py(project_root: Path) -> str:
 
 @pytest.fixture
 def generate_certs_sh(project_root: Path) -> str:
-    """Return the content of docker/generate-certs.sh."""
-    return (project_root / "docker" / "generate-certs.sh").read_text()
+    """Return the content of containers/generate-certs.sh."""
+    return (project_root / "containers" / "generate-certs.sh").read_text()
 
 
 @pytest.fixture
@@ -425,28 +425,27 @@ class TestScriptMigration:
     ) -> None:
         """auto_scale_workers.py must NOT pass a literal "docker" string
         to subprocess calls. All subprocess invocations should use
-        CONTAINER_RT. The detection function itself is excluded."""
-        # Extract the detection function body to exclude it.
-        detect_fn_match = re.search(
-            r"def _detect_container_runtime\(\).*?(?=\ndef |\nCONTAINER_RT)",
-            auto_scale_py,
-            re.DOTALL,
-        )
-        assert detect_fn_match is not None
-
-        # Remove the detection function from the source for analysis.
-        code_without_detect = (
-            auto_scale_py[: detect_fn_match.start()]
-            + auto_scale_py[detect_fn_match.end() :]
-        )
+        CONTAINER_RT or COMPOSE_CMD. Detection functions are excluded."""
+        # Remove all detection functions (both runtime and compose) from
+        # the source before checking for hardcoded "docker" strings.
+        code_cleaned = auto_scale_py
+        for fn_name in (
+            "_detect_container_runtime",
+            "_detect_compose_command",
+        ):
+            fn_pattern = re.compile(
+                rf"def {fn_name}\(\).*?(?=\ndef |\n\n[A-Z])",
+                re.DOTALL,
+            )
+            code_cleaned = fn_pattern.sub("", code_cleaned)
 
         # Look for subprocess calls with hardcoded "docker".
         # Pattern: [..., "docker", ...] or ["docker", ...]
         subprocess_docker = re.findall(
-            r'subprocess\.run\(\s*\[.*?"docker"', code_without_detect, re.DOTALL
+            r'subprocess\.run\(\s*\[.*?"docker"', code_cleaned, re.DOTALL
         )
         assert len(subprocess_docker) == 0, (
-            "Found hardcoded 'docker' in subprocess calls outside detection function"
+            "Found hardcoded 'docker' in subprocess calls outside detection functions"
         )
 
     # ---- watch_tuning_signals.py ----

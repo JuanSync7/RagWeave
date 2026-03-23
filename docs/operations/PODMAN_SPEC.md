@@ -127,7 +127,7 @@ podman info | grep -i rootless   # should show: rootless: true
 | Dozzle (`/var/run/docker.sock`) | Hardcoded Docker socket mount | Configurable via `CONTAINER_SOCK` env var |
 | Volume mounts | Docker volumes | Podman volumes (compatible); permissions via Dockerfile |
 | Health checks | Docker health checks | Podman supports same syntax |
-| `docker/generate-certs.sh` | Uses `openssl` directly (no Docker dependency) | Add explicit permission fix for rootless Podman |
+| `containers/generate-certs.sh` | Uses `openssl` directly (no Docker dependency) | Add explicit permission fix for rootless Podman |
 | `scripts/backup_all.sh` | Hardcodes `docker exec` / `docker cp` / `docker ps` | Use runtime detection helper |
 | `scripts/restore_all.sh` | Hardcodes `docker exec` / `docker cp` / `docker ps` / `docker restart` | Use runtime detection helper |
 | `scripts/auto_scale_workers.py` | Hardcodes `docker ps` / `docker stats` / `docker compose` | Use runtime detection |

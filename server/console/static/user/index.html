@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aion Chat - User Console</title>
+  <link rel="stylesheet" href="/console/static/user/styles.css">
+</head>
+<body>
+
+<!-- ── Task 4.5: sidebar backdrop (tablet/mobile) ── -->
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+<div class="app-shell">
+
+  <!-- ── Sidebar (Task 4.8: icon rail + nav) ── -->
+  <aside class="sidebar" id="sidebar">
+
+    <!-- Header: brand + internal collapse toggle -->
+    <div class="sidebar-header">
+      <div class="sidebar-brand" data-tooltip="Aion Chat">
+        <span class="nav-icon">&#9670;</span>
+        <span class="sidebar-label">Aion Chat</span>
+      </div>
+      <button class="sidebar-collapse-btn" id="sidebarCollapseBtn"
+              title="Collapse sidebar">&#8249;</button>
+    </div>
+
+    <!-- New conversation -->
+    <div class="sidebar-top-actions">
+      <button class="new-chat-btn" data-tooltip="New conversation">
+        <span class="nav-icon">&#43;</span>
+        <span class="sidebar-label">New conversation</span>
+      </button>
+    </div>
+
+    <!-- Primary nav -->
+    <nav class="sidebar-nav">
+      <div class="sidebar-nav-item active" data-tooltip="Conversations" data-panel="panel-convs">
+        <span class="nav-icon">&#128172;</span>
+        <span class="sidebar-label">Conversations</span>
+      </div>
+      <div class="sidebar-nav-item" data-tooltip="Projects" data-panel="panel-projects">
+        <span class="nav-icon">&#128193;</span>
+        <span class="sidebar-label">Projects</span>
+      </div>
+      <div class="sidebar-nav-item" data-tooltip="Search" data-panel="panel-search">
+        <span class="nav-icon">&#128269;</span>
+        <span class="sidebar-label">Search</span>
+      </div>
+      <div class="sidebar-nav-item" data-tooltip="Customize" data-panel="panel-customize">
+        <span class="nav-icon">&#10024;</span>
+        <span class="sidebar-label">Customize</span>
+      </div>
+    </nav>
+
+    <!-- Panel: Conversations -->
+    <div class="sidebar-panel active" id="panel-convs">
+      <div class="conv-list">
+        <div class="conv-section-label">Today</div>
+        <div class="conv-item active"><span class="dot"></span>RAG pipeline debugging</div>
+        <div class="conv-item"><span class="dot"></span>Summarize Q1 report</div>
+        <div class="conv-item"><span class="dot"></span>Draft release notes</div>
+        <div class="conv-section-label">Yesterday</div>
+        <div class="conv-item"><span class="dot"></span>Embeddings strategy</div>
+        <div class="conv-item"><span class="dot"></span>API rate limit question</div>
+        <div class="conv-item"><span class="dot"></span>SQL query optimization</div>
+        <div class="conv-section-label">This week</div>
+        <div class="conv-item"><span class="dot"></span>Onboarding checklist</div>
+        <div class="conv-item"><span class="dot"></span>Budget forecast model</div>
+      </div>
+    </div>
+
+    <!-- Panel: Projects -->
+    <div class="sidebar-panel" id="panel-projects">
+      <div class="sidebar-placeholder">
+        <div class="sidebar-placeholder-icon">&#128193;</div>
+        <div class="sidebar-placeholder-text"><strong>Projects</strong><br>Organise conversations into projects for focused work sessions.</div>
+      </div>
+    </div>
+
+    <!-- Panel: Search -->
+    <div class="sidebar-panel" id="panel-search">
+      <input class="sidebar-search-input" type="text" placeholder="Search conversations…">
+      <div class="sidebar-placeholder" style="flex:1">
+        <div class="sidebar-placeholder-icon">&#128270;</div>
+        <div class="sidebar-placeholder-text">Type to search across all conversations and messages.</div>
+      </div>
+    </div>
+
+    <!-- Panel: Customize -->
+    <div class="sidebar-panel" id="panel-customize">
+      <div class="sidebar-placeholder">
+        <div class="sidebar-placeholder-icon">&#10024;</div>
+        <div class="sidebar-placeholder-text"><strong>Customize</strong><br>Theme, layout, and display preferences.</div>
+        <button class="customize-open-btn" id="customizeOpenSettings">Open Settings</button>
+      </div>
+    </div>
+
+    <!-- Footer: settings -->
+    <div class="sidebar-footer">
+      <button class="settings-btn" id="settingsBtn" data-tooltip="Settings">
+        <span class="nav-icon">&#9881;</span>
+        <span class="sidebar-label">Settings</span>
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main">
+
+    <header class="chat-header">
+      <button class="toggle-btn" id="toggleBtn">&#9776;</button>
+      <span class="conv-title">RAG pipeline debugging</span>
+      <div class="model-badge"><span class="model-dot"></span>Claude Sonnet 4.5</div>
+      <!-- Task 4.6 — Context window indicator -->
+      <div class="ctx-chip" id="ctxChip">
+        <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctxBarFill" style="width:0%"></div></div>
+        <span id="ctxPct">—</span>
+        <div class="ctx-tooltip" id="ctxTooltip">
+          <div class="ctx-tt-title">Context window</div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">System prompt</span><span class="ctx-tt-val" id="ttSystem">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Memory / history</span><span class="ctx-tt-val" id="ttMemory">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Retrieved chunks</span><span class="ctx-tt-val" id="ttChunks">—</span></div>
+          <div class="ctx-tt-row"><span class="ctx-tt-label">Query</span><span class="ctx-tt-val" id="ttQuery">—</span></div>
+          <hr class="ctx-tt-divider">
+          <div class="ctx-tt-row"><span class="ctx-tt-label"><strong>Total used</strong></span><span class="ctx-tt-val" id="ttTotal">—</span></div>
+          <button class="ctx-tt-compact" id="ctxCompactBtn" style="display:none">&#9889; Compact conversation</button>
+        </div>
+      </div>
+      <div class="status-chip"><span class="pulse"></span>Connected</div>
+    </header>
+
+    <button class="scroll-fab" id="scrollFab" title="Jump to bottom">&#8595;</button>
+
+    <!-- ── Message Thread ── -->
+    <div class="message-thread" id="thread">
+
+      <div class="msg-group">
+        <div class="msg-row user">
+          <div class="avatar user-av">J</div>
+          <div class="bubble-wrap">
+            <div class="bubble">Hey, my RAG retrieval is returning irrelevant chunks even though embeddings look fine. Any ideas?</div>
+            <div class="msg-actions">
+              <button class="msg-action-btn">&#128203; Copy</button>
+            </div>
+            <div class="msg-meta">10:14 AM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg-group">
+        <div class="msg-row assistant">
+          <div class="avatar ai-av">AI</div>
+          <div class="bubble-wrap">
+            <div class="bubble" id="bubble-1">
+              <p>A few common culprits when embeddings look correct but retrieval is off:</p>
+              <ul>
+                <li><strong>Chunk size mismatch</strong> — query embedding is short but chunks are long paragraphs, skewing cosine similarity.</li>
+                <li><strong>Missing metadata filter</strong> — add a <code>source</code> filter to narrow the search space.</li>
+                <li><strong>Top-k too high</strong> — pulling 20 chunks adds noise; try top-5 with a reranker.</li>
+              </ul>
+              <p style="margin-top:6px">What does your chunking strategy look like?</p>
+            </div>
+            <div class="citations">
+              <div class="citation-label">&#128206; 2 sources cited</div>
+              <div class="citation-card">
+                <div class="citation-header">
+                  <span class="citation-icon">&#128196;</span>
+                  <div class="citation-info">
+                    <div class="citation-filename">rag_architecture_guide.pdf</div>
+                    <div class="citation-section">§3.2 — Retrieval Quality</div>
+                  </div>
+                  <div class="relevance-bar-wrap">
+                    <span class="relevance-pct high">94%</span>
+                    <div class="relevance-bar"><div class="relevance-fill high" style="width:94%"></div></div>
+                  </div>
+                  <span class="citation-chevron">&#8964;</span>
+                </div>
+                <div class="citation-body">
+                  <div class="citation-chunk" id="chunk-a">"Retrieval quality is often impacted by the mismatch between query embedding length and stored chunk length. Asymmetric embedding models such as E5-large address this by training separate encoders for queries and passages..."</div>
+                  <button class="citation-show-more">Show more</button>
+                </div>
+              </div>
+              <div class="citation-card">
+                <div class="citation-header">
+                  <span class="citation-icon">&#128196;</span>
+                  <div class="citation-info">
+                    <div class="citation-filename">vector_search_best_practices.md</div>
+                    <div class="citation-section">§5 — Top-K Tuning</div>
+                  </div>
+                  <div class="relevance-bar-wrap">
+                    <span class="relevance-pct mid">71%</span>
+                    <div class="relevance-bar"><div class="relevance-fill mid" style="width:71%"></div></div>
+                  </div>
+                  <span class="citation-chevron">&#8964;</span>
+                </div>
+                <div class="citation-body">
+                  <div class="citation-chunk" id="chunk-b">"Choosing top-k involves a precision/recall trade-off. Higher k increases recall but lowers precision and increases LLM context cost. A cross-encoder reranker applied post-retrieval can recover precision..."</div>
+                  <button class="citation-show-more">Show more</button>
+                </div>
+              </div>
+            </div>
+            <div class="msg-actions">
+              <button class="msg-action-btn">&#128203; Copy</button>
+              <button class="msg-action-btn">&#128257; Regenerate</button>
+            </div>
+            <div class="msg-meta">10:14 AM</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg-group">
+        <div class="msg-row user">
+          <div class="avatar user-av">J</div>
+          <div class="bubble-wrap">
+            <div class="bubble">Chunks are 512 tokens with 50-token overlap. I'm using top-10 right now.</div>
+            <div class="msg-actions">
+              <button class="msg-action-btn">&#128203; Copy</button>
+            </div>
+            <div class="msg-meta">10:16 AM</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Streaming message -->
+      <div class="msg-group">
+        <div class="msg-row assistant" id="streaming-row">
+          <div class="avatar ai-av">AI</div>
+          <div class="bubble-wrap">
+            <div class="typing-indicator" id="typingIndicator">
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+              <div class="typing-dot"></div>
+            </div>
+            <div class="bubble" id="streaming-bubble" style="display:none"></div>
+            <div class="citations" id="streaming-citations" style="display:none">
+              <div class="citation-label">&#128206; 1 source cited</div>
+              <div class="citation-card">
+                <div class="citation-header">
+                  <span class="citation-icon">&#128196;</span>
+                  <div class="citation-info">
+                    <div class="citation-filename">reranking_models_survey.pdf</div>
+                    <div class="citation-section">§4.1 — Cross-Encoder Rerankers</div>
+                  </div>
+                  <div class="relevance-bar-wrap">
+                    <span class="relevance-pct high">88%</span>
+                    <div class="relevance-bar"><div class="relevance-fill high" style="width:88%"></div></div>
+                  </div>
+                  <span class="citation-chevron">&#8964;</span>
+                </div>
+                <div class="citation-body">
+                  <div class="citation-chunk" id="chunk-c">"Cross-encoder models score query-passage pairs jointly, producing finer-grained relevance signals than bi-encoder cosine similarity. ms-marco-MiniLM-L-6-v2 achieves near state-of-the-art MRR@10 on MS MARCO while remaining inference-efficient..."</div>
+                  <button class="citation-show-more">Show more</button>
+                </div>
+              </div>
+            </div>
+            <div class="msg-actions" id="streaming-actions" style="display:none">
+              <button class="msg-action-btn">&#128203; Copy</button>
+              <button class="msg-action-btn">&#128257; Regenerate</button>
+            </div>
+            <div class="msg-meta" id="streaming-meta" style="display:none">10:17 AM</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /thread -->
+
+    <!-- Input bar -->
+    <div class="input-bar">
+
+      <!-- Keyboard slash-autocomplete (existing) -->
+      <div class="slash-dropdown" id="slashDropdown">
+        <div class="slash-header">Commands</div>
+        <div class="slash-item selected" data-cmd="/summarize"><span class="slash-cmd">/summarize</span><span class="slash-desc">Summarize the current conversation</span></div>
+        <div class="slash-item" data-cmd="/explain"><span class="slash-cmd">/explain</span><span class="slash-desc">Explain the last code block in detail</span></div>
+        <div class="slash-item" data-cmd="/rewrite"><span class="slash-cmd">/rewrite</span><span class="slash-desc">Rewrite selection in a different style</span></div>
+        <div class="slash-item" data-cmd="/translate"><span class="slash-cmd">/translate</span><span class="slash-desc">Translate message to another language</span></div>
+        <div class="slash-item" data-cmd="/clear"><span class="slash-cmd">/clear</span><span class="slash-desc">Clear conversation history</span></div>
+      </div>
+
+      <!-- Task 4.7 — Attachment popover -->
+      <div class="attach-popover" id="attachPopover">
+        <div class="attach-popover-title">Add to context</div>
+        <div class="attach-option" id="attachOptFile">
+          <span class="attach-option-icon">&#128206;</span>
+          <div><div class="attach-option-label">Upload file</div><div class="attach-option-sub">PDF, DOCX, TXT, MD</div></div>
+        </div>
+        <div class="attach-option" id="attachOptWeb">
+          <span class="attach-option-icon">&#127760;</span>
+          <div><div class="attach-option-label">Browse web</div><div class="attach-option-sub">Fetch a URL and add to context</div></div>
+        </div>
+        <div class="attach-option" id="attachOptKB">
+          <span class="attach-option-icon">&#128218;</span>
+          <div><div class="attach-option-label">Knowledge base</div><div class="attach-option-sub">Add an ingested document</div></div>
+        </div>
+      </div>
+
+      <!-- Task 4.7 — Web URL panel -->
+      <div class="web-input-panel" id="webInputPanel">
+        <div class="web-input-label">&#127760; Paste a URL to fetch and add to context</div>
+        <div class="web-input-row">
+          <input class="web-url-input" id="webUrlInput" type="url" placeholder="https://example.com/article">
+          <button class="web-add-btn" id="webAddBtn">Add</button>
+        </div>
+      </div>
+
+      <!-- Task 4.7 — Knowledge base panel -->
+      <div class="kb-panel" id="kbPanel">
+        <div class="kb-panel-header">
+          <span class="kb-panel-title">&#128218; Select from knowledge base</span>
+          <button class="kb-panel-close" id="kbPanelClose">&#10005;</button>
+        </div>
+        <input class="kb-search" id="kbSearch" type="text" placeholder="Search documents…">
+        <div class="kb-list" id="kbList">
+          <label class="kb-item"><input type="checkbox" value="rag_architecture_guide.pdf"><span class="kb-item-name">&#128196; rag_architecture_guide.pdf</span><span class="kb-item-meta">2.1 MB</span></label>
+          <label class="kb-item"><input type="checkbox" value="vector_search_best_practices.md"><span class="kb-item-name">&#128196; vector_search_best_practices.md</span><span class="kb-item-meta">48 KB</span></label>
+          <label class="kb-item"><input type="checkbox" value="reranking_models_survey.pdf"><span class="kb-item-name">&#128196; reranking_models_survey.pdf</span><span class="kb-item-meta">3.8 MB</span></label>
+          <label class="kb-item"><input type="checkbox" value="embedding_benchmarks_2025.pdf"><span class="kb-item-name">&#128196; embedding_benchmarks_2025.pdf</span><span class="kb-item-meta">1.2 MB</span></label>
+          <label class="kb-item"><input type="checkbox" value="llm_context_window_study.pdf"><span class="kb-item-name">&#128196; llm_context_window_study.pdf</span><span class="kb-item-meta">890 KB</span></label>
+        </div>
+        <div class="kb-footer">
+          <button class="kb-add-btn" id="kbAddBtn">Add selected</button>
+        </div>
+      </div>
+
+      <!-- Task 4.7 — Command picker panel (REQ-216) -->
+      <div class="cmd-picker" id="cmdPicker">
+        <div class="cmd-picker-header">
+          <span class="cmd-picker-title">&#47; Commands</span>
+          <button class="cmd-picker-close" id="cmdPickerClose">&#10005;</button>
+        </div>
+        <div class="cmd-picker-body" id="cmdPickerBody">
+          <div class="cmd-group-label">Conversation</div>
+          <div class="cmd-picker-item" data-cmd="/new-chat"><span class="cmd-picker-icon">&#43;</span><span class="cmd-picker-name">/new-chat</span><span class="cmd-picker-desc">Start a new conversation</span></div>
+          <div class="cmd-picker-item" data-cmd="/history"><span class="cmd-picker-icon">&#128336;</span><span class="cmd-picker-name">/history</span><span class="cmd-picker-desc">Show conversation history</span></div>
+          <div class="cmd-picker-item" data-cmd="/compact"><span class="cmd-picker-icon">&#9881;</span><span class="cmd-picker-name">/compact</span><span class="cmd-picker-desc">Compact the current conversation</span></div>
+          <div class="cmd-picker-item" data-cmd="/clear"><span class="cmd-picker-icon">&#128465;</span><span class="cmd-picker-name">/clear</span><span class="cmd-picker-desc">Clear conversation history</span></div>
+          <div class="cmd-group-label">Context</div>
+          <div class="cmd-picker-item" data-cmd="/summarize"><span class="cmd-picker-icon">&#128221;</span><span class="cmd-picker-name">/summarize</span><span class="cmd-picker-desc">Summarize the conversation</span></div>
+          <div class="cmd-picker-item" data-cmd="/explain"><span class="cmd-picker-icon">&#128270;</span><span class="cmd-picker-name">/explain</span><span class="cmd-picker-desc">Explain the last code block</span></div>
+          <div class="cmd-picker-item" data-cmd="/rewrite"><span class="cmd-picker-icon">&#9999;</span><span class="cmd-picker-name">/rewrite</span><span class="cmd-picker-desc">Rewrite in a different style</span></div>
+          <div class="cmd-group-label">Display</div>
+          <div class="cmd-picker-item" data-cmd="/translate"><span class="cmd-picker-icon">&#127760;</span><span class="cmd-picker-name">/translate</span><span class="cmd-picker-desc">Translate to another language</span></div>
+          <div class="cmd-picker-item" data-cmd="/help"><span class="cmd-picker-icon">&#63;</span><span class="cmd-picker-name">/help</span><span class="cmd-picker-desc">Show all available commands</span></div>
+        </div>
+      </div>
+
+      <!-- Task 4.7 — Attachment chips -->
+      <div class="attach-chips" id="attachChips"></div>
+
+      <!-- Hidden file input -->
+      <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.md" style="display:none">
+
+      <div class="input-wrap">
+        <!-- Task 4.7 — Toolbar: + and / buttons -->
+        <div class="input-toolbar">
+          <button class="toolbar-btn" id="attachBtn" title="Add context (files, web, KB)">&#43;</button>
+          <button class="toolbar-btn" id="cmdBtn" title="Commands"><strong>/</strong></button>
+          <div class="toolbar-divider"></div>
+        </div>
+        <textarea class="input-textarea" id="inputArea" placeholder="Message Aion Chat…" rows="1"></textarea>
+        <button class="send-btn" id="sendBtn">&#9650;</button>
+      </div>
+      <div class="input-hint">Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Shift+Enter&nbsp;new&nbsp;line &nbsp;·&nbsp; /&nbsp;for&nbsp;commands</div>
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     Settings Panel
+═══════════════════════════════════════════ -->
+<div class="settings-overlay" id="settingsOverlay"></div>
+
+<div class="settings-panel" id="settingsPanel">
+  <div class="settings-header">
+    <span class="settings-title">&#9881; Settings</span>
+    <button class="settings-close" id="settingsClose">&#10005;</button>
+  </div>
+
+  <div class="settings-body">
+
+    <!-- Theme -->
+    <div>
+      <div class="settings-section-title">Appearance</div>
+      <div class="theme-options">
+        <div class="theme-opt" data-theme-val="dark">
+          <div class="theme-opt-icon">&#127761;</div>
+          <div class="theme-opt-label">Dark</div>
+        </div>
+        <div class="theme-opt" data-theme-val="light">
+          <div class="theme-opt-icon">&#9728;</div>
+          <div class="theme-opt-label">Light</div>
+        </div>
+        <div class="theme-opt" data-theme-val="system">
+          <div class="theme-opt-icon">&#128187;</div>
+          <div class="theme-opt-label">System</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preset -->
+    <div>
+      <div class="settings-section-title">Query Preset</div>
+      <select class="settings-select" id="presetSelect">
+        <option value="balanced">&#9881; Balanced (default)</option>
+        <option value="precise">&#127919; Precise — fewer, higher-quality results</option>
+        <option value="broad">&#128269; Broad — wider recall, more context</option>
+        <option value="fast">&#9889; Fast — minimal reranking</option>
+      </select>
+    </div>
+
+    <!-- Search limit -->
+    <div class="settings-row">
+      <div class="settings-section-title">Query Parameters</div>
+      <div class="settings-row-head">
+        <span class="settings-label">Search limit (top-k)</span>
+        <span class="settings-value" id="searchLimitVal">10</span>
+      </div>
+      <div class="settings-sub">Number of chunks retrieved before reranking</div>
+      <input type="range" class="settings-slider" id="searchLimit" min="5" max="50" step="5" value="10">
+    </div>
+
+    <!-- Rerank top-k -->
+    <div class="settings-row">
+      <div class="settings-row-head">
+        <span class="settings-label">Rerank top-k</span>
+        <span class="settings-value" id="rerankVal">5</span>
+      </div>
+      <div class="settings-sub">Chunks passed to the LLM after reranking</div>
+      <input type="range" class="settings-slider" id="rerankTopK" min="1" max="20" step="1" value="5">
+    </div>
+
+    <!-- Streaming toggle -->
+    <div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <span class="toggle-label">Streaming responses</span>
+          <span class="toggle-sub">Show tokens in real-time as they're generated</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="streamingToggle" checked>
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Show citations toggle -->
+    <div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <span class="toggle-label">Show source citations</span>
+          <span class="toggle-sub">Display document sources below AI responses</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="citationsToggle" checked>
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
+  </div><!-- /settings-body -->
+
+  <div class="settings-footer">
+    <button class="settings-reset-btn" id="settingsResetBtn">Reset</button>
+    <button class="settings-save-btn" id="settingsSaveBtn">Save settings</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="/console/static/user-console.js"></script>
+
+</body>
+</html>

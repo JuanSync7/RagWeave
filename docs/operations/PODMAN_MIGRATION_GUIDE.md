@@ -40,7 +40,7 @@ regardless of their runtime.
 ./scripts/compose.sh down
 ```
 
-### 1.3 Non-Root Worker (`docker/Dockerfile.runtime`)
+### 1.3 Non-Root Worker (`containers/Dockerfile.runtime`)
 
 **What:** Added a non-root user `app` (matching `Dockerfile.api`) with `USER app` directive.
 Source files use `--chown=app:app` on COPY.
@@ -67,7 +67,7 @@ socket is at `/var/run/docker.sock` (root-owned), while Podman's is at
 
 **For Podman users:** Set `CONTAINER_SOCK=$XDG_RUNTIME_DIR/podman/podman.sock` in `.env`.
 
-### 1.5 Certificate Permissions (`docker/generate-certs.sh`)
+### 1.5 Certificate Permissions (`containers/generate-certs.sh`)
 
 **What:** Added explicit `chmod 644` for the cert and `chmod 600` for the key after generation.
 
@@ -138,9 +138,9 @@ We chose **Dockerfile `chown`/`--chown`** over the `:U` volume flag because:
 ### Modified Files
 | File | Change |
 |------|--------|
-| `docker/Dockerfile.runtime` | Added non-root user `app` + `USER` directive |
+| `containers/Dockerfile.runtime` | Added non-root user `app` + `USER` directive |
 | `docker-compose.yml` | `CONTAINER_SOCK` env var for Dozzle; updated header comments |
-| `docker/generate-certs.sh` | Explicit `chmod` for cert/key permissions |
+| `containers/generate-certs.sh` | Explicit `chmod` for cert/key permissions |
 | `.env.example` | Added `CONTAINER_SOCK` documentation |
 | `scripts/backup_all.sh` | Runtime detection via `$CONTAINER_RT` |
 | `scripts/restore_all.sh` | Runtime detection via `$CONTAINER_RT` |
@@ -163,5 +163,5 @@ After applying these changes, verify:
 - [ ] `./scripts/compose.sh --profile workers up -d` starts workers
 - [ ] Worker runs as non-root: `$CONTAINER_RT exec <worker> whoami` returns `app`
 - [ ] Dozzle connects to logs when monitoring profile is started
-- [ ] `bash docker/generate-certs.sh` creates certs with correct permissions
+- [ ] `bash containers/generate-certs.sh` creates certs with correct permissions
 - [ ] Backup/restore scripts work: `./scripts/backup_all.sh test && echo OK`

@@ -47,7 +47,7 @@ metadata:
 spec:
   sandboxes:
     - name: rag-worker
-      image: rag-worker:latest  # Built from docker/Dockerfile.runtime
+      image: rag-worker:latest  # Built from containers/Dockerfile.runtime
       policy: /etc/openshell/policies/rag-worker.yaml
       command: >
         sh -lc '
@@ -100,10 +100,10 @@ openshell:
 
 ```bash
 # Start infrastructure + OpenShell
-docker compose --profile workers --profile sandbox up -d
+./scripts/compose.sh --profile workers --profile sandbox up -d
 
 # Monitor audit logs for violations (no blocking yet)
-docker logs -f rag-openshell 2>&1 | grep "VIOLATION"
+podman logs -f rag-openshell 2>&1 | grep "VIOLATION"  # or: docker logs
 ```
 
 ### 1.7 Iterative Policy Tightening
@@ -503,8 +503,8 @@ Create operational runbooks in `docs/openshell/runbooks/`:
 
 ```bash
 # Disable OpenShell — no application code changes needed
-docker compose --profile workers up -d  # omit --profile sandbox
+./scripts/compose.sh --profile workers up -d  # omit --profile sandbox
 
 # Re-enable
-docker compose --profile workers --profile sandbox up -d
+./scripts/compose.sh --profile workers --profile sandbox up -d
 ```

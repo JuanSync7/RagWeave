@@ -140,10 +140,23 @@ def _should_scale_down(snapshot: Snapshot, args: argparse.Namespace) -> bool:
     return backlog_cool and sts_cool and p95_cool and mem_safe
 
 
+def _detect_compose_command() -> list[str]:
+    """Detect the correct compose command, mirroring scripts/compose.sh logic."""
+    if shutil.which("podman-compose"):
+        return ["podman-compose"]
+    if shutil.which("podman"):
+        return ["podman", "compose"]
+    if shutil.which("docker"):
+        return ["docker", "compose"]
+    raise RuntimeError("Neither podman-compose nor docker compose found")
+
+
+COMPOSE_CMD = _detect_compose_command()
+
+
 def _scale_to(target: int, dry_run: bool) -> bool:
     cmd = [
-        CONTAINER_RT,
-        "compose",
+        *COMPOSE_CMD,
         "up",
         "-d",
         "--scale",

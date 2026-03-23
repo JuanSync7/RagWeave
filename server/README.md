@@ -38,10 +38,10 @@ Users → FastAPI Server → Temporal Server → Temporal Worker(s)
 ### 1. Start Temporal (infrastructure)
 
 ```bash
-# Option A: Docker Compose (recommended)
-docker compose up -d
+# Option A: Compose (recommended — auto-detects Podman or Docker)
+./scripts/compose.sh up -d
 
-# Option B: Temporal CLI (lightweight, no Docker)
+# Option B: Temporal CLI (lightweight, no containers)
 temporal server start-dev
 ```
 
@@ -100,14 +100,14 @@ Environment variables for adapter auth forwarding:
 
 ## Managed Container Mode (Optional)
 
-Run API and worker(s) as managed Docker services instead of hand-started terminals:
+Run API and worker(s) as managed container services instead of hand-started terminals:
 
 ```bash
 # Start Temporal + API + one worker container
-docker compose --profile app --profile workers up -d
+./scripts/compose.sh --profile app --profile workers up -d
 
 # Scale workers on the same Temporal task queue (rag-query)
-docker compose --profile workers up -d --scale rag-worker=3
+./scripts/compose.sh --profile workers up -d --scale rag-worker=3
 ```
 
 This stays true to production patterns:
@@ -120,7 +120,7 @@ This stays true to production patterns:
 
 ```bash
 # Container log dashboard
-docker compose --profile monitoring up -d
+./scripts/compose.sh --profile monitoring up -d
 ```
 
 - **Dozzle logs UI**: http://localhost:9999
@@ -132,7 +132,7 @@ docker compose --profile monitoring up -d
 Run self-hosted Langfuse under the `observability` profile:
 
 ```bash
-docker compose --profile observability up -d
+./scripts/compose.sh --profile observability up -d
 ```
 
 Open:
@@ -149,11 +149,11 @@ export LANGFUSE_PUBLIC_KEY=pk-local-dev
 export LANGFUSE_SECRET_KEY=sk-local-dev
 ```
 
-If you run `rag-api` and `rag-worker` via Docker Compose, pass the same env vars
+If you run `rag-api` and `rag-worker` via containers, pass the same env vars
 into compose (for example in a local `.env` file) and start with:
 
 ```bash
-docker compose --profile app --profile workers --profile observability up -d
+./scripts/compose.sh --profile app --profile workers --profile observability up -d
 ```
 
 ## Current Setup
@@ -161,7 +161,7 @@ docker compose --profile app --profile workers --profile observability up -d
 Your current local flow still works unchanged:
 
 ```bash
-docker compose up -d
+./scripts/compose.sh up -d
 .venv/bin/python -m server.worker
 .venv/bin/uvicorn server.api:app --host 0.0.0.0 --port 8000
 .venv/bin/python -m server.cli_client
@@ -302,7 +302,7 @@ What it checks:
 - Temporal queue backlog (query overridable via CLI arg)
 - API p95 latency from Prometheus (`rag_api_request_latency_ms`)
 - Retrieval/generation p95 stage latencies (`rag_pipeline_stage_ms`)
-- Worker CPU/memory pressure from `docker stats`
+- Worker CPU/memory pressure from container stats
 - GPU memory pressure from `nvidia-smi` (when available)
 
 ### Auto-Scale Worker Replicas

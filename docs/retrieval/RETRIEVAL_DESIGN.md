@@ -1,18 +1,26 @@
-# Retrieval Pipeline — Implementation Guide
+# Retrieval Pipeline — Design Document
 
-**AION Knowledge Management Platform**
-Version: 1.1 | Status: Draft | Domain: Retrieval Pipeline
+| Field | Value |
+|-------|-------|
+| **Document** | Retrieval Pipeline Design Document |
+| **Version** | 1.2 |
+| **Status** | Draft |
+| **Spec Reference** | `RETRIEVAL_QUERY_SPEC.md` v1.2 (REQ-101–REQ-403, REQ-1001–REQ-1008), `RETRIEVAL_GENERATION_SPEC.md` v1.2 (REQ-501–REQ-903) |
+| **Companion Documents** | `RETRIEVAL_QUERY_SPEC.md`, `RETRIEVAL_GENERATION_SPEC.md`, `RETRIEVAL_SPEC_SUMMARY.md`, `RETRIEVAL_IMPLEMENTATION.md` |
+| **Created** | 2026-03-11 |
+| **Last Updated** | 2026-03-23 |
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2026-03-11 | AI Assistant | Initial draft — 5 phases, 17 tasks covering core pipeline through security |
-| 1.1 | 2026-03-13 | AI Assistant | Added Phase 6 (conversation memory) covering REQ-1001–1008, updated dependency graph and mapping |
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-03-11 | Initial draft — 5 phases, 17 tasks covering core pipeline through security |
+| 1.1 | 2026-03-13 | Added Phase 6 (conversation memory) covering REQ-1001–1008, updated dependency graph and mapping |
+| 1.2 | 2026-03-23 | Renamed from Implementation Guide to Design Document; added Contract/Pattern annotations to Part B; added companion document references |
 
-> **Document intent:** This file is a phased implementation plan tied to `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`.  
-> It is not the source of truth for current runtime behavior.  
-> For as-built behavior, refer to `docs/retrieval/RETRIEVAL_ENGINEERING_GUIDE.md`, `src/retrieval/README.md`, and `server/README.md`.
-
-This document provides a phased implementation plan and detailed code appendix for the retrieval pipeline specified in `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`. Every task references the requirements it satisfies.
+> **Document Intent.** This document provides a technical design with task decomposition
+> and contract-grade code appendix for the retrieval pipeline specified in
+> `RETRIEVAL_QUERY_SPEC.md` / `RETRIEVAL_GENERATION_SPEC.md`. Every task references the
+> requirements it satisfies. Part B contract entries are consumed verbatim by the companion
+> implementation plan (`RETRIEVAL_IMPLEMENTATION.md`).
 
 ---
 
@@ -566,7 +574,11 @@ Phase 6 (Conversation Memory)
 
 # Part B: Code Appendix
 
-## B.1 Pre-Retrieval Guardrail
+## B.1: Pre-Retrieval Guardrail — Contract
+
+**Tasks:** Task 1.1, Task 1.4, Task 2.3
+**Requirements:** REQ-201, REQ-202, REQ-203, REQ-204, REQ-205, REQ-903
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```python
 from dataclasses import dataclass, field
@@ -732,7 +744,11 @@ class PreRetrievalGuardrail:
 
 ---
 
-## B.2 Risk Classification Config
+## B.2: Risk Classification Config — Contract
+
+**Tasks:** Task 2.3, Task 5.1
+**Requirements:** REQ-203, REQ-202, REQ-903
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```yaml
 # config/guardrails.yaml
@@ -812,7 +828,11 @@ injection_patterns:
 
 ---
 
-## B.3 3-Signal Confidence Scoring
+## B.3: 3-Signal Confidence Scoring — Contract
+
+**Tasks:** Task 2.1
+**Requirements:** REQ-701, REQ-604
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```python
 from dataclasses import dataclass
@@ -922,7 +942,11 @@ def _has_substantial_overlap(sentence: str, quote: str, threshold: int = 5) -> b
 
 ---
 
-## B.4 Post-Generation Guardrail
+## B.4: Post-Generation Guardrail — Contract
+
+**Tasks:** Task 1.2, Task 2.1
+**Requirements:** REQ-701, REQ-702, REQ-703, REQ-704, REQ-705, REQ-706
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```python
 from dataclasses import dataclass, field
@@ -1105,7 +1129,11 @@ class PostGenerationGuardrail:
 
 ---
 
-## B.5 Version Conflict Detection
+## B.5: Version Conflict Detection — Contract
+
+**Tasks:** Task 3.2
+**Requirements:** REQ-502
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```python
 from dataclasses import dataclass
@@ -1188,7 +1216,11 @@ def _extract_filename_stem(filename: str) -> Optional[str]:
 
 ---
 
-## B.6 Structured Document Formatter
+## B.6: Structured Document Formatter — Pattern
+
+**Tasks:** Task 3.1
+**Requirements:** REQ-501, REQ-503
+**Type:** Pattern (illustrative — shows approach, not exact contract)
 
 ```python
 def format_retrieved_docs(
@@ -1225,7 +1257,11 @@ Content:
 
 ---
 
-## B.7 Retry Logic Wrapper
+## B.7: Retry Logic Wrapper — Contract
+
+**Tasks:** Task 1.3
+**Requirements:** REQ-605, REQ-902
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```python
 import time
@@ -1296,7 +1332,11 @@ def with_retry(
 
 ---
 
-## B.8 Embedding Cache
+## B.8: Embedding Cache — Pattern
+
+**Tasks:** Task 4.2
+**Requirements:** REQ-306
+**Type:** Pattern (illustrative — shows approach, not exact contract)
 
 ```python
 from functools import lru_cache
@@ -1340,7 +1380,11 @@ class CachedEmbeddings:
 
 ---
 
-## B.9 Query Result Cache
+## B.9: Query Result Cache — Pattern
+
+**Tasks:** Task 4.3
+**Requirements:** REQ-308
+**Type:** Pattern (illustrative — shows approach, not exact contract)
 
 ```python
 import time
@@ -1424,7 +1468,11 @@ class QueryResultCache:
 
 ---
 
-## B.10 Connection Pool Manager
+## B.10: Connection Pool Manager — Pattern
+
+**Tasks:** Task 4.1
+**Requirements:** REQ-307
+**Type:** Pattern (illustrative — shows approach, not exact contract)
 
 ```python
 import logging
@@ -1509,7 +1557,11 @@ class VectorDBPool:
 
 ---
 
-## B.11 PromptTemplate Integration
+## B.11: PromptTemplate Integration — Pattern
+
+**Tasks:** Task 3.3
+**Requirements:** REQ-601, REQ-602
+**Type:** Pattern (illustrative — shows approach, not exact contract)
 
 ```python
 from langchain_core.prompts import ChatPromptTemplate
@@ -1553,7 +1605,11 @@ def load_rag_prompt(
 
 ---
 
-## B.12 Full-Pipeline LangGraph Definition
+## B.12: Full-Pipeline LangGraph Definition — Contract
+
+**Tasks:** Task 2.2
+**Requirements:** REQ-706, REQ-902
+**Type:** Contract (exact — RAGPipelineState TypedDict copied to Phase 0; graph definition is illustrative)
 
 ```python
 from langgraph.graph import StateGraph, END
@@ -1729,7 +1785,11 @@ def flag_for_review_node(state: RAGPipelineState) -> dict:
 
 ---
 
-## B.13 Observability Wrapper
+## B.13: Observability Wrapper — Contract
+
+**Tasks:** Task 4.4
+**Requirements:** REQ-801, REQ-802, REQ-803
+**Type:** Contract (exact — StageMetrics, QueryTrace, traced decorator copied to Phase 0)
 
 ```python
 import time
@@ -1828,7 +1888,11 @@ def traced(stage_name: str):
 
 ---
 
-## B.14 Multi-Turn Conversation State
+## B.14: Multi-Turn Conversation State — Pattern
+
+**Tasks:** Task 3.4
+**Requirements:** REQ-103
+**Type:** Pattern (illustrative — shows coreference approach, superseded by B.15 for persistent memory)
 
 ```python
 from dataclasses import dataclass, field
@@ -1912,12 +1976,13 @@ class ConversationState:
 
 ---
 
-## B.15 Conversation Memory Provider
+## B.15: Conversation Memory Provider — Contract
 
 This snippet shows a tenant-scoped conversation memory provider with sliding window extraction, rolling summary support, and TTL-based expiration.
 
 **Tasks:** Task 6.1, Task 6.2
 **Requirements:** REQ-1001, REQ-1002, REQ-1003, REQ-1007
+**Type:** Contract (exact — copied to implementation plan Phase 0)
 
 ```python
 from dataclasses import dataclass, field
@@ -2000,12 +2065,13 @@ def assemble_memory_context(
 
 ---
 
-## B.16 Conversation Lifecycle Operations
+## B.16: Conversation Lifecycle Operations — Pattern
 
 This snippet shows the API-facing lifecycle operations for conversation management.
 
 **Tasks:** Task 6.3
 **Requirements:** REQ-1004, REQ-1005, REQ-1006
+**Type:** Pattern (illustrative — shows service layer approach)
 
 ```python
 from dataclasses import dataclass
@@ -2085,3 +2151,13 @@ class ConversationService:
 - Service layer wraps the provider to keep route handlers thin.
 - Compaction is a separate explicit operation, not automatic, to give operators control.
 - Conversation ID is returned on creation and echoed on every subsequent query response.
+
+---
+
+## Document Chain
+
+```
+RETRIEVAL_QUERY_SPEC.md  ┐
+                         ├─► RETRIEVAL_SPEC_SUMMARY.md ─► RETRIEVAL_DESIGN.md ─► RETRIEVAL_IMPLEMENTATION.md
+RETRIEVAL_GENERATION_SPEC.md ┘
+```

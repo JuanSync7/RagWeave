@@ -418,7 +418,7 @@ class WorkerAutoscaler:
 
     def apply_scale(self, target_replicas: int) -> None:
         subprocess.run(
-            ["docker", "compose", "--profile", "workers", "up", "-d",
+            [*COMPOSE_CMD, "--profile", "workers", "up", "-d",
              "--scale", f"rag-worker={target_replicas}"],
             check=True,
         )
@@ -544,7 +544,7 @@ echo "[drill] Phase 2: Restore"
 ./scripts/restore_all.sh "${BACKUP_DIR}"
 
 echo "[drill] Phase 3: Recreate containers"
-docker compose up -d
+./scripts/compose.sh up -d
 
 echo "[drill] Phase 4: Verify health"
 for i in {1..30}; do
@@ -587,7 +587,7 @@ echo "${TIMESTAMP} | backup=${BACKUP_DIR} | result=${RESULT}" >> "${DRILL_LOG}"
 
 ### Restore
 - Run `./scripts/restore_all.sh ./backups/<timestamp>`.
-- Recreate containers with `docker compose up -d`.
+- Recreate containers with `./scripts/compose.sh up -d`.
 
 ### Drill
 - Run `./scripts/dr_drill.sh`.

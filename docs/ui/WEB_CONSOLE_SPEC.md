@@ -9,6 +9,7 @@ Version: 2.0 | Status: Implemented Baseline | Domain: Web Console
 | 2.0 | 2026-03-13 | AI Assistant | Dual-console architecture: User Console (`/console`) and Admin Console (`/console/admin`). Reorganized requirement sections. Added Change Parity principle. Expanded from 30 to 48 requirements. |
 
 > **Document intent:** This is a normative requirements/specification document for the web console UI.
+> For the design document, see `WEB_CONSOLE_DESIGN.md`.
 > For the implementation plan, see `WEB_CONSOLE_IMPLEMENTATION.md`.
 > For the API server layer, see `SERVER_API_SPEC.md`. For as-built behavior, see `server/console/README.md`.
 

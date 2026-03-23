@@ -1138,11 +1138,11 @@ The vector store collection MUST support the following property categories:
 
 > **NFR-603** | Priority: MUST
 >
-> **Description:** The system MUST support containerised deployment (Docker). A Dockerfile and docker-compose configuration MUST be provided.
+> **Description:** The system MUST support containerised deployment (Podman/Docker). A Dockerfile and compose configuration MUST be provided.
 >
-> **Rationale:** Containerisation ensures reproducible deployment environments and simplifies dependency management. Docker Compose enables single-command deployment of the pipeline with its co-located services (vector store, graph database).
+> **Rationale:** Containerisation ensures reproducible deployment environments and simplifies dependency management. The compose wrapper (`./scripts/compose.sh`) enables single-command deployment of the pipeline with its co-located services (vector store, graph database) on either Podman or Docker.
 >
-> **Acceptance Criteria:** Given a clean Docker host, when `docker-compose up` is executed, then the pipeline, vector store, and graph database services start successfully. When a document is ingested via CLI within the container, then it is processed and stored correctly.
+> **Acceptance Criteria:** Given a clean container host, when `./scripts/compose.sh up` is executed, then the pipeline, vector store, and graph database services start successfully. When a document is ingested via CLI within the container, then it is processed and stored correctly.
 
 > **NFR-604** | Priority: MUST
 >

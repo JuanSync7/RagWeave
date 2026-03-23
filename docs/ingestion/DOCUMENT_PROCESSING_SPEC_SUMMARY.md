@@ -2,7 +2,7 @@
 
 **Companion document to:** `DOCUMENT_PROCESSING_SPEC.md` (v1.0.0)
 **Purpose:** Concise digest combining the conceptual pipeline overview and project requirements summary for stakeholders, reviewers, and implementers.
-**See also:** `EMBEDDING_PIPELINE_SPEC_SUMMARY.md`, `INGESTION_PLATFORM_SPEC.md`, `DOCUMENT_PROCESSING_IMPLEMENTATION.md`
+**See also:** `EMBEDDING_PIPELINE_SPEC_SUMMARY.md`, `INGESTION_PLATFORM_SPEC.md`, `DOCUMENT_PROCESSING_DESIGN.md`
 
 ---
 
@@ -244,8 +244,10 @@ Covers one `.md` file and one `.meta.json` per source document, metadata envelop
 | `DOCUMENT_PROCESSING_SPEC.md` | Authoritative requirements baseline — FR-101 through FR-587 |
 | `EMBEDDING_PIPELINE_SPEC.md` | Phase 2 functional requirements — chunking, enrichment, embedding, storage |
 | `INGESTION_PLATFORM_SPEC.md` | Cross-cutting platform requirements — re-ingestion, config schema, error handling, NFRs |
-| `DOCUMENT_PROCESSING_IMPLEMENTATION.md` | Phased implementation plan for Document Processing phase (FR-101–FR-587) |
-| `EMBEDDING_PIPELINE_IMPLEMENTATION.md` | Phased implementation plan for Embedding Pipeline phase (FR-591–FR-1304) |
+| `DOCUMENT_PROCESSING_DESIGN.md` | Design document for Document Processing phase (FR-101–FR-587) |
+| `DOCUMENT_PROCESSING_IMPLEMENTATION.md` | Implementation plan for Document Processing phase (FR-101–FR-587) |
+| `EMBEDDING_PIPELINE_DESIGN.md` | Design document for Embedding Pipeline phase (FR-591–FR-1304) |
+| `EMBEDDING_PIPELINE_IMPLEMENTATION.md` | Implementation plan for Embedding Pipeline phase (FR-591–FR-1304) |
 | `INGESTION_PIPELINE_ENGINEERING_GUIDE.md` | Practical developer guide — architecture, extension steps, troubleshooting |
 | `INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md` | Quick-start checklist for new engineers |
 | `DOCUMENT_PROCESSING_SPEC_SUMMARY.md` (this document) | Concise requirements digest combining conceptual overview and project-specific summary |

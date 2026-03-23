@@ -65,7 +65,7 @@ services:
     profiles: ["app"]
     build:
       context: .
-      dockerfile: docker/Dockerfile.api
+      dockerfile: containers/Dockerfile.api
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
@@ -110,7 +110,7 @@ services:
     profiles: ["workers"]
     build:
       context: .
-      dockerfile: docker/Dockerfile.runtime
+      dockerfile: containers/Dockerfile.runtime
     command: >
       sh -lc '
       WORKER_WV_DIR="/tmp/rag-weaviate-$${HOSTNAME}" &&

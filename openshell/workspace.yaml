@@ -21,7 +21,7 @@ spec:
   sandboxes:
     - name: rag-worker
       description: "Temporal worker — GPU model inference for RAG queries"
-      image: rag-worker:latest  # Built from docker/Dockerfile.runtime
+      image: rag-worker:latest  # Built from containers/Dockerfile.runtime
       policy: /etc/openshell/policies/rag-worker.yaml
       command: >
         sh -lc '

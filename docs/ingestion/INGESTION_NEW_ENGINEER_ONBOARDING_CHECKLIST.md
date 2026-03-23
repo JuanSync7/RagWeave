@@ -16,7 +16,8 @@ Use this one-page checklist to get productive in the ingestion subsystem on day 
   3. `docs/ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
   4. `docs/ingestion/DOCUMENT_PROCESSING_SPEC.md` (Document Processing requirements, FR-100–FR-589)
   5. `docs/ingestion/EMBEDDING_PIPELINE_SPEC.md` (Embedding requirements, FR-591–FR-1304)
-  6. Skim `DOCUMENT_PROCESSING_IMPLEMENTATION.md` and `EMBEDDING_PIPELINE_IMPLEMENTATION.md` — phased task breakdowns with code appendices
+  6. Skim `DOCUMENT_PROCESSING_DESIGN.md` and `EMBEDDING_PIPELINE_DESIGN.md` — design documents with code appendices
+  7. Skim `DOCUMENT_PROCESSING_IMPLEMENTATION.md` and `EMBEDDING_PIPELINE_IMPLEMENTATION.md` — phased implementation plans with task breakdowns
 
 ## First Code Change Flow (Safe Path)
 

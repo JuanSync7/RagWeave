@@ -1,6 +1,6 @@
 # @summary
 # Shared console service helpers for UI serving, static asset resolution, log snapshots, source previews, and rendering.
-# Exports: CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, build_source_preview_payload, render_source_document_html
+# Exports: CONSOLE_HTML_PATH, USER_CONSOLE_HTML_PATH, CONSOLE_STATIC_DIR, USER_CONSOLE_STATIC_DIR, resolve_console_html_path, resolve_user_console_html_path, resolve_console_static_asset, resolve_user_console_static_asset, is_ollama_reachable, tail_log_lines, resolve_console_source_path, build_source_preview_payload, render_source_document_html
 # Deps: config.settings, server.schemas, fastapi
 # @end-summary
 """Console service helpers."""
@@ -18,15 +18,21 @@ from config.settings import DOCUMENTS_DIR, OLLAMA_BASE_URL
 from server.schemas import ConsoleLogsResponse
 
 _CONSOLE_DIR = Path(__file__).resolve().parent
+
+# --- Admin Console (existing tabbed debug/ops interface) ---
 _CONSOLE_HTML_CANDIDATES = (
     _CONSOLE_DIR / "static" / "console.html",
     _CONSOLE_DIR.parent / "console.html",  # Backward-compat for older local checkouts.
 )
 CONSOLE_STATIC_DIR = _CONSOLE_DIR / "static"
 
+# --- User Console (modern chat interface) ---
+USER_CONSOLE_STATIC_DIR = _CONSOLE_DIR / "static" / "user"
+_USER_CONSOLE_HTML_PATH = USER_CONSOLE_STATIC_DIR / "index.html"
+
 
 def resolve_console_html_path() -> Path:
-    """Resolve console HTML path with fallback for legacy locations."""
+    """Resolve admin console HTML path with fallback for legacy locations."""
     for candidate in _CONSOLE_HTML_CANDIDATES:
         if candidate.exists():
             return candidate
@@ -36,14 +42,33 @@ def resolve_console_html_path() -> Path:
 CONSOLE_HTML_PATH = resolve_console_html_path()
 
 
+def resolve_user_console_html_path() -> Path:
+    """Resolve User Console HTML path."""
+    return _USER_CONSOLE_HTML_PATH
+
+
+USER_CONSOLE_HTML_PATH = resolve_user_console_html_path()
+
+
 def resolve_console_static_asset(asset_path: str) -> Path:
-    """Resolve and validate static console asset path."""
+    """Resolve and validate static console asset path (admin console)."""
     candidate = (CONSOLE_STATIC_DIR / asset_path).resolve()
     static_root = CONSOLE_STATIC_DIR.resolve()
     if not str(candidate).startswith(str(static_root)):
         raise HTTPException(status_code=404, detail="Console asset not found")
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="Console asset not found")
+    return candidate
+
+
+def resolve_user_console_static_asset(asset_path: str) -> Path:
+    """Resolve and validate static asset path for the User Console."""
+    candidate = (USER_CONSOLE_STATIC_DIR / asset_path).resolve()
+    static_root = USER_CONSOLE_STATIC_DIR.resolve()
+    if not str(candidate).startswith(str(static_root)):
+        raise HTTPException(status_code=404, detail="User console asset not found")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="User console asset not found")
     return candidate
 
 

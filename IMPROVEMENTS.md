@@ -98,7 +98,7 @@ Recent operational changes made to stabilize local observability and container s
 - Stabilized `rag-api` startup by making API host port configurable (`RAG_API_HOST_PORT`) and routing container-to-host access through `host.docker.internal`.
 
 **Brute-force fixes (works locally, may not scale):**
-- Using `host.docker.internal` to bypass intermittent Docker DNS resolution is a pragmatic local workaround, but fragile for production and multi-host deployments.
+- Using `host.docker.internal` to bypass intermittent container DNS resolution is a pragmatic local workaround, but fragile for production and multi-host deployments.
 - Forcing `CLICKHOUSE_CLUSTER_ENABLED=false` is correct for a single-node dev setup, but not suitable for distributed/high-throughput Langfuse at scale.
 - Hardcoded/default local credentials and bootstrap values in compose are convenient for dev, but must be replaced with secret management + rotation in production.
 - Running all observability components in one compose project is good for local testing, but production should split storage/compute, add backups, and apply resource/retention controls.
