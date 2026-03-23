@@ -13,7 +13,7 @@ process-wide singleton resolver for use by API and CLI surfaces.
 
 from __future__ import annotations
 
-import json
+import orjson
 import logging
 import uuid
 from dataclasses import asdict
@@ -417,7 +417,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         turns: list[ConversationTurn] = []
         for row in raw_rows:
             try:
-                payload = json.loads(row)
+                payload = orjson.loads(row)
                 turns.append(
                     ConversationTurn(
                         role=str(payload.get("role", "user")),
@@ -458,7 +458,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
             "timestamp_ms": now,
             "query_id": query_id,
         }
-        self._client.rpush(key, json.dumps(row, ensure_ascii=True))
+        self._client.rpush(key, orjson.dumps(row))
         self._client.hset(
             self._meta_key(scope, meta.conversation_id),
             mapping={

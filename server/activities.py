@@ -13,7 +13,7 @@ inference against models already in memory — no per-request init cost.
 import logging
 import time
 import hashlib
-import json
+import orjson
 from dataclasses import asdict
 from typing import Optional
 
@@ -102,7 +102,7 @@ def execute_rag_query(request: dict) -> dict:
         "memory_recent_turns": memory_recent_turns,
     }
     cache_key = "rag:query:" + hashlib.sha256(
-        json.dumps(cache_payload, sort_keys=True).encode("utf-8")
+        orjson.dumps(cache_payload, option=orjson.OPT_SORT_KEYS)
     ).hexdigest()
 
     cached = _cache.get(cache_key)

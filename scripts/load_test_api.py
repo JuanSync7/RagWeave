@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import orjson
 import statistics
 import sys
 import time
@@ -47,7 +47,7 @@ def _one_request(
     payload = {"query": query}
     if tenant_id:
         payload["tenant_id"] = tenant_id
-    body = json.dumps(payload).encode("utf-8")
+    body = orjson.dumps(payload)
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["x-api-key"] = api_key

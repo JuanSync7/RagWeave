@@ -14,7 +14,7 @@ Supports:
 from __future__ import annotations
 
 import hmac
-import json
+import orjson
 import logging
 import time
 from dataclasses import dataclass
@@ -84,11 +84,11 @@ def _verify_hs256_jwt(token: str, secret: str) -> dict[str, Any]:
     if not hmac.compare_digest(expected, actual):
         raise ValueError("Invalid JWT signature")
 
-    header = json.loads(_b64url_decode(header_b64).decode("utf-8"))
+    header = orjson.loads(_b64url_decode(header_b64))
     if header.get("alg") != "HS256":
         raise ValueError("Unsupported JWT algorithm")
 
-    payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    payload = orjson.loads(_b64url_decode(payload_b64))
     exp = payload.get("exp")
     if exp is not None and float(exp) < time.time():
         raise ValueError("JWT expired")
@@ -142,8 +142,8 @@ def _parse_api_keys() -> dict[str, dict[str, Any]]:
     if not AUTH_API_KEYS_JSON.strip():
         return {}
     try:
-        parsed = json.loads(AUTH_API_KEYS_JSON)
-    except json.JSONDecodeError as exc:
+        parsed = orjson.loads(AUTH_API_KEYS_JSON)
+    except orjson.JSONDecodeError as exc:
         raise RuntimeError("RAG_AUTH_API_KEYS_JSON is not valid JSON") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError("RAG_AUTH_API_KEYS_JSON must be an object")

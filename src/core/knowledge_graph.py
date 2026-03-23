@@ -11,7 +11,7 @@ patterns, stores them in a NetworkX directed graph, and provides query-time
 expansion to augment BM25 search with related terms.
 """
 
-import json
+import orjson
 import logging
 import re
 from pathlib import Path
@@ -422,13 +422,13 @@ class KnowledgeGraphBuilder:
     def save(self, path: Path) -> None:
         """Save graph to JSON."""
         data = nx.node_link_data(self.graph, edges="edges")
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
     @classmethod
     def load(cls, path: Path) -> "KnowledgeGraphBuilder":
         """Load graph from JSON."""
         builder = cls()
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = orjson.loads(path.read_bytes())
         builder.graph = nx.node_link_graph(data, directed=True, edges="edges")
         # Rebuild aliases and case index from node data
         for node, node_data in builder.graph.nodes(data=True):

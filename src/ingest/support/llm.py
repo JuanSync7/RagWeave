@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-import json
+import orjson
 import logging
 
 from src.ingest.common.types import IngestionConfig

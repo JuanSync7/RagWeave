@@ -12,7 +12,7 @@ This module centralizes caching behind a small interface so callers can use
 
 from __future__ import annotations
 
-import json
+import orjson
 import threading
 import time
 from typing import Any
@@ -125,7 +125,7 @@ class RedisCache(CacheProvider):
         raw = self._client.get(key)
         if raw is None:
             return None
-        return json.loads(raw)
+        return orjson.loads(raw)
 
     def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
         """Set a cached value.
@@ -136,7 +136,7 @@ class RedisCache(CacheProvider):
             ttl_seconds: Optional TTL override, in seconds.
         """
         ttl = ttl_seconds if ttl_seconds is not None else CACHE_TTL_SECONDS
-        self._client.set(key, json.dumps(value), ex=max(1, int(ttl)))
+        self._client.set(key, orjson.dumps(value), ex=max(1, int(ttl)))
 
 
 class NoopCache(CacheProvider):

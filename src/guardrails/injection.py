@@ -16,7 +16,7 @@ Requirements references (from internal docs): REQ-201 through REQ-204.
 
 from __future__ import annotations
 
-import json
+import orjson
 import logging
 import re
 from dataclasses import dataclass
@@ -303,7 +303,7 @@ class InjectionDetector:
                         detection_source="nemo_llm",
                         message=REJECTION_MESSAGE,
                     )
-            except (json.JSONDecodeError, ValueError, TypeError) as e:
+            except (orjson.JSONDecodeError, ValueError, TypeError) as e:
                 logger.warning("Failed to parse injection check response: %s", e)
 
         return InjectionResult(verdict=RailVerdict.PASS)

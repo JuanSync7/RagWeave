@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-import json as json_mod
+import orjson as json_mod
 import logging
 import time
 import uuid
@@ -48,7 +48,7 @@ from src.platform.security.tenancy import resolve_tenant_id
 
 
 def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json_mod.dumps(data)}\n\n"
+    return f"event: {event}\ndata: {json_mod.dumps(data).decode()}\n\n"
 
 
 def _aggregate_stage_totals(stage_timings: list[dict]) -> dict:

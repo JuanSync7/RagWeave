@@ -11,7 +11,7 @@ FastAPI endpoints so the HTTP API remains the single production contract.
 
 from __future__ import annotations
 
-import json
+import orjson
 import os
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -73,8 +73,8 @@ def _require_admin_tools_enabled() -> None:
 def _parse_error_payload(status_code: int, body_text: str) -> str:
     """Extract a readable error message from the API error envelope."""
     try:
-        payload = json.loads(body_text)
-    except json.JSONDecodeError:
+        payload = orjson.loads(body_text)
+    except orjson.JSONDecodeError:
         return f"HTTP {status_code}: {body_text}"
     if isinstance(payload, dict):
         error = payload.get("error", {})
@@ -100,7 +100,7 @@ def _request_json(
     base_url = os.environ.get("RAG_API_URL", RAG_API_URL).rstrip("/")
     body = None
     if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
+        body = orjson.dumps(payload)
     req = Request(
         f"{base_url}{path}",
         data=body,
@@ -112,7 +112,7 @@ def _request_json(
             raw = resp.read().decode("utf-8")
             if not raw.strip():
                 return {}
-            return json.loads(raw)
+            return orjson.loads(raw)
     except HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(_parse_error_payload(exc.code, body_text)) from exc

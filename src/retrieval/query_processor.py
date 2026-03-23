@@ -15,7 +15,7 @@ Implements a creation/verification loop:
 Falls back to word-count heuristic if Ollama is unavailable.
 """
 
-import json
+import orjson
 import logging
 import os
 import re
@@ -125,8 +125,8 @@ def _get_kg_terms() -> tuple:
         return _KG_TERMS, _KG_WORD_INDEX
 
     try:
-        with open(KG_PATH, encoding="utf-8") as f:
-            kg_data = json.load(f)
+        with open(KG_PATH, "rb") as f:
+            kg_data = orjson.loads(f.read())
         nodes = kg_data.get("nodes", [])
         # Sort by mention count, filter out noisy short/long entries
         valid = [
@@ -402,7 +402,7 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
                 "confidence": confidence,
                 "reasoning": reasoning,
             }
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
+        except (orjson.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning(
                 "Failed to parse combined JSON: %s. Raw: %s", e, result[:200]
             )

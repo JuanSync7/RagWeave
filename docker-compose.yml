@@ -35,7 +35,7 @@ services:
     image: temporalio/auto-setup:latest
     container_name: rag-temporal
     ports:
-      - "7233:7233"
+      - "${RAG_TEMPORAL_PORT:-7233}:7233"
     environment:
       - DB=postgres12
       - DB_PORT=5432
@@ -50,10 +50,10 @@ services:
     image: temporalio/ui:latest
     container_name: rag-temporal-ui
     ports:
-      - "8080:8080"
+      - "${RAG_TEMPORAL_UI_PORT:-8080}:8080"
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+      - TEMPORAL_ADDRESS=temporal:${RAG_TEMPORAL_PORT:-7233}
+      - TEMPORAL_CORS_ORIGINS=http://localhost:${LANGFUSE_PORT:-3000}
     depends_on:
       - temporal
 

@@ -13,7 +13,7 @@ doesn't have metadata for.
 
 from __future__ import annotations
 
-import json
+import orjson
 import logging
 from typing import Any, Dict, List, Optional
 from urllib.error import URLError
@@ -75,7 +75,7 @@ def _fetch_via_ollama(
     # Strip the "ollama/" prefix if present for the Ollama API
     ollama_model = model_name.removeprefix("ollama/")
     try:
-        payload = json.dumps({"name": ollama_model}).encode("utf-8")
+        payload = orjson.dumps({"name": ollama_model})
         req = Request(
             f"{base_url.rstrip('/')}/api/show",
             data=payload,
@@ -83,8 +83,8 @@ def _fetch_via_ollama(
             method="POST",
         )
         with urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (URLError, OSError, json.JSONDecodeError, ValueError):
+            return orjson.loads(resp.read())
+    except (URLError, OSError, orjson.JSONDecodeError, ValueError):
         return None
 
 

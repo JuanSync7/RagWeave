@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import orjson
 import re
 from typing import Any
 
@@ -17,8 +17,8 @@ def parse_json_object(raw: str) -> dict[str, Any]:
     """Parse a JSON object from plain or fenced markdown text."""
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.IGNORECASE)
     try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError:
+        payload = orjson.loads(cleaned)
+    except orjson.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
 

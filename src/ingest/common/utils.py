@@ -12,7 +12,7 @@ used across pipeline nodes without pulling in heavy dependencies.
 from __future__ import annotations
 
 import hashlib
-import json
+import orjson
 import logging
 import time
 from pathlib import Path
@@ -52,9 +52,9 @@ def load_manifest(path: Path = INGESTION_MANIFEST_PATH) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        raw_manifest = json.loads(path.read_text(encoding="utf-8"))
+        raw_manifest = orjson.loads(path.read_bytes())
         return raw_manifest if isinstance(raw_manifest, dict) else {}
-    except json.JSONDecodeError as exc:
+    except orjson.JSONDecodeError as exc:
         backup = path.with_name(f"{path.name}.corrupt.{int(time.time())}")
         try:
             path.replace(backup)
@@ -78,10 +78,7 @@ def save_manifest(manifest: dict[str, Any], path: Path = INGESTION_MANIFEST_PATH
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.tmp")
-    tmp_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    tmp_path.write_bytes(orjson.dumps(manifest, option=orjson.OPT_INDENT_2))
     tmp_path.replace(path)
 
 

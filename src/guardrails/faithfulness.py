@@ -16,7 +16,7 @@ Requirements references (from internal docs): REQ-501 through REQ-505.
 
 from __future__ import annotations
 
-import json
+import orjson
 import logging
 import re
 from dataclasses import dataclass, field
@@ -299,7 +299,7 @@ class FaithfulnessChecker:
             # Try to parse as JSON array
             response = response.strip()
             if response.startswith("["):
-                parsed = json.loads(response)
+                parsed = orjson.loads(response)
             else:
                 parsed_obj = parse_json_object(response)
                 parsed = parsed_obj if isinstance(parsed_obj, list) else [parsed_obj]
@@ -313,7 +313,7 @@ class FaithfulnessChecker:
                 for item in parsed
                 if isinstance(item, dict)
             ]
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
+        except (orjson.JSONDecodeError, TypeError, ValueError) as e:
             logger.warning("Failed to parse faithfulness response: %s", e)
             return []
         except Exception as e:

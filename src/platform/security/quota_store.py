@@ -11,7 +11,7 @@ local JSON file for small deployments and development.
 
 from __future__ import annotations
 
-import json
+import orjson
 import threading
 from pathlib import Path
 from typing import Any
@@ -41,7 +41,7 @@ def _read_store(path: Path = AUTH_QUOTAS_STORE_PATH) -> dict[str, dict[str, Any]
     """
     if not path.exists():
         return {"tenants": {}, "projects": {}}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = orjson.loads(path.read_bytes())
     if not isinstance(data, dict):
         return {"tenants": {}, "projects": {}}
     data.setdefault("tenants", {})
@@ -58,7 +58,7 @@ def _write_store(payload: dict[str, dict[str, Any]], path: Path = AUTH_QUOTAS_ST
     """
     _ensure_parent(path)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS))
     tmp.replace(path)
 
 

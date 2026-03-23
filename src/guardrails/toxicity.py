@@ -15,7 +15,7 @@ Requirements references (from internal docs): REQ-401 through REQ-404.
 
 from __future__ import annotations
 
-import json
+import orjson
 import logging
 import re
 from dataclasses import dataclass
@@ -161,7 +161,7 @@ class ToxicityFilter:
 
             # Ambiguous response — try to parse as JSON for backward compat
             try:
-                parsed = json.loads(result)
+                parsed = orjson.loads(result)
                 score = float(parsed.get("toxicity_score", 0.0))
                 score = max(0.0, min(1.0, score))
                 if score >= self._threshold:
@@ -171,7 +171,7 @@ class ToxicityFilter:
                         message=REJECTION_MESSAGE,
                     )
                 return ToxicityResult(verdict=RailVerdict.PASS, score=score)
-            except (json.JSONDecodeError, ValueError, TypeError):
+            except (orjson.JSONDecodeError, ValueError, TypeError):
                 pass
 
         return ToxicityResult(verdict=RailVerdict.PASS, score=0.0)

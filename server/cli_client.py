@@ -16,7 +16,7 @@ Usage:
     python -m server.cli_client --server http://localhost:8000
 """
 
-import json
+import orjson
 import logging
 import os
 import re
@@ -293,7 +293,7 @@ def send_query(server: str, query: str, filters: dict) -> dict:
         "conversation_id": _CURRENT_CONVERSATION_ID,
         "memory_enabled": _MEMORY_ENABLED,
     }
-    data = json.dumps(payload).encode("utf-8")
+    data = orjson.dumps(payload)
     headers = {"Content-Type": "application/json"}
     if API_KEY:
         headers["X-API-Key"] = API_KEY
@@ -306,7 +306,7 @@ def send_query(server: str, query: str, filters: dict) -> dict:
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        return orjson.loads(resp.read())
 
 
 def send_query_stream(server: str, query: str, filters: dict):
@@ -317,7 +317,7 @@ def send_query_stream(server: str, query: str, filters: dict):
         "conversation_id": _CURRENT_CONVERSATION_ID,
         "memory_enabled": _MEMORY_ENABLED,
     }
-    data = json.dumps(payload).encode("utf-8")
+    data = orjson.dumps(payload)
     headers = {
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
@@ -340,7 +340,7 @@ def send_query_stream(server: str, query: str, filters: dict):
             if line.startswith("event: "):
                 current_event = line[7:]
             elif line.startswith("data: ") and current_event:
-                yield current_event, json.loads(line[6:])
+                yield current_event, orjson.loads(line[6:])
                 current_event = None
     finally:
         resp.close()
@@ -359,7 +359,7 @@ def check_server(server: str, retries: int = 5, backoff: float = 1.0) -> dict | 
             elif BEARER_TOKEN:
                 req.add_header("Authorization", f"Bearer {BEARER_TOKEN}")
             with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = orjson.loads(resp.read())
                 logger.info(
                     "Health check OK (attempt %d/%d): %s", attempt + 1, retries, data
                 )
@@ -375,7 +375,7 @@ def check_server(server: str, retries: int = 5, backoff: float = 1.0) -> dict | 
 
 
 def _request_server_json(server: str, method: str, path: str, payload: dict | None = None) -> dict:
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    data = orjson.dumps(payload) if payload is not None else None
     headers = {"Content-Type": "application/json"}
     if API_KEY:
         headers["X-API-Key"] = API_KEY
@@ -389,7 +389,7 @@ def _request_server_json(server: str, method: str, path: str, payload: dict | No
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw.strip() else {}
+        return orjson.loads(raw) if raw.strip() else {}
 
 
 def _list_conversations(server: str, limit: int = 20) -> list[dict]:
@@ -751,7 +751,7 @@ def _cmd_raw_health(_: str = ""):
     if health is None:
         print(f"  {B_RED}✗{RESET} No health payload available (server unreachable)\n")
         return
-    print(json.dumps(health, indent=2))
+    print(orjson.dumps(health, option=orjson.OPT_INDENT_2).decode())
     print()
 
 
@@ -1036,7 +1036,7 @@ def main() -> None:
             elapsed = time.time() - start
             print(f"\r  {B_RED}✗{RESET} HTTP {exc.code} {DIM}({elapsed:.1f}s){RESET}        ")
             try:
-                body = json.loads(exc.read().decode("utf-8"))
+                body = orjson.loads(exc.read())
                 print(f"    {DIM}{body.get('detail', str(exc))}{RESET}")
             except Exception:
                 print(f"    {DIM}{exc}{RESET}")

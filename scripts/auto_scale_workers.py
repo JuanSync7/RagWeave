@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import orjson
 import subprocess
 import sys
 import time
@@ -30,7 +30,7 @@ def _query_prometheus(base_url: str, promql: str, timeout_s: int = 5) -> Optiona
     endpoint = f"{base_url.rstrip('/')}/api/v1/query?{parse.urlencode({'query': promql})}"
     try:
         with request.urlopen(endpoint, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+            payload = orjson.loads(resp.read())
     except Exception:
         return None
     if payload.get("status") != "success":

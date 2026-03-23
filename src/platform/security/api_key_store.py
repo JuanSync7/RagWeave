@@ -12,7 +12,7 @@ keeping only a SHA-256 hash of the raw key at rest.
 from __future__ import annotations
 
 import hashlib
-import json
+import orjson
 import secrets
 import threading
 import time
@@ -40,7 +40,7 @@ def _read_store(path: Path = AUTH_API_KEYS_STORE_PATH) -> dict[str, dict[str, An
     """
     if not path.exists():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = orjson.loads(path.read_bytes())
     if isinstance(data, dict):
         return data
     return {}
@@ -55,7 +55,7 @@ def _write_store(payload: dict[str, dict[str, Any]], path: Path = AUTH_API_KEYS_
     """
     _ensure_parent(path)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS))
     tmp.replace(path)
 
 

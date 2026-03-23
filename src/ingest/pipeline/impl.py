@@ -16,7 +16,7 @@ over a file or directory, including:
 from __future__ import annotations
 
 import hashlib
-import json
+import orjson
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -161,10 +161,7 @@ def _write_refactor_mirror_artifacts(
             for idx, chunk in enumerate(result.get("chunks", []))
         ],
     }
-    mapping_path.write_text(
-        json.dumps(mapping_payload, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    mapping_path.write_bytes(orjson.dumps(mapping_payload, option=orjson.OPT_INDENT_2))
 
 
 def _normalize_manifest_entries(
@@ -511,9 +508,8 @@ def ingest_directory(
                     {"chunk_index": idx, "text": chunk.text, "metadata": chunk.metadata}
                     for idx, chunk in enumerate(result["chunks"])
                 ]
-                (PROCESSED_DIR / f"{export_stem}.chunks.json").write_text(
-                    json.dumps(chunk_payload, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
+                (PROCESSED_DIR / f"{export_stem}.chunks.json").write_bytes(
+                    orjson.dumps(chunk_payload, option=orjson.OPT_INDENT_2)
                 )
 
         if runtime.kg_builder is not None:
