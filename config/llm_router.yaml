@@ -4,13 +4,17 @@
 #
 # When multiple entries share the same model_name, the Router provides
 # automatic fallback + load balancing between them.
+#
+# api_base uses "os.environ/RAG_OLLAMA_URL" so LiteLLM reads the env var
+# at runtime.  Change the Ollama port in .env (RAG_OLLAMA_PORT) and this
+# config picks it up automatically — no edits needed here.
 
 model_list:
   # "default" alias — used by retrieval, ingestion LLM, memory compaction
   - model_name: "default"
     litellm_params:
       model: "ollama/qwen2.5:3b"
-      api_base: "http://localhost:11434"
+      api_base: "os.environ/RAG_OLLAMA_URL"
 
   # Uncomment to add a cloud fallback for "default":
   # - model_name: "default"
@@ -22,13 +26,13 @@ model_list:
   - model_name: "query"
     litellm_params:
       model: "ollama/qwen2.5:3b"
-      api_base: "http://localhost:11434"
+      api_base: "os.environ/RAG_OLLAMA_URL"
 
   # "vision" alias — used by ingestion multimodal processing
   - model_name: "vision"
     litellm_params:
       model: "ollama/qwen2.5vl:3b"
-      api_base: "http://localhost:11434"
+      api_base: "os.environ/RAG_OLLAMA_URL"
 
   # "smart" alias — higher-quality model for complex reasoning tasks
   # - model_name: "smart"
@@ -40,7 +44,7 @@ model_list:
   # - model_name: "fast"
   #   litellm_params:
   #     model: "ollama/qwen2.5:1.5b"
-  #     api_base: "http://localhost:11434"
+  #     api_base: "os.environ/RAG_OLLAMA_URL"
 
 router_settings:
   routing_strategy: "simple-shuffle"

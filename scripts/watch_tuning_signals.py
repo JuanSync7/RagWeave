@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import orjson
+import os
 import subprocess
 import sys
 import time
@@ -277,7 +278,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Monitor RAG worker scaling/concurrency signals and emit tuning alerts."
     )
-    p.add_argument("--prometheus-url", default="http://localhost:9091")
+    p.add_argument(
+        "--prometheus-url",
+        default=f"http://localhost:{os.environ.get('PROMETHEUS_HOST_PORT', '9091')}",
+    )
     p.add_argument("--interval-seconds", type=int, default=30)
     p.add_argument("--once", action="store_true")
     p.add_argument("--webhook-url", default="")

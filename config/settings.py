@@ -93,11 +93,16 @@ GLINER_ENTITY_LABELS = [
     "programming language", "data structure",
 ]
 
+# --- Service Ports (canonical defaults — override via .env) ---
+_OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
+_REDIS_PORT = os.environ.get("RAG_REDIS_PORT", "6379")
+_TEMPORAL_PORT = os.environ.get("RAG_TEMPORAL_PORT", "7233")
+
 # --- LLM Generation (Ollama — legacy) ---
 GENERATION_ENABLED = os.environ.get(
     "RAG_GENERATION_ENABLED", "true"
 ).lower() in ("true", "1", "yes")
-OLLAMA_BASE_URL = os.environ.get("RAG_OLLAMA_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = os.environ.get("RAG_OLLAMA_URL", f"http://localhost:{_OLLAMA_PORT}")
 OLLAMA_MODEL = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
 GENERATION_MAX_TOKENS = int(os.environ.get("RAG_GENERATION_MAX_TOKENS", "1024"))
 GENERATION_TEMPERATURE = float(os.environ.get("RAG_GENERATION_TEMPERATURE", "0.3"))
@@ -105,7 +110,7 @@ GENERATION_TEMPERATURE = float(os.environ.get("RAG_GENERATION_TEMPERATURE", "0.3
 # --- LLM Provider (LiteLLM) ─────────────────────────────────────────
 # Unified config. Falls back to legacy Ollama vars for backward compat.
 _legacy_ollama_model = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
-_legacy_ollama_url = os.environ.get("RAG_OLLAMA_URL", "http://localhost:11434")
+_legacy_ollama_url = os.environ.get("RAG_OLLAMA_URL", f"http://localhost:{_OLLAMA_PORT}")
 
 LLM_MODEL = os.environ.get(
     "RAG_LLM_MODEL",
@@ -168,12 +173,12 @@ RETRY_BACKOFF_MULTIPLIER = float(
 )
 
 # --- Temporal (optional) ---
-TEMPORAL_TARGET_HOST = os.environ.get("RAG_TEMPORAL_TARGET_HOST", "localhost:7233")
+TEMPORAL_TARGET_HOST = os.environ.get("RAG_TEMPORAL_TARGET_HOST", f"localhost:{_TEMPORAL_PORT}")
 TEMPORAL_TASK_QUEUE = os.environ.get("RAG_TEMPORAL_TASK_QUEUE", "rag-reliability")
 
 # --- Server ---
 RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
-RAG_API_URL = os.environ.get("RAG_API_URL", "http://localhost:8000")
+RAG_API_URL = os.environ.get("RAG_API_URL", f"http://localhost:{RAG_API_PORT}")
 RAG_WORKER_CONCURRENCY = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
 RAG_API_MAX_INFLIGHT_REQUESTS = int(os.environ.get("RAG_API_MAX_INFLIGHT_REQUESTS", "64"))
 RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS = int(
@@ -235,7 +240,7 @@ AUTH_QUOTAS_STORE_PATH = Path(
 CACHE_ENABLED = os.environ.get("RAG_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
 CACHE_PROVIDER = os.environ.get("RAG_CACHE_PROVIDER", "memory")
 CACHE_TTL_SECONDS = int(os.environ.get("RAG_CACHE_TTL_SECONDS", "120"))
-CACHE_REDIS_URL = os.environ.get("RAG_CACHE_REDIS_URL", "redis://localhost:6379/0")
+CACHE_REDIS_URL = os.environ.get("RAG_CACHE_REDIS_URL", f"redis://localhost:{_REDIS_PORT}/0")
 
 # --- Conversation memory ---
 MEMORY_ENABLED = os.environ.get("RAG_MEMORY_ENABLED", "true").lower() in ("true", "1", "yes")

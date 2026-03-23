@@ -57,13 +57,23 @@ async def _run(listen_host: str, listen_port: int, target_host: str, target_port
 
 
 def main() -> int:
+    import os
+
     parser = argparse.ArgumentParser(
         description="Expose localhost Ollama to Docker via host-gateway reachable port."
     )
     parser.add_argument("--listen-host", default="0.0.0.0")
-    parser.add_argument("--listen-port", type=int, default=11435)
+    parser.add_argument(
+        "--listen-port",
+        type=int,
+        default=int(os.environ.get("RAG_OLLAMA_PROXY_PORT", "11435")),
+    )
     parser.add_argument("--target-host", default="127.0.0.1")
-    parser.add_argument("--target-port", type=int, default=11434)
+    parser.add_argument(
+        "--target-port",
+        type=int,
+        default=int(os.environ.get("RAG_OLLAMA_PORT", "11434")),
+    )
     args = parser.parse_args()
     try:
         asyncio.run(

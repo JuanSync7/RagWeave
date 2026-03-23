@@ -62,22 +62,25 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+      args:
+        RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
-    command: uvicorn server.api:app --host 0.0.0.0 --port 8000
+    command: uvicorn server.api:app --host 0.0.0.0 --port ${RAG_API_PORT:-8000}
     ports:
-      - "${RAG_API_HOST_PORT:-8000}:8000"
+      - "${RAG_API_HOST_PORT:-8000}:${RAG_API_PORT:-8000}"
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
+      - RAG_API_PORT=${RAG_API_PORT:-8000}
+      - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
       # API stream-generation needs Ollama access too.
-      - RAG_OLLAMA_URL=${RAG_OLLAMA_URL:-http://host.docker.internal:11435}
+      - RAG_OLLAMA_URL=http://host.docker.internal:${RAG_OLLAMA_PROXY_PORT:-11435}
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3000}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:${LANGFUSE_PORT:-3000}}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
-      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - RAG_MEMORY_PROVIDER=redis
-      - RAG_MEMORY_REDIS_URL=redis://rag-redis:6379/0
+      - RAG_MEMORY_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
       - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
       - RAG_AUTH_OIDC_ISSUER=${RAG_AUTH_OIDC_ISSUER:-}
@@ -94,7 +97,7 @@ services:
     volumes:
       - ./.runtime:/app/.runtime
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${RAG_API_PORT:-8000}/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -114,19 +117,19 @@ services:
       python -m server.worker
       '
     environment:
-      - RAG_TEMPORAL_TARGET_HOST=temporal:7233
+      - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
       # Ollama is expected to run on the host in this setup.
-      # Default port 11435 is a local proxy that forwards to 127.0.0.1:11434.
-      - RAG_OLLAMA_URL=${RAG_OLLAMA_URL:-http://host.docker.internal:11435}
+      # The proxy port forwards to the actual Ollama port on 127.0.0.1.
+      - RAG_OLLAMA_URL=http://host.docker.internal:${RAG_OLLAMA_PROXY_PORT:-11435}
       - RAG_EMBEDDING_MODEL=/models/baai/bge-m3
       - RAG_RERANKER_MODEL=/models/baai/bge-reranker-v2-m3
       - RAG_WORKER_CONCURRENCY=4
       - RAG_OBSERVABILITY_PROVIDER=${RAG_OBSERVABILITY_PROVIDER:-noop}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:3000}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://host.docker.internal:${LANGFUSE_PORT:-3000}}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
-      - RAG_CACHE_REDIS_URL=redis://rag-redis:6379/0
+      - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
     depends_on:
       - temporal
       - rag-redis
@@ -146,7 +149,7 @@ services:
     image: amir20/dozzle:latest
     container_name: rag-monitor
     ports:
-      - "9999:8080"
+      - "${DOZZLE_HOST_PORT:-9999}:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
@@ -168,7 +171,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
     ports:
-      - "9091:9090"
+      - "${PROMETHEUS_HOST_PORT:-9091}:9090"
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -184,7 +187,7 @@ services:
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
     ports:
-      - "9093:9093"
+      - "${ALERTMANAGER_HOST_PORT:-9093}:9093"
     volumes:
       - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     restart: unless-stopped
@@ -194,7 +197,7 @@ services:
     image: grafana/grafana:latest
     container_name: rag-grafana
     ports:
-      - "3001:3000"
+      - "${GRAFANA_HOST_PORT:-3001}:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -277,7 +280,7 @@ services:
     volumes:
       - langfuse-minio-data:/data
     ports:
-      - "9090:9000"
+      - "${MINIO_HOST_PORT:-9090}:9000"
     restart: unless-stopped
 
   langfuse-worker:
@@ -374,7 +377,7 @@ services:
       - REDIS_PORT=6379
       - REDIS_AUTH=${LANGFUSE_REDIS_AUTH:-myredissecret}
     ports:
-      - "3000:3000"
+      - "${LANGFUSE_PORT:-3000}:3000"
     restart: unless-stopped
 
 volumes:

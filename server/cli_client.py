@@ -65,7 +65,8 @@ B_WHITE = f"{BOLD}{WHITE}"
 _BG_SEL = "\033[48;5;237m"
 
 
-DEFAULT_SERVER = os.environ.get("RAG_API_URL", "http://localhost:8000")
+_API_PORT = os.environ.get("RAG_API_PORT", "8000")
+DEFAULT_SERVER = os.environ.get("RAG_API_URL", f"http://localhost:{_API_PORT}")
 API_KEY = os.environ.get("RAG_API_KEY", "").strip()
 BEARER_TOKEN = os.environ.get("RAG_BEARER_TOKEN", "").strip()
 _FILTER_PAT = re.compile(r"\b(source|section):(\S+)\s*", re.IGNORECASE)

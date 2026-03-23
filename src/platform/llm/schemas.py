@@ -9,8 +9,11 @@ These dataclasses define the minimal configuration and response envelope used
 by the platform LLM provider facade.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+_OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
 
 
 @dataclass(frozen=True)
@@ -18,7 +21,7 @@ class LLMConfig:
     """Resolved LLM configuration built from env vars or YAML Router config."""
 
     model: str = "ollama/qwen2.5:3b"
-    api_base: Optional[str] = "http://localhost:11434"
+    api_base: Optional[str] = f"http://localhost:{_OLLAMA_PORT}"
     api_key: Optional[str] = None
     max_tokens: int = 2048
     temperature: float = 0.2

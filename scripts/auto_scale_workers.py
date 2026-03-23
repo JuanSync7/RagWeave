@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import orjson
+import os
 import subprocess
 import sys
 import time
@@ -157,7 +158,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Auto-scale rag-worker replicas with conservative hysteresis."
     )
-    p.add_argument("--prometheus-url", default="http://localhost:9091")
+    p.add_argument(
+        "--prometheus-url",
+        default=f"http://localhost:{os.environ.get('PROMETHEUS_HOST_PORT', '9091')}",
+    )
     p.add_argument("--interval-seconds", type=int, default=30)
     p.add_argument("--min-replicas", type=int, default=1)
     p.add_argument("--max-replicas", type=int, default=6)

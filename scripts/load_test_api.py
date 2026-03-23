@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import orjson
+import os
 import statistics
 import sys
 import time
@@ -97,7 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a concurrent /query load test against the RAG API."
     )
-    parser.add_argument("--url", default="http://localhost:8000")
+    parser.add_argument(
+        "--url",
+        default=os.environ.get("RAG_API_URL", f"http://localhost:{os.environ.get('RAG_API_PORT', '8000')}"),
+    )
     parser.add_argument("--query", default="What is retrieval augmented generation?")
     parser.add_argument("--total-requests", type=int, default=500)
     parser.add_argument("--concurrency", type=int, default=100)

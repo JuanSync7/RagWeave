@@ -129,7 +129,8 @@ async def run_demo() -> None:
         print("Install it with: uv add nemoguardrails")
         sys.exit(1)
 
-    base_url = os.environ.get("RAG_OLLAMA_URL", "http://localhost:11434")
+    _port = os.environ.get("RAG_OLLAMA_PORT", "11434")
+    base_url = os.environ.get("RAG_OLLAMA_URL", f"http://localhost:{_port}")
     model = os.environ.get("RAG_OLLAMA_MODEL", "qwen2.5:3b")
 
     # Create a temporary config directory with our Colang + YAML
