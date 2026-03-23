@@ -136,11 +136,20 @@ receives a deterministic ID derived from the document `source_key` and chunk ord
    as primary split points.
 2. Implement recursive character splitter as secondary fallback when a section exceeds the
    configured chunk size.
-3. Generate deterministic chunk IDs: `SHA-256(source_key + ":" + str(ordinal))[:24]` — same
-   input always produces the same IDs (see Part B, Snippet B.3).
+3. Generate deterministic chunk IDs: `SHA-256(source_key + ":" + str(ordinal) + ":" + content_hash)[:24]`
+   where `content_hash = SHA-256(chunk_text)[:16]` — same input always produces the same IDs
+   (see Part B, Snippet B.3). The content hash component ensures that if a chunk's content
+   changes during re-chunking (while keeping the same ordinal position), the ID changes
+   accordingly, enabling accurate change detection per FR-605.
 4. Attach chunk metadata: ordinal, `source_key`, character offsets, heading path context.
 5. Validate chunk sizes against configured `min_chunk_tokens` and `max_chunk_tokens`; split
    oversized chunks and log undersized ones.
+6. **Table atomic chunking (FR-604):** Treat tables as indivisible chunks. If a table exceeds
+   `max_chunk_tokens`, split by row groups while prepending the header row to each resulting
+   chunk. Respect the `tables.keep_atomic` configuration flag.
+7. **Adjacency links (FR-606):** After chunking, assign `previous_chunk_id` and
+   `next_chunk_id` to each chunk. First chunk has `previous_chunk_id = null`; last chunk has
+   `next_chunk_id = null`. These links enable sequential navigation at retrieval time.
 
 **Testing Strategy:** Unit tests asserting deterministic output (same input always produces
 same chunk IDs); property tests on chunk size bounds.
@@ -156,7 +165,7 @@ the embedding API.
 
 **Requirements Covered:** FR-1201, FR-1202, FR-1203, FR-1204
 
-**Dependencies:** Task 1.6 (or Task 2.2 when enrichment is enabled)
+**Dependencies:** Task 1.6 (or Task 2.2a when enrichment is enabled)
 
 **Complexity:** M
 
@@ -167,6 +176,10 @@ the embedding API.
 4. Implement BYOM mode: when `config.byom_mode = true`, accept pre-computed vector field from
    chunk state instead of calling the API.
 5. Attach embedding vectors and model metadata (`model_name`, `dimension`) to chunk state.
+6. **Dimensionality validation (FR-1203):** After generating embeddings, validate that the
+   output vector dimension matches the expected dimension from model configuration. If mismatch
+   detected, halt the pipeline with a clear error message naming the expected vs actual
+   dimensions.
 
 **Testing Strategy:** Unit tests with mocked embedding API; integration test with live API
 behind a feature flag. Verify BYOM mode bypasses the API call entirely.
@@ -197,6 +210,14 @@ all existing chunks for the document before inserting fresh ones.
 4. Add retry logic for transient vector store errors.
 5. Verify idempotency: re-upserting the same chunk ID overwrites, not duplicates. Verify point
    count does not increase on re-run of an unchanged document.
+6. **Asymmetric embedding prefixes (FR-1206):** Support configurable document and query
+   prefixes for asymmetric embedding models (e.g., `passage:` for documents, `query:` for
+   queries). Read prefix configuration from `embedding.document_prefix` and
+   `embedding.query_prefix` config keys. Apply document prefix during ingestion; query prefix
+   is applied at retrieval time.
+7. **Hybrid search setup (FR-1207):** Configure BM25 keyword indexing alongside vector
+   indexing in the vector store. Enable via `storage.enable_bm25` configuration flag (default:
+   `true`). The BM25 index uses the same `enriched_content` text as the vector embedding.
 
 **Testing Strategy:** Integration tests against a Weaviate test collection; verify point count
 does not increase on re-upsert; verify stale chunks are gone after re-ingestion of a changed
@@ -288,6 +309,10 @@ boundaries. Falls back to rule-based chunking on LLM failure or timeout.
 4. Cache LLM chunking decisions keyed by `clean_hash` + section ordinal to avoid redundant
    calls on unchanged documents.
 5. Add token usage tracking to the run report.
+6. **Content type tagging (FR-609):** Tag each chunk with its dominant content type: `text`,
+   `table`, `figure`, `code`, `equation`, `list`, or `heading`. Derive the tag from the
+   chunk's source structure (e.g., Markdown table syntax -> `table`, code fences -> `code`).
+   Store as `content_type` field in chunk metadata.
 
 **Testing Strategy:** Unit tests with mocked LLM; A/B evaluation comparing rule-based vs. LLM
 chunk quality on a held-out document set.
@@ -297,45 +322,75 @@ section-level parallelism.
 
 ---
 
-### Task 2.2 — Node 7 + 8: Chunk Enrichment and Metadata Generation
+### Task 2.2a — Node 7: Chunk Enrichment (FR-701–FR-705)
 
 **Description:** Implement Node 7 (`src/ingest/nodes/chunk_enrichment.py`) for boundary
-context attachment and metadata header construction, and Node 8
-(`src/ingest/nodes/metadata_generation.py`) for LLM-based keyword and entity extraction.
-These two stages run sequentially and together constitute the enrichment phase.
+context attachment, metadata header construction, and cross-chunk overlap. This stage
+prepares the enriched content that will be embedded.
 
-**Requirements Covered:** FR-701, FR-702, FR-703, FR-704, FR-705, FR-801, FR-802, FR-803, FR-804, FR-805, FR-806
+**Requirements Covered:** FR-701, FR-702, FR-703, FR-704, FR-705
 
 **Dependencies:** Task 1.6
 
 **Complexity:** M
 
 **Subtasks:**
-1. **Node 7 — Chunk Enrichment:** Attach `context_header` to each chunk: a brief text header
+1. **Boundary context window:** Attach `context_header` to each chunk: a brief text header
    summarising the document source, section path, and review tier (FR-701, FR-702).
-2. **Node 7:** Compute `enriched_content = context_header + chunk_text` — this is the text
-   that will be embedded (FR-703). Store `context_header` separately in metadata for retrieval
+2. **Enriched content computation:** Compute `enriched_content = chunk_text + boundary_context`
+   — this is the text that will be embedded (FR-703). The `context_header` (document title,
+   section path, source metadata) is stored alongside the chunk for retrieval display but is
+   NOT included in the embedding input by default (FR-702). Only the chunk text plus boundary
+   context from adjacent sections is embedded. A configuration flag `embed_context_header`
+   (default: `false`) can override this behavior.
+3. **Context header assembly:** Store `context_header` separately in metadata for retrieval
    display (FR-704).
-3. **Node 7:** Add boundary overlap: include the last N tokens from the previous chunk and
-   first N tokens from the next chunk as optional context (FR-705).
-4. **Node 8 — Metadata Generation:** Use an LLM to extract structured metadata per chunk:
+4. **Section path breadcrumb:** Include the full heading path (e.g., `# Title > ## Section >
+   ### Subsection`) in the context header for hierarchical context (FR-701).
+5. **Cross-chunk overlap:** Add boundary overlap: include the last N tokens from the previous
+   chunk and first N tokens from the next chunk as optional context (FR-705).
+
+**Testing Strategy:** Unit tests verifying `enriched_content` contains chunk text plus boundary
+context but not context header by default; integration test verifying context header is stored
+in metadata payload.
+
+---
+
+### Task 2.2b — Node 8: Metadata Generation (FR-801–FR-806)
+
+**Description:** Implement Node 8 (`src/ingest/nodes/metadata_generation.py`) for LLM-based
+keyword and entity extraction, domain vocabulary validation, and document-level summary
+aggregation. This stage runs after chunk enrichment and adds structured metadata to each chunk.
+
+**Requirements Covered:** FR-801, FR-802, FR-803, FR-804, FR-805, FR-806
+
+**Dependencies:** Task 2.2a
+
+**Complexity:** M
+
+**Subtasks:**
+1. **LLM keyword extraction:** Use an LLM to extract structured metadata per chunk:
    title, summary, keywords, topic tags (FR-801).
-5. **Node 8:** Validate extracted keywords against the domain vocabulary; retain only
-   vocabulary-validated keywords for the BM25 index field; use TF-IDF fallback when LLM fails
+2. **TF-IDF fallback (FR-805):** When the LLM fails or times out, fall back to TF-IDF-based
+   keyword extraction to ensure every chunk has keywords.
+3. **BM25 keyword validation (FR-803):** Validate extracted keywords against the domain
+   vocabulary; retain only vocabulary-validated keywords for the BM25 index field
    (FR-802, FR-803, FR-804).
-6. **Node 8:** Generate a document-level summary by aggregating chunk summaries (FR-805,
-   FR-806).
+4. **Domain vocabulary injection (FR-806):** Inject domain vocabulary terms that appear in the
+   chunk text but were not extracted by the LLM, ensuring domain coverage.
+5. **Document-level summary aggregation:** Generate a document-level summary by aggregating
+   chunk summaries (FR-805, FR-806).
 
 **Testing Strategy:** Unit tests with mocked LLM verifying JSON schema compliance; integration
-test verifying keywords appear in the Weaviate payload and that `enriched_content` contains the
-context header prepended to chunk text.
+test verifying keywords appear in the Weaviate payload; test TF-IDF fallback activates on LLM
+failure.
 
 ---
 
 ### Task 2.4 — Domain Vocabulary System
 
 **Description:** Implement the domain vocabulary loader and management utilities. The vocabulary
-is a curated list of domain-specific terms used for keyword validation (Task 2.2) and query
+is a curated list of domain-specific terms used for keyword validation (Task 2.2b) and query
 expansion in retrieval. Stored as a versioned YAML file (`domain_vocabulary.yaml`).
 
 **Requirements Covered:** FR-803, FR-804
@@ -371,7 +426,7 @@ documents.
 
 **Requirements Covered:** FR-901, FR-902, FR-903, FR-904, FR-905
 
-**Dependencies:** Task 2.2
+**Dependencies:** Task 2.2b
 
 **Complexity:** M
 
@@ -388,36 +443,94 @@ creation in Weaviate payload.
 
 ---
 
-### Task 3.3 — Nodes 10 & 13: Knowledge Graph Construction and Storage
+### Task 3.3a — Node 10: Triple Extraction (FR-1001–FR-1009)
 
 **Description:** Implement Node 10 (`src/ingest/nodes/knowledge_graph_extraction.py`) for
-entity and relation triple extraction, and Node 13 (`src/ingest/nodes/knowledge_graph_storage.py`)
-for writing triples to the graph store. Node 10 uses an LLM to extract structured
-(subject, predicate, object) triples; Node 13 upserts them into the graph database.
+LLM-based entity and relation triple extraction. Extracts structured (subject, predicate,
+object) triples from enriched chunks with provenance tracking and structural fallback.
 
-**Requirements Covered:** FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009, FR-1301, FR-1302, FR-1303, FR-1304
+**Requirements Covered:** FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009
 
-**Dependencies:** Task 2.2
+**Dependencies:** Task 2.2a
 
 **Complexity:** L
 
 **Subtasks:**
-1. Design the entity/relation extraction prompt: output structured JSON triples with subject,
-   predicate, object, and provenance chunk ID.
-2. Implement triple normalisation: entity deduplication and canonical form resolution.
-3. Implement the graph store writer (Weaviate cross-references as v1; Neo4j as planned v2
-   upgrade path — see FR-1301).
-4. Add provenance tracking: each triple includes the chunk ID from which it was extracted
-   (FR-1302).
-5. Wire Nodes 10 and 13 into the graph with conditional activation via feature flag.
-6. Implement KG re-ingestion: on re-embedding, delete existing triples for the document before
-   inserting fresh ones (FR-1303, FR-1304).
+1. **LLM-based triple extraction:** Design the entity/relation extraction prompt: output
+   structured JSON triples with subject, predicate, object, and provenance chunk ID (FR-1001,
+   FR-1002).
+2. **Entity normalization:** Normalize entity surface forms to canonical representations
+   (e.g., casing, abbreviation expansion) (FR-1003, FR-1004).
+3. **Relation typing:** Classify extracted relations into a controlled vocabulary of relation
+   types (FR-1005, FR-1006).
+4. **Provenance tracking:** Each triple includes the chunk ID from which it was extracted
+   (FR-1008).
+5. **Structural triple fallback (FR-1007):** When the LLM fails or times out, extract triples
+   from structural cues (e.g., Markdown headings as entities, list items as relations) to
+   ensure baseline coverage.
+6. **Conditional activation:** Wire Node 10 into the graph with conditional activation via
+   feature flag (FR-1009).
 
-**Testing Strategy:** Unit tests with mocked LLM; integration tests verifying triples in graph
-store; evaluate extraction precision on annotated test set.
+**Testing Strategy:** Unit tests with mocked LLM verifying triple JSON schema; evaluate
+extraction precision on annotated test set.
 
-**Risks:** Entity deduplication is inherently noisy; plan for iterative prompt refinement. Graph
-store migration (Weaviate → Neo4j v2) must be treated as a schema migration event.
+**Risks:** Entity deduplication is inherently noisy; plan for iterative prompt refinement.
+
+---
+
+### Task 3.3b — Entity Consolidation
+
+**Description:** Implement entity consolidation as a support module used by both triple
+extraction and graph storage. Handles entity deduplication, alias resolution, and confidence
+scoring for entity merges across chunks and documents.
+
+**Requirements Covered:** FR-1003, FR-1004, FR-1005
+
+**Dependencies:** Task 3.3a
+
+**Complexity:** M
+
+**Subtasks:**
+1. **Entity deduplication:** Detect and merge duplicate entities across chunks using
+   string similarity and embedding-based matching.
+2. **Alias resolution:** Maintain an alias table mapping variant surface forms to canonical
+   entity identifiers (e.g., "ML" -> "Machine Learning").
+3. **Confidence scoring for entity merges:** Assign confidence scores to proposed entity merges
+   based on string similarity, co-occurrence frequency, and context overlap. Only merge above
+   a configurable confidence threshold.
+
+**Testing Strategy:** Unit tests with known duplicate entity sets; verify merge decisions and
+confidence scores on synthetic entity pairs.
+
+---
+
+### Task 3.3c — Node 13: Graph Store Writer (FR-1301–FR-1304)
+
+**Description:** Implement Node 13 (`src/ingest/nodes/knowledge_graph_storage.py`) for writing
+consolidated triples to the graph store. Supports Weaviate cross-references as the primary
+backend with an optional Neo4j backend, and handles re-ingestion cleanup.
+
+**Requirements Covered:** FR-1301, FR-1302, FR-1303, FR-1304
+
+**Dependencies:** Task 3.3a, Task 3.3b
+
+**Complexity:** M
+
+**Subtasks:**
+1. **Weaviate cross-reference writing:** Implement the graph store writer using Weaviate
+   cross-references as v1 backend (FR-1301).
+2. **Optional Neo4j backend:** Implement Neo4j as a planned v2 upgrade path for richer graph
+   query capabilities (FR-1302).
+3. **Backend swapping via config (FR-1303):** Support switching between Weaviate and Neo4j
+   backends via `graph_store.backend` configuration key without code changes.
+4. **Re-ingestion cleanup:** On re-embedding, delete all existing triples for the document
+   before inserting fresh ones to prevent stale graph data (FR-1304).
+
+**Testing Strategy:** Integration tests verifying triples in graph store; verify re-ingestion
+deletes old triples before inserting new ones; test backend swapping via config.
+
+**Risks:** Graph store migration (Weaviate -> Neo4j v2) must be treated as a schema migration
+event.
 
 ---
 
@@ -430,7 +543,7 @@ envelope and propagated to every chunk from that document.
 
 **Requirements Covered:** FR-594, FR-803
 
-**Dependencies:** Task S.2, Task 2.2
+**Dependencies:** Task S.2, Task 2.2b
 
 **Complexity:** M
 
@@ -462,7 +575,7 @@ chunks, and assigns quality scores to all surviving chunks.
 
 **Requirements Covered:** FR-1101, FR-1102, FR-1103, FR-1104, FR-1105
 
-**Dependencies:** Task 2.2
+**Dependencies:** Task 2.2b
 
 **Complexity:** S
 
@@ -600,23 +713,26 @@ Phase 1 (Core Embedding — MVP)                                       │
 
 Phase 2 (LLM Enhancement)                                            │
 ├── Task 2.1: LLM-Assisted Chunking ◄─── Task 1.6 ─────────────────┤
-├── Task 2.2: Chunk Enrichment + Metadata Generation ◄─── Task 1.6 │ [CRITICAL if LLM enabled]
+├── Task 2.2a: Chunk Enrichment ◄─── Task 1.6                      │ [CRITICAL if LLM enabled]
+├── Task 2.2b: Metadata Generation ◄─── Task 2.2a                  │ [CRITICAL if LLM enabled]
 └── Task 2.4: Domain Vocabulary ◄─── None (parallel with Phase 1)   │
 
 Phase 3 (Extended Features)                                          │
-├── Task 3.2: Node 9 Cross-Reference Extraction ◄─── Task 2.2      │
-├── Task 3.3: Nodes 10+13 Knowledge Graph ◄─── Task 2.2            │
-└── Task 3.4: Review Tier System ◄─── Task S.2, Task 2.2           │
+├── Task 3.2: Node 9 Cross-Reference Extraction ◄─── Task 2.2b     │
+├── Task 3.3a: Node 10 Triple Extraction ◄─── Task 2.2a            │
+├── Task 3.3b: Entity Consolidation ◄─── Task 3.3a                 │
+├── Task 3.3c: Node 13 Graph Store Writer ◄─── Task 3.3a, 3.3b     │
+└── Task 3.4: Review Tier System ◄─── Task S.2, Task 2.2b          │
 
 Phase 4 (Quality & Operations)                                       │
-├── Task 4.0: Node 11 Quality Validation ◄─── Task 2.2             │ [CRITICAL]
+├── Task 4.0: Node 11 Quality Validation ◄─── Task 2.2b            │ [CRITICAL]
 ├── Task 4.1: Evaluation Framework ◄─── Phase 1 complete            │
 ├── Task 4.2: Langfuse Observability ◄─── Task 1.2                  │
 ├── Task 4.3: Batch Processing Hardening ◄─── Task 1.10             │
 └── Task 4.4: Schema Migration ◄─── Task 1.8                        │
 
 Critical path (MVP): S.2 → 1.2 → 1.6 → 1.7 → 1.8
-Critical path (full): + 2.2 → 4.0 → (embedding of enriched content)
+Critical path (full): + 2.2a → 2.2b → 4.0 → (embedding of enriched content)
 ```
 
 ---
@@ -627,16 +743,19 @@ Critical path (full): + 2.2 → 4.0 → (embedding of enriched content)
 |------|---------------------|
 | S.2 Clean Document Store Reader | FR-591, FR-592, FR-593, FR-594, FR-595 |
 | 1.2 Embedding Pipeline DAG Skeleton | FR-591, FR-901, FR-1001, FR-1301 |
-| 1.6 Node 6: Chunking (Rule-Based) | FR-601, FR-602, FR-603, FR-604, FR-605 |
+| 1.6 Node 6: Chunking (Rule-Based) | FR-601, FR-602, FR-603, FR-604, FR-605, FR-606 |
 | 1.7 Node 12: Embedding Generation | FR-1201, FR-1202, FR-1203, FR-1204 |
 | 1.8 Vector Store Upsert | FR-1205, FR-1206, FR-1207, FR-1208, FR-1209 |
 | 1.9 Result Reporting | FR-1201 |
 | 1.10 Re-Ingestion Flow | FR-593, FR-1205, FR-1208 |
 | 2.1 LLM-Assisted Chunking | FR-606, FR-607, FR-608, FR-609, FR-610, FR-611 |
-| 2.2 Chunk Enrichment + Metadata Generation | FR-701, FR-702, FR-703, FR-704, FR-705, FR-801, FR-802, FR-803, FR-804, FR-805, FR-806 |
+| 2.2a Node 7: Chunk Enrichment | FR-701, FR-702, FR-703, FR-704, FR-705 |
+| 2.2b Node 8: Metadata Generation | FR-801, FR-802, FR-803, FR-804, FR-805, FR-806 |
 | 2.4 Domain Vocabulary System | FR-803, FR-804 |
 | 3.2 Node 9: Cross-Reference Extraction | FR-901, FR-902, FR-903, FR-904, FR-905 |
-| 3.3 Nodes 10 + 13: Knowledge Graph | FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009, FR-1301, FR-1302, FR-1303, FR-1304 |
+| 3.3a Node 10: Triple Extraction | FR-1001, FR-1002, FR-1003, FR-1004, FR-1005, FR-1006, FR-1007, FR-1008, FR-1009 |
+| 3.3b Entity Consolidation | FR-1003, FR-1004, FR-1005 |
+| 3.3c Node 13: Graph Store Writer | FR-1301, FR-1302, FR-1303, FR-1304 |
 | 3.4 Review Tier System | FR-594, FR-803 |
 | 4.0 Node 11: Quality Validation | FR-1101, FR-1102, FR-1103, FR-1104, FR-1105 |
 | 4.1 Evaluation Framework | — (cross-cutting) |
@@ -665,7 +784,7 @@ Constructs the 8-stage Embedding Pipeline graph with three conditional routing p
 cross-reference extraction (optional), KG extraction (optional), and KG storage (conditional
 on KG extraction having run). Supports Tasks 1.2, 3.2, 3.3, and 4.0.
 
-**Tasks:** Task 1.2, Task 3.2, Task 3.3, Task 4.0
+**Tasks:** Task 1.2, Task 3.2, Task 3.3a, Task 3.3c, Task 4.0
 **Requirements:** FR-901, FR-1001, FR-1301
 
 ```python

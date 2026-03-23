@@ -223,7 +223,7 @@ The LLM fallback matrix for embedding-phase stages:
 
 ## 2. System Architecture
 
-The pipeline is orchestrated as a LangGraph `StateGraph` (DAG). All eight nodes share a single `PipelineDocument` state object; each node reads from upstream-populated fields and writes only to its own designated output fields.
+The pipeline is orchestrated as a LangGraph `StateGraph` (DAG). All eight nodes share a single `EmbeddingPipelineState` TypedDict; each node reads from upstream-populated fields and writes only to its own designated output fields.
 
 ```
     ┌────────────────────────────────────┐
@@ -302,7 +302,7 @@ Defines what the Embedding Pipeline reads from the Clean Document Store: the `.m
 
 ### Chunking (`FR-601` to `FR-611` — 11 requirements)
 
-Covers structure-aware splitting (respects section tree and heading boundaries), domain vocabulary compound-term boundary respect, deterministic chunk IDs from content hashing, configurable chunk size and overlap, configurable splitting strategy, maximum chunk count limit, fallback to recursive splitter when LLM chunking fails, and BYOM pre-chunked input mode.
+Covers structure-aware splitting (respects section tree and heading boundaries), domain vocabulary compound-term boundary respect, deterministic chunk IDs from content hashing, table atomic chunking (tables kept as indivisible units; oversized tables split with header-row prepending), adjacency links (each chunk carries previous_chunk_id and next_chunk_id for navigation), configurable chunk size and overlap, configurable splitting strategy, maximum chunk count limit, and fallback to recursive splitter when LLM chunking fails.
 
 ### Chunk Enrichment (`FR-701` to `FR-705` — 5 requirements)
 
@@ -360,9 +360,9 @@ Covers graph store persistence of extracted triples, conditional execution when 
 | `source_key` | The stable deterministic identifier derived from the source file path, used to locate all artefacts for a given document across both pipelines and the vector store. |
 | `KGTriple` | A subject-predicate-object relationship extracted from document content and stored in the knowledge graph. |
 | `ReviewTier` | The trust classification assigned to each document at ingestion (`FULLY_REVIEWED`, `PARTIALLY_REVIEWED`, `SELF_REVIEWED`), stored as chunk metadata and used as a filter at retrieval time. |
-| `PipelineDocument` | The shared state object that flows through all pipeline stages. Each stage reads from upstream-populated fields and writes to its own designated fields. |
+| `EmbeddingPipelineState` | The shared TypedDict state object that flows through all pipeline stages. Each node reads from upstream-populated fields and writes to its own designated fields. |
 | `PipelineConfig` | The master configuration object. Resolved from the configuration file plus per-run overrides before pipeline execution begins. |
-| `BaseNode` | The abstract base class that all pipeline stage implementations extend. Enforces the stage contract: shared state input, stage-scoped output, independent error handling. |
+| Node functions | Pipeline stages are implemented as plain functions following the pattern `def node_name(state: EmbeddingPipelineState) -> dict`. There is no abstract base class; the stage contract is enforced by convention: shared state input, stage-scoped dict output, independent error handling. |
 | `BYOM` | Bring Your Own Model — mode where embeddings are computed externally and passed as pre-computed vectors to the vector store, allowing custom fine-tuned models without pipeline code changes. |
 | `deterministic_id()` | The SHA-256-based UUID generator used to derive chunk IDs from content and document IDs from file paths. Same input always produces the same output. |
 

@@ -204,6 +204,8 @@ single-file and directory-glob modes, config file path, verbosity, dry-run, and 
 re-processing. The CLI is the primary operational entry point for the full ingestion system —
 it also triggers the downstream Embedding Pipeline after Document Processing completes.
 
+> **Integration note:** Embedding Pipeline triggering is a platform-level integration concern defined in `INGESTION_PLATFORM_SPEC.md`. This task implements the CLI hook point; the actual orchestration logic lives in the platform layer.
+
 **Requirements Covered:** FR-112
 
 **Dependencies:** Task 1.2, Task 1.1
@@ -262,6 +264,13 @@ same `source_key` is preserved.
    hierarchy is preserved in the Markdown using standard heading syntax (FR-585).
 6. Ensure the full processed text (cleaned body + figure descriptions + tables + optional
    refactored content) is written to the `.md` file (FR-584).
+7. Derive `review_tier` for the metadata envelope based on extraction confidence from Node 2:
+   - If `extraction_confidence` > 0.8: `"Fully Reviewed"`
+   - If `extraction_confidence` between 0.5–0.8: `"Partially Reviewed"`
+   - If `extraction_confidence` < 0.5 or unavailable: `"Self Reviewed"` (default)
+   - The default tier (`"Self Reviewed"`) is configurable via platform config per FR-1514.
+
+> **Cross-reference:** See `INGESTION_PLATFORM_SPEC.md` Section 4 for the full review tier lifecycle, including how review tiers propagate to the Embedding Pipeline and affect retrieval visibility weighting.
 
 **Testing Strategy:** Unit tests asserting atomic write (simulate failure mid-write, verify no
 partial files), hash correctness, and metadata schema completeness. Test that a failed metadata
@@ -306,6 +315,9 @@ validation. Falls back to the original text if all iterations fail validation.
 6. Write both original and refactored text as separate artefacts (never mutate source; FR-509).
 7. Attach provenance metadata to every refactored section: source URI and positional span
    mapping (FR-510, FR-511).
+
+> **Scope note:** FR-510 and FR-511 are partially covered here — this task generates and attaches provenance metadata (source URI, positional span mapping) to refactored output. Chunk-level provenance propagation and citation resolution are downstream responsibilities covered in `EMBEDDING_PIPELINE_IMPLEMENTATION.md`.
+
 8. Respect `config.enable_refactoring = false` to skip the stage entirely (FR-502).
 
 **Testing Strategy:** Unit tests with mocked LLM covering: fact-check failure, completeness
@@ -434,7 +446,7 @@ Critical path (full): + Task 2.3
 | 3.1 Node 3: Multimodal Processing | FR-301, FR-302, FR-303, FR-304, FR-305, FR-306, FR-307 |
 | 3.5 PPTX and XLSX Extractors | FR-104, FR-105 |
 
-<!-- VERIFY: All 51 requirements from DOCUMENT_PROCESSING_SPEC.md FR-101–FR-587 appear above. -->
+<!-- VERIFY: All 53 requirements from DOCUMENT_PROCESSING_SPEC.md FR-101–FR-587 appear above. -->
 
 ---
 

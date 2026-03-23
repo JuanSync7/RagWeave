@@ -15,8 +15,11 @@ An end-to-end Retrieval-Augmented Generation system with modular ingestion, mult
 - **Python 3.10+** (3.12 recommended)
 - **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
 - **Node.js 18+** and **npm** — for the web console TypeScript build
-- **Docker** and **Docker Compose** — for infrastructure services (Temporal, Redis)
+- **Docker** and **Docker Compose** (or **Podman** and **podman-compose**) — for infrastructure services (Temporal, Redis)
 - **[Ollama](https://ollama.com/)** — for local LLM inference (or set `RAG_LLM_*` vars for cloud providers)
+
+> **Podman users**: Podman is supported as a drop-in replacement for Docker.
+> See [Podman Setup](#podman-setup) below for one-time configuration.
 
 ### 1. Clone and install Python dependencies
 
@@ -47,10 +50,11 @@ npm --prefix server/console/web run build
 ### 3. Start infrastructure services
 
 ```bash
-docker compose up -d
+./scripts/compose.sh up -d
 ```
 
 This starts the core services: **Temporal** (orchestration) + **Temporal UI** (port 8080).
+The `compose.sh` wrapper auto-detects Docker or Podman — no configuration needed.
 
 Redis starts automatically when you use the `app` or `workers` profiles (see below).
 
@@ -107,11 +111,11 @@ source .venv/bin/activate
 python -m server.worker
 ```
 
-Or use Docker profiles for a fully containerized stack:
+Or use Docker/Podman profiles for a fully containerized stack:
 
 ```bash
-docker compose --profile app --profile workers up -d
-# Scale workers: docker compose --profile workers up -d --scale rag-worker=3
+./scripts/compose.sh --profile app --profile workers up -d
+# Scale workers: ./scripts/compose.sh --profile workers up -d --scale rag-worker=3
 ```
 
 Then use the CLI client or web console:
@@ -131,7 +135,7 @@ pytest                    # full suite
 pytest tests/ingest/ -v   # ingestion tests only
 ```
 
-## Docker Profiles
+## Container Profiles
 
 | Profile | Services | Use Case |
 |---------|----------|----------|
@@ -143,16 +147,39 @@ pytest tests/ingest/ -v   # ingestion tests only
 
 ```bash
 # Example: full production stack with monitoring
-docker compose --profile app --profile workers --profile monitoring up -d
+./scripts/compose.sh --profile app --profile workers --profile monitoring up -d
 ```
 
-## Model Cache (Docker Workers)
+## Podman Setup
+
+Podman is supported as a rootless, daemonless alternative to Docker. One-time setup:
+
+```bash
+# 1. Install Podman
+sudo apt-get install -y podman podman-compose   # Debian/Ubuntu
+
+# 2. Enable user socket (needed for Dozzle log viewer)
+systemctl --user enable --now podman.socket
+
+# 3. Verify rootless mode
+podman info | grep -i rootless   # should show: rootless: true
+
+# 4. Set the container socket in .env
+echo "CONTAINER_SOCK=\$XDG_RUNTIME_DIR/podman/podman.sock" >> .env
+
+# 5. Use compose.sh as normal — it auto-detects Podman
+./scripts/compose.sh --profile app up -d
+```
+
+See `docs/operations/PODMAN_SPEC.md` for full details.
+
+## Model Cache (Containerized Workers)
 
 Containerized workers expect embedding/reranker models mounted at `/models`. Set `RAG_MODEL_ROOT` to your local model directory:
 
 ```bash
 export RAG_MODEL_ROOT=/path/to/your/models
-docker compose --profile workers up -d
+./scripts/compose.sh --profile workers up -d
 ```
 
 Default model paths inside the container:

@@ -1,12 +1,13 @@
 <!-- @summary
 How to reformat markdown Functional Requirement (FR) blocks to match the
-spaced, readable style used in `INGESTION_PIPELINE_SPEC.md` (FR-101/FR-102).
+spaced, readable style used in the ingestion specification documents
+(`INGESTION_PLATFORM_SPEC.md`, `DOCUMENT_PROCESSING_SPEC.md`, `EMBEDDING_PIPELINE_SPEC.md`).
 Includes the canonical rules and the formatter script usage.
 @end-summary -->
 
 ## Purpose
 
-`docs/ingestion/INGESTION_PIPELINE_SPEC.md` uses a blockquote-based format for each Functional Requirement (FR). The preferred style is:
+The ingestion specification documents (`INGESTION_PLATFORM_SPEC.md`, `DOCUMENT_PROCESSING_SPEC.md`, `EMBEDDING_PIPELINE_SPEC.md`) use a blockquote-based format for each Functional Requirement (FR). The preferred style is:
 
 - Blank `>` spacer lines between `**Description:**`, `**Rationale:**`, and `**Acceptance Criteria:**`
 - Acceptance criteria rendered as a **numbered list**
@@ -60,8 +61,13 @@ and includes (at minimum) these subsections:
 Use the repo script:
 
 ```bash
-python3 scripts/format_spec_fr_blocks.py docs/ingestion/INGESTION_PIPELINE_SPEC.md --check
-python3 scripts/format_spec_fr_blocks.py docs/ingestion/INGESTION_PIPELINE_SPEC.md --write
+python3 scripts/format_spec_fr_blocks.py docs/ingestion/INGESTION_PLATFORM_SPEC.md --check
+python3 scripts/format_spec_fr_blocks.py docs/ingestion/DOCUMENT_PROCESSING_SPEC.md --check
+python3 scripts/format_spec_fr_blocks.py docs/ingestion/EMBEDDING_PIPELINE_SPEC.md --check
+
+python3 scripts/format_spec_fr_blocks.py docs/ingestion/INGESTION_PLATFORM_SPEC.md --write
+python3 scripts/format_spec_fr_blocks.py docs/ingestion/DOCUMENT_PROCESSING_SPEC.md --write
+python3 scripts/format_spec_fr_blocks.py docs/ingestion/EMBEDDING_PIPELINE_SPEC.md --write
 ```
 
 - `--check` exits **non-zero** if it would change the file (useful for CI).

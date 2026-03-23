@@ -10,12 +10,25 @@ from __future__ import annotations
 import argparse
 import orjson
 import os
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
 from urllib import parse, request
+
+
+def _detect_container_runtime() -> str:
+    """Return 'podman' if available, else 'docker'."""
+    if shutil.which("podman"):
+        return "podman"
+    if shutil.which("docker"):
+        return "docker"
+    raise RuntimeError("Neither podman nor docker found in PATH")
+
+
+CONTAINER_RT = _detect_container_runtime()
 
 
 @dataclass
@@ -50,7 +63,7 @@ def _docker_worker_stats() -> list[tuple[str, float, float]]:
     try:
         proc = subprocess.run(
             [
-                "docker",
+                CONTAINER_RT,
                 "stats",
                 "--no-stream",
                 "--format",

@@ -10,12 +10,25 @@ from __future__ import annotations
 import argparse
 import orjson
 import os
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
 from urllib import parse, request
+
+
+def _detect_container_runtime() -> str:
+    """Return 'podman' if available, else 'docker'."""
+    if shutil.which("podman"):
+        return "podman"
+    if shutil.which("docker"):
+        return "docker"
+    raise RuntimeError("Neither podman nor docker found in PATH")
+
+
+CONTAINER_RT = _detect_container_runtime()
 
 
 @dataclass
@@ -48,7 +61,7 @@ def _query_prometheus(base_url: str, promql: str, timeout_s: int = 5) -> Optiona
 def _current_replicas() -> int:
     try:
         proc = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}"],
+            [CONTAINER_RT, "ps", "--format", "{{.Names}}"],
             check=True,
             capture_output=True,
             text=True,
@@ -62,7 +75,7 @@ def _worker_max_mem_pct() -> Optional[float]:
     try:
         proc = subprocess.run(
             [
-                "docker",
+                CONTAINER_RT,
                 "stats",
                 "--no-stream",
                 "--format",
@@ -129,7 +142,7 @@ def _should_scale_down(snapshot: Snapshot, args: argparse.Namespace) -> bool:
 
 def _scale_to(target: int, dry_run: bool) -> bool:
     cmd = [
-        "docker",
+        CONTAINER_RT,
         "compose",
         "up",
         "-d",

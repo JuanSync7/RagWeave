@@ -2,7 +2,7 @@
 
 **Status**: Draft
 **Date**: 2026-03-14
-**Updated**: 2026-03-19
+**Updated**: 2026-03-23
 
 ---
 
@@ -64,13 +64,18 @@ For most workflows, swapping Docker for Podman requires no changes to images or 
 
 | Item | Docker command/path | Podman equivalent | Notes |
 |------|--------------------|--------------------|-------|
-| Runtime binary | `docker` | `podman` | `alias docker=podman` covers ~95% of use |
-| Compose | `docker compose` | `podman-compose` or `podman compose` | See `scripts/compose.sh` wrapper |
+| Runtime binary | `docker` | `podman` | Runtime detection script selects correct binary |
+| Compose | `docker compose` | `podman-compose` or `podman compose` | `scripts/compose.sh` wrapper handles this |
 | Socket path | `/var/run/docker.sock` | `$XDG_RUNTIME_DIR/podman/podman.sock` | Set via `CONTAINER_SOCK` env var |
-| Privileged ports | No restriction | Ports <1024 need sysctl or use >1024 | Default to 8080/8443 |
-| Volume UID mapping | Implicit | Add `:U` flag for writable volumes | Safe to add; Docker ignores it |
+| Privileged ports | No restriction | Ports <1024 need sysctl or use >1024 | Current stack already uses ports >1024; no change needed |
+| Volume permissions | Implicit | Handled via Dockerfile `chown` and `--chown` on COPY | Do NOT use `:U` flag — Podman-only, will error on Docker |
 | Daemon start | `sudo systemctl start docker` | No daemon — Podman starts on demand | Nothing to start |
 | Socket enable | Always on | `systemctl --user enable --now podman.socket` | One-time user setup |
+
+> **Important**: The `:U` volume flag is a Podman-only feature. Docker Compose does not
+> recognize it and will produce an error. Volume permissions must instead be handled via
+> Dockerfile `chown`/`--chown` directives so that `docker-compose.yml` remains compatible
+> with both Docker and Podman.
 
 #### One-Time Setup (Rootless Podman)
 
@@ -85,7 +90,10 @@ systemctl --user enable --now podman.socket
 # 3. Verify rootless mode
 podman info | grep -i rootless   # should show: rootless: true
 
-# 4. Use the compose wrapper (auto-detects Docker vs Podman)
+# 4. Set Podman-specific env vars in .env
+# CONTAINER_SOCK=$XDG_RUNTIME_DIR/podman/podman.sock
+
+# 5. Use the compose wrapper (auto-detects Docker vs Podman)
 ./scripts/compose.sh --profile app up -d
 ```
 
@@ -101,6 +109,7 @@ podman info | grep -i rootless   # should show: rootless: true
 | B4 | Worker container runs as non-root | Must |
 | B5 | CI/CD pipelines updated if applicable | Should |
 | B6 | Developer documentation updated | Must |
+| B7 | All scripts support both Docker and Podman via runtime detection | Must |
 
 ---
 
@@ -112,13 +121,18 @@ podman info | grep -i rootless   # should show: rootless: true
 |-----------|--------------|---------------|
 | Container runtime | Docker Engine (root daemon) | Podman (daemonless, rootless) |
 | Compose tool | `docker compose` | `podman-compose` (or `podman compose` via plugin) |
-| `docker-compose.yml` | Docker Compose v3 syntax | Compatible as-is (Podman supports Compose spec) |
+| `docker-compose.yml` | Docker Compose v3 syntax | Compatible as-is; add `CONTAINER_SOCK` env var for Dozzle |
 | `Dockerfile.api` | Runs as non-root user `app` | No change needed |
 | `Dockerfile.runtime` | Runs as root (no USER directive) | Add non-root user |
-| Dozzle (`/var/run/docker.sock`) | Mounts Docker socket | Replace with Podman user socket |
-| Volume mounts | Docker volumes | Podman volumes (compatible); add `:U` for writable |
+| Dozzle (`/var/run/docker.sock`) | Hardcoded Docker socket mount | Configurable via `CONTAINER_SOCK` env var |
+| Volume mounts | Docker volumes | Podman volumes (compatible); permissions via Dockerfile |
 | Health checks | Docker health checks | Podman supports same syntax |
-| `docker/generate-certs.sh` | Uses `docker run` for permission fix | Replace with `podman run` |
+| `docker/generate-certs.sh` | Uses `openssl` directly (no Docker dependency) | Add explicit permission fix for rootless Podman |
+| `scripts/backup_all.sh` | Hardcodes `docker exec` / `docker cp` / `docker ps` | Use runtime detection helper |
+| `scripts/restore_all.sh` | Hardcodes `docker exec` / `docker cp` / `docker ps` / `docker restart` | Use runtime detection helper |
+| `scripts/auto_scale_workers.py` | Hardcodes `docker ps` / `docker stats` / `docker compose` | Use runtime detection |
+| `scripts/watch_tuning_signals.py` | Hardcodes `docker stats` | Use runtime detection |
+| `README.md` | References `docker compose` commands | Document `scripts/compose.sh` wrapper |
 
 ### Out of Scope
 
@@ -127,6 +141,7 @@ podman info | grep -i rootless   # should show: rootless: true
 | Kubernetes / Podman play kube | Future consideration; not in this migration |
 | Remote Podman | Local development only |
 | Buildah (separate build tool) | Podman includes built-in build; no need for separate tool |
+| `host.docker.internal` references | This is an `extra_hosts` alias resolved at container start; works identically in Podman |
 
 ---
 
@@ -140,31 +155,30 @@ podman info | grep -i rootless   # should show: rootless: true
 
 **Acceptance criteria:**
 - [ ] `podman info` shows rootless mode.
-- [ ] All services start with `podman-compose --profile app --profile workers up -d`.
+- [ ] All services start with `./scripts/compose.sh --profile app --profile workers up -d`.
 - [ ] No container runs as UID 0 inside the container (except init processes that drop privileges).
 
 ### R-B2: Compose Compatibility
 
-- `docker-compose.yml` MUST work with `podman-compose` without modification.
-- If syntax differences exist, use conditional comments or a thin wrapper script.
+- `docker-compose.yml` MUST work with both `docker compose` and `podman-compose` without modification.
+- The `CONTAINER_SOCK` env var MUST default to `/var/run/docker.sock` for backward compatibility.
 - Volume mounts, health checks, environment variables, and profiles MUST behave identically.
 
 **Acceptance criteria:**
-- [ ] `podman-compose up -d` starts all default services.
-- [ ] `podman-compose --profile app --profile workers --profile monitoring up -d` starts full stack.
+- [ ] `./scripts/compose.sh up -d` starts all default services on both Docker and Podman hosts.
+- [ ] `./scripts/compose.sh --profile app --profile workers --profile monitoring up -d` starts full stack.
 - [ ] Health checks pass for all services.
 
 ### R-B3: Monitoring Without Docker Socket
 
 - Dozzle currently requires `/var/run/docker.sock` to stream container logs.
-- Options (pick one):
-  1. Mount Podman's user socket: `$XDG_RUNTIME_DIR/podman/podman.sock`
-  2. Replace Dozzle with `podman logs --follow` wrapper
-  3. Use Podman's systemd journal integration for log aggregation
+- Use `CONTAINER_SOCK` env var to mount the correct socket:
+  - Docker default: `/var/run/docker.sock`
+  - Podman: `$XDG_RUNTIME_DIR/podman/podman.sock` (set in `.env`)
 
 **Acceptance criteria:**
 - [ ] Container log streaming works from the monitoring UI.
-- [ ] No root-owned socket is mounted into any container.
+- [ ] No root-owned socket is mounted into any container when using Podman.
 
 ### R-B4: Worker Non-Root
 
@@ -174,18 +188,32 @@ podman info | grep -i rootless   # should show: rootless: true
 
 **Acceptance criteria:**
 - [ ] Worker container starts and processes ingestion/retrieval tasks.
-- [ ] `podman exec rag-rag-worker-1 whoami` returns non-root user.
+- [ ] `<runtime> exec <worker-container> whoami` returns non-root user.
 
 ### R-B5: Developer Experience
 
-- A wrapper script (`scripts/compose.sh`) MUST detect Docker vs Podman and use the correct command.
+- A wrapper script (`scripts/compose.sh`) MUST detect Docker vs Podman and use the correct compose command.
+- A shared helper script (`scripts/container-runtime.sh`) MUST detect and export the container runtime binary.
+- All operational scripts MUST use runtime detection instead of hardcoding `docker`.
 - README and operations docs MUST document the Podman setup steps (§1.3).
 - `generate-certs.sh` MUST work with Podman.
 
 **Acceptance criteria:**
 - [ ] New developer can start the full stack following updated docs.
-- [ ] Script auto-detects runtime and works transparently.
 - [ ] `./scripts/compose.sh` works on both Docker and Podman hosts without modification.
+- [ ] All operational scripts work transparently on both runtimes.
+
+### R-B7: Runtime Detection
+
+- A shared helper script (`scripts/container-runtime.sh`) MUST detect whether Docker or Podman is available.
+- Detection order: Podman first (preferred), Docker as fallback.
+- All shell scripts that previously hardcoded `docker` MUST source this helper and use `$CONTAINER_RT`.
+- All Python scripts that previously hardcoded `"docker"` MUST detect the runtime dynamically.
+
+**Acceptance criteria:**
+- [ ] `source scripts/container-runtime.sh` sets `CONTAINER_RT` to `podman` or `docker`.
+- [ ] `scripts/backup_all.sh`, `scripts/restore_all.sh` use `$CONTAINER_RT`.
+- [ ] `scripts/auto_scale_workers.py`, `scripts/watch_tuning_signals.py` detect runtime.
 
 ---
 
@@ -194,9 +222,9 @@ podman info | grep -i rootless   # should show: rootless: true
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | `podman-compose` feature gaps | Some Compose features may not be supported | Test all profiles; fall back to `podman compose` plugin if needed |
-| Rootless networking limitations | Port < 1024 binding may fail without `net.ipv4.ip_unprivileged_port_start=0` | Document sysctl requirement or use ports > 1024 |
-| Volume permission mismatches | UID mapping in rootless mode may cause permission errors | Use `podman unshare` or `:U` volume flag for auto-UID mapping |
-| Third-party images assume root | Some images (ClickHouse, Temporal) may require root | Test each image; use `--userns=keep-id` where needed |
+| Rootless networking limitations | Port < 1024 binding may fail without `net.ipv4.ip_unprivileged_port_start=0` | Current stack uses ports > 1024; document sysctl if future ports need it |
+| Volume permission mismatches | UID mapping in rootless mode may cause permission errors | Handle via Dockerfile `chown` / `--chown` directives, not `:U` flag |
+| Third-party images assume root | Some images (ClickHouse, Temporal) may require root | Test each image; ClickHouse already uses `user: "101:101"` in compose |
 | CI/CD compatibility | GitHub Actions may not have Podman pre-installed | Provide Docker fallback in CI; Podman for local dev |
 
 ---
@@ -225,7 +253,8 @@ podman info | grep -i rootless   # should show: rootless: true
 | Requirement | Test | Component |
 |-------------|------|-----------|
 | R-B1 | Smoke: `podman info` rootless | Infrastructure |
-| R-B2 | Smoke: all profiles start | `docker-compose.yml` |
-| R-B3 | Smoke: log streaming works | Monitoring stack |
+| R-B2 | Smoke: all profiles start with `compose.sh` | `docker-compose.yml`, `scripts/compose.sh` |
+| R-B3 | Smoke: log streaming works via Dozzle | Monitoring stack |
 | R-B4 | Smoke: worker whoami non-root | `Dockerfile.runtime` |
 | R-B5 | Manual: new dev setup + `compose.sh` smoke | Documentation, `scripts/compose.sh` |
+| R-B7 | Unit: `container-runtime.sh` sets correct binary | `scripts/container-runtime.sh` |

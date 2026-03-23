@@ -125,7 +125,7 @@ Before any document is processed, the pipeline validates its configuration at st
 
 ## 2. System Architecture
 
-The pipeline is orchestrated as a LangGraph `StateGraph` (DAG). All five nodes share a single `PipelineDocument` state object; each node reads from upstream-populated fields and writes only to its own designated output fields.
+The pipeline is orchestrated as a LangGraph `StateGraph` (DAG). All five nodes share a single `DocumentProcessingState` TypedDict; each node reads from upstream-populated fields and writes only to its own designated output fields.
 
 ```
 Source Document (filesystem path)
@@ -173,7 +173,7 @@ Source Document (filesystem path)
         └────────────────────────────────────┘
 ```
 
-Stages marked `[optional]` are conditional: multimodal processing fires only when figures are detected; refactoring is skippable via `skip_refactoring` config flag. Cross-cutting platform requirements (re-ingestion detection, review tier management, batch processing, configuration schema, error handling framework, NFRs) are defined in `INGESTION_PLATFORM_SPEC.md`.
+Stages marked `[optional]` are conditional: multimodal processing fires only when figures are detected; refactoring is skippable via `enable_refactoring` config flag. Cross-cutting platform requirements (re-ingestion detection, review tier management, batch processing, configuration schema, error handling framework, NFRs) are defined in `INGESTION_PLATFORM_SPEC.md`.
 
 ---
 
@@ -226,9 +226,9 @@ Covers one `.md` file and one `.meta.json` per source document, metadata envelop
 |------|-----------|
 | `Clean Document Store` | The persistent storage boundary between the Document Processing Pipeline and the Embedding Pipeline. Contains one `.md` and one `.meta.json` per source document. |
 | `source_key` | A stable, deterministic identifier derived from the source file path, used to name artefacts in the Clean Document Store. |
-| `PipelineDocument` | The shared state object that flows through all pipeline stages. Each stage reads from upstream-populated fields and writes to its own designated fields. |
+| `DocumentProcessingState` | The TypedDict that flows through all pipeline stages. Each stage reads from upstream-populated fields and writes to its own designated fields. |
 | `PipelineConfig` | The master configuration object. Controls stage enablement, provider selection, thresholds, and runtime overrides for a pipeline run. |
-| `BaseNode` | The abstract base class that all pipeline stage implementations extend. Enforces the stage contract: shared state input, stage-scoped output, independent error handling. |
+| Node function | Pipeline stages are implemented as plain functions (e.g., `def text_cleaning_node(state: DocumentProcessingState) -> dict`), not as subclasses of an abstract base class. Each function enforces the stage contract: shared state input, stage-scoped output, independent error handling. |
 | `Review Tier` | A trust classification (`FULLY_REVIEWED`, `PARTIALLY_REVIEWED`, `SELF_REVIEWED`) assigned to each document, controlling its visibility weight in retrieval results. |
 | `Re-ingestion` | Processing a previously ingested document again after detecting a content change, including cleanup of the old Clean Document Store artefacts before writing the new ones. |
 | `VLM` | Vision-Language Model — a multimodal model that receives image input and produces text descriptions used to make figures searchable. |

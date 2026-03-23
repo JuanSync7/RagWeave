@@ -12,9 +12,11 @@ Use this one-page checklist to get productive in the ingestion subsystem on day 
 - [ ] Run ingestion tests: `uv run --with pytest python -m pytest tests/ingest`.
 - [ ] Read these docs in order:
   1. `src/ingest/README.md`
-  2. `docs/ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
-  3. `docs/ingestion/DOCUMENT_PROCESSING_SPEC.md` (Document Processing requirements, FR-100–FR-589)
-  4. `docs/ingestion/EMBEDDING_PIPELINE_SPEC.md` (Embedding requirements, FR-600–FR-1304)
+  2. `INGESTION_PLATFORM_SPEC.md` — defines overall architecture, cross-cutting concerns (re-ingestion, review tiers, domain vocabulary, error handling), and the Clean Document Store boundary
+  3. `docs/ingestion/INGESTION_PIPELINE_ENGINEERING_GUIDE.md`
+  4. `docs/ingestion/DOCUMENT_PROCESSING_SPEC.md` (Document Processing requirements, FR-100–FR-589)
+  5. `docs/ingestion/EMBEDDING_PIPELINE_SPEC.md` (Embedding requirements, FR-591–FR-1304)
+  6. Skim `DOCUMENT_PROCESSING_IMPLEMENTATION.md` and `EMBEDDING_PIPELINE_IMPLEMENTATION.md` — phased task breakdowns with code appendices
 
 ## First Code Change Flow (Safe Path)
 

@@ -18,4 +18,8 @@ openssl req -x509 -nodes -days 365 \
     -subj "/CN=localhost/O=RAG-Dev/C=US" \
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
+# Ensure cert permissions are correct for rootless container runtimes.
+chmod 644 "$CERT_FILE"
+chmod 600 "$KEY_FILE"
+
 echo "[certs] Generated self-signed cert at $CERT_DIR"

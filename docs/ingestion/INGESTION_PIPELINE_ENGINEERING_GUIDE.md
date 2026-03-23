@@ -53,6 +53,72 @@ This split improves:
 - safer code review (small, stage-focused changes),
 - easier test targeting and onboarding.
 
+## Target Architecture: Two-Phase Pipeline
+
+> **Note:** The current codebase implements a monolithic 13-node LangGraph graph. The target
+> architecture described below is defined in the companion specifications and is being
+> implemented incrementally.
+
+The ingestion system is being refactored into two independent pipelines connected by the
+**Clean Document Store** — a filesystem-based boundary contract:
+
+```
+Source Documents
+      │
+      ▼
+┌─────────────────────────┐
+│  Document Processing    │  Nodes 1–5 (current graph nodes 1–6)
+│  State: DocumentProcessingState
+│  Spec: DOCUMENT_PROCESSING_SPEC.md
+│  FR-101 through FR-587
+└─────────┬───────────────┘
+          │
+          ▼
+    Clean Document Store
+    ({source_key}.md + {source_key}.meta.json)
+    Two-phase change detection:
+      • source_hash — detects source file changes
+      • clean_hash  — detects processing output changes
+          │
+          ▼
+┌─────────────────────────┐
+│  Embedding Pipeline     │  Nodes 6–13 (current graph nodes 7–13)
+│  State: EmbeddingPipelineState
+│  Spec: EMBEDDING_PIPELINE_SPEC.md
+│  FR-591 through FR-1304
+└─────────────────────────┘
+```
+
+**Key architectural properties:**
+- Each phase can be re-run independently (re-process documents without re-embedding, or re-embed without re-processing).
+- The Clean Document Store is the contract surface: Document Processing writes to it, Embedding Pipeline reads from it.
+- Cross-cutting concerns (re-ingestion strategy, review tiers, domain vocabulary, error handling, configuration, CLI/API interface) are defined in `INGESTION_PLATFORM_SPEC.md`.
+
+**Mapping current implementation to target:**
+
+| Current Code | Target Phase | Notes |
+|---|---|---|
+| `IngestState` | `DocumentProcessingState` + `EmbeddingPipelineState` | Will be split into two separate TypedDicts |
+| `IngestionConfig` | `PipelineConfig` (per-phase) | Configuration will be phase-scoped |
+| `content_hash` field | `source_hash` + `clean_hash` | Two-phase change detection replaces single hash |
+| Nodes 1–6 | Document Processing Pipeline | Ingestion, structure detection, multimodal, text cleaning, refactoring, output |
+| Nodes 7–13 | Embedding Pipeline | Chunking, enrichment, metadata, cross-refs, KG, quality, embedding/storage |
+
+### Review Tiers
+
+The platform spec defines a three-tier review system (`INGESTION_PLATFORM_SPEC.md` Section 4):
+- **Fully Reviewed** — high extraction confidence (>0.8)
+- **Partially Reviewed** — moderate confidence (0.5–0.8)
+- **Self Reviewed** — low confidence or default
+
+Review tier is stored in the Clean Document Store metadata and propagated to chunk metadata for retrieval-time filtering.
+
+### Domain Vocabulary
+
+The platform spec defines domain vocabulary requirements (`INGESTION_PLATFORM_SPEC.md` Section 5):
+- Vocabulary terms are injected into LLM prompts for chunking, metadata generation, and KG extraction
+- Vocabulary is managed via configuration and can be updated without re-ingestion
+
 ## Package Layout
 
 ```text

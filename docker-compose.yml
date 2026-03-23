@@ -1,19 +1,23 @@
 # RAG production stack (Temporal + optional API/worker containers).
 #
+# Use ./scripts/compose.sh to auto-detect Docker or Podman:
+#
 # Default:
-#   docker compose up -d
+#   ./scripts/compose.sh up -d
 #   Starts Temporal infra + UI only.
 #
 # Optional managed services:
-#   docker compose --profile app --profile workers up -d
+#   ./scripts/compose.sh --profile app --profile workers up -d
 #   Starts API + worker as containerized services (no hand-started terminals).
 #
 # Scale workers on the same Temporal task queue:
-#   docker compose --profile workers up -d --scale rag-worker=3
+#   ./scripts/compose.sh --profile workers up -d --scale rag-worker=3
 #
 # Monitoring:
-#   docker compose --profile monitoring up -d
+#   ./scripts/compose.sh --profile monitoring up -d
 #   Then open http://localhost:9999 for live container logs.
+#
+# Podman users: set CONTAINER_SOCK in .env — see .env.example.
 
 services:
   temporal-db:
@@ -151,7 +155,10 @@ services:
     ports:
       - "${DOZZLE_HOST_PORT:-9999}:8080"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Use CONTAINER_SOCK env var for Docker/Podman compatibility.
+      # Docker default: /var/run/docker.sock
+      # Podman: set CONTAINER_SOCK=$XDG_RUNTIME_DIR/podman/podman.sock in .env
+      - ${CONTAINER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
     restart: unless-stopped
 
   rag-redis:

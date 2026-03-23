@@ -15,7 +15,12 @@ COPY pyproject.toml /app/pyproject.toml
 RUN pip install --upgrade pip && pip install .
 
 # Copy source code needed by server/api + worker.
-COPY config /app/config
-COPY src /app/src
-COPY server /app/server
-COPY prompts /app/prompts
+# Create non-root user (mirrors Dockerfile.api pattern).
+RUN groupadd --system app && useradd --system --gid app --create-home app
+
+COPY --chown=app:app config /app/config
+COPY --chown=app:app src /app/src
+COPY --chown=app:app server /app/server
+COPY --chown=app:app prompts /app/prompts
+
+USER app
