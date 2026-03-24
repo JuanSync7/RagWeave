@@ -20,15 +20,54 @@
 # Podman users: set CONTAINER_SOCK in .env — see .env.example.
 
 services:
+  rag-postgres:
+    image: postgres:16-alpine
+    container_name: rag-postgres
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - rag-postgres-data:/var/lib/postgresql/data
+      - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Nightly cleanup: deletes LiteLLM spend logs older than LITELLM_LOG_RETENTION_DAYS (default 90).
+  pg-maintenance:
+    profiles: ["app"]
+    image: postgres:16-alpine
+    container_name: rag-pg-maintenance
+    environment:
+      - PGPASSWORD=litellm
+      - PGHOST=rag-postgres
+      - PGUSER=litellm
+      - PGDATABASE=litellm
+      - LITELLM_LOG_RETENTION_DAYS=${LITELLM_LOG_RETENTION_DAYS:-90}
+    volumes:
+      - ./ops/postgres/litellm-maintenance.sh:/litellm-maintenance.sh:ro
+    command: sh /litellm-maintenance.sh
+    depends_on:
+      rag-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   temporal-db:
     image: postgres:16-alpine
     container_name: rag-temporal-db
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
       POSTGRES_DB: temporal
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
+      - ./ops/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U temporal"]
       interval: 5s
@@ -46,6 +85,9 @@ services:
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=temporal-db
+      # Workflow history retention. Temporal auto-deletes histories older than this.
+      # Default is 72h (3 days); 720h = 30 days is typical for production.
+      - TEMPORAL_DEFAULT_NAMESPACE_RETENTION=${TEMPORAL_WORKFLOW_RETENTION:-720h}
     depends_on:
       temporal-db:
         condition: service_healthy
@@ -69,7 +111,7 @@ services:
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
-    command: uvicorn server.api:app --host 0.0.0.0 --port ${RAG_API_PORT:-8000}
+    command: uvicorn server.api:app --host 0.0.0.0 --port ${RAG_API_PORT:-8000} --proxy-headers --forwarded-allow-ips='*'
     ports:
       - "${RAG_API_HOST_PORT:-8000}:${RAG_API_PORT:-8000}"
     environment:
@@ -86,6 +128,7 @@ services:
       - RAG_MEMORY_PROVIDER=redis
       - RAG_MEMORY_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
+      - DATABASE_URL=postgresql://litellm:litellm@rag-postgres:5432/litellm
       - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
       - RAG_AUTH_OIDC_ISSUER=${RAG_AUTH_OIDC_ISSUER:-}
       - RAG_AUTH_OIDC_AUDIENCE=${RAG_AUTH_OIDC_AUDIENCE:-}
@@ -93,8 +136,12 @@ services:
       - RAG_AUTH_API_KEYS_STORE_PATH=/app/.runtime/security/api_keys.json
       - RAG_AUTH_QUOTAS_STORE_PATH=/app/.runtime/security/quotas.json
     depends_on:
-      - temporal
-      - rag-redis
+      temporal:
+        condition: service_started
+      rag-redis:
+        condition: service_started
+      rag-postgres:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -387,7 +434,28 @@ services:
       - "${LANGFUSE_PORT:-3000}:3000"
     restart: unless-stopped
 
+  rag-nginx:
+    profiles: ["gateway"]
+    image: nginx:alpine
+    container_name: rag-nginx
+    ports:
+      - "${RAG_NGINX_HTTP_PORT:-80}:80"
+      - "${RAG_NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./ops/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      rag-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate --spider -q https://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
+  rag-postgres-data:
   temporal-db-data:
   rag-redis-data:
   langfuse-postgres-data:

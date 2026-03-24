@@ -43,3 +43,8 @@ logs/*.log
 
 # Model cache
 models/
+
+# TLS certs (generated locally via mkcert)
+certs/
+!certs/.gitkeep
+!certs/README.md

@@ -33,6 +33,19 @@ This creates a `.venv/`, installs all runtime dependencies plus dev tools (pytes
 
 > **Alternative** (pip only): `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`
 
+#### Optional dependency groups
+
+Some features require extra packages that are not installed by default:
+
+```bash
+uv pip install -e ".[pii]"          # PII detection (presidio, spacy)
+uv pip install -e ".[gliner]"       # GLiNER entity extraction
+uv pip install -e ".[chromadb]"     # ChromaDB vector store
+uv pip install -e ".[pinecone]"     # Pinecone vector store
+uv pip install -e ".[qdrant]"       # Qdrant vector store
+uv pip install -e ".[all]"          # All optional dependencies
+```
+
 ### 2. Build the web console
 
 ```bash
@@ -144,11 +157,41 @@ pytest tests/ingest/ -v   # ingestion tests only
 | `workers` | + Temporal worker(s) + Redis | Containerized workers |
 | `monitoring` | + Prometheus, Grafana, Alertmanager, Dozzle | Observability stack |
 | `observability` | + Langfuse (full stack) | LLM tracing and evaluation |
+| `gateway` | + nginx HTTPS reverse proxy | TLS termination for `rag-api` |
 
 ```bash
 # Example: full production stack with monitoring
 ./scripts/compose.sh --profile app --profile workers --profile monitoring up -d
 ```
+
+## HTTPS Gateway (nginx)
+
+Add HTTPS support in front of the API server using nginx:
+
+### One-time setup
+
+```bash
+# 1. Install mkcert
+sudo apt install mkcert          # Debian/Ubuntu
+# brew install mkcert             # macOS
+
+# 2. Generate locally-trusted certs
+./scripts/generate-certs.sh
+
+# 3. Add hostname to /etc/hosts
+echo "127.0.0.1  aion.local" | sudo tee -a /etc/hosts
+```
+
+### Start with HTTPS
+
+```bash
+./scripts/compose.sh --profile app --profile gateway up -d
+# Browse: https://aion.local
+```
+
+The `gateway` profile requires the `app` profile. See `certs/README.md` for details.
+
+> **Security note:** When the gateway is active, port 8000 remains directly accessible (bypassing TLS). For LAN demos, set `RAG_API_HOST_PORT=127.0.0.1:8000` in `.env` to restrict direct access to localhost only.
 
 ## Podman Setup
 
