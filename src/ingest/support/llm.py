@@ -44,6 +44,7 @@ def _llm_json(
             messages,
             temperature=config.llm_temperature,
             max_tokens=max_tokens,
+            timeout=config.llm_timeout_seconds,
         )
         return parse_json_object(response.content)
     except Exception:

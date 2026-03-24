@@ -505,6 +505,7 @@ def ingest_directory(
                         "source_version": source["source_version"],
                         "content_hash": previous_hash,
                     }
+                    save_manifest(manifest)
                     logger.info(
                         "ingestion_skipped source=%s source_key=%s reason=unchanged",
                         source["source_name"],
@@ -562,6 +563,7 @@ def ingest_directory(
                     "processing_log": result["processing_log"][-12:],
                     "mirror_stem": stem,
                 }
+                save_manifest(manifest)
 
                 if config.export_processed and config.clean_store_dir:
                     _store = CleanDocumentStore(Path(config.clean_store_dir))

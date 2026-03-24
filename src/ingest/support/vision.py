@@ -223,6 +223,7 @@ def _describe_image(
         model_alias="vision",
         temperature=config.vision_temperature,
         max_tokens=config.vision_max_tokens,
+        timeout=config.vision_timeout_seconds,
     )
     parsed = parse_json_object(response.content)
     caption = str(parsed.get("caption", "")).strip() or "No caption generated."

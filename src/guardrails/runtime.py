@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Optional
 
 logger = logging.getLogger("rag.guardrails.runtime")
@@ -25,6 +26,7 @@ class GuardrailsRuntime:
     _initialized: bool = False
     _rails = None  # LLMRails instance
     _auto_disabled: bool = False
+    _lock: threading.Lock = threading.Lock()
 
     @classmethod
     def get(cls) -> GuardrailsRuntime:
@@ -34,7 +36,9 @@ class GuardrailsRuntime:
             The singleton `GuardrailsRuntime` instance.
         """
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     @classmethod
@@ -65,28 +69,29 @@ class GuardrailsRuntime:
         Raises:
             SyntaxError: If Colang parsing fails (fail-fast at startup).
         """
-        if self._initialized:
-            return
-        if not self.is_enabled():
-            logger.info("NeMo Guardrails disabled (RAG_NEMO_ENABLED=false)")
-            return
+        with type(self)._lock:
+            if self._initialized:
+                return
+            if not self.is_enabled():
+                logger.info("NeMo Guardrails disabled (RAG_NEMO_ENABLED=false)")
+                return
 
-        try:
-            from nemoguardrails import LLMRails, RailsConfig
+            try:
+                from nemoguardrails import LLMRails, RailsConfig
 
-            logger.info("Initializing NeMo Guardrails from %s...", config_dir)
-            config = RailsConfig.from_path(config_dir)
-            self._rails = LLMRails(config)
-            self._initialized = True
-            logger.info("NeMo Guardrails runtime initialized successfully")
-        except SyntaxError as e:
-            logger.error("Colang parse error in %s: %s", config_dir, e)
-            raise
-        except Exception as e:
-            logger.error(
-                "NeMo Guardrails init failed: %s — auto-disabling guardrails", e
-            )
-            cls._auto_disabled = True
+                logger.info("Initializing NeMo Guardrails from %s...", config_dir)
+                config = RailsConfig.from_path(config_dir)
+                self._rails = LLMRails(config)
+                self._initialized = True
+                logger.info("NeMo Guardrails runtime initialized successfully")
+            except SyntaxError as e:
+                logger.error("Colang parse error in %s: %s", config_dir, e)
+                raise
+            except Exception as e:
+                logger.error(
+                    "NeMo Guardrails init failed: %s — auto-disabling guardrails", e
+                )
+                type(self)._auto_disabled = True
 
     @property
     def rails(self) -> Any | None:
@@ -140,7 +145,8 @@ class GuardrailsRuntime:
     @classmethod
     def reset(cls) -> None:
         """Reset singleton state (primarily for testing)."""
-        if cls._instance is not None:
-            cls._instance.shutdown()
-        cls._instance = None
-        cls._auto_disabled = False
+        with cls._lock:
+            if cls._instance is not None:
+                cls._instance.shutdown()
+            cls._instance = None
+            cls._auto_disabled = False

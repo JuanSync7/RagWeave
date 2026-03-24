@@ -181,12 +181,17 @@ class LLMProvider:
             )
 
     def _base_kwargs(
-        self, model_alias: str = "default", **overrides: Any
+        self,
+        model_alias: str = "default",
+        user_id: Optional[str] = None,
+        **overrides: Any,
     ) -> Dict[str, Any]:
         """Build base keyword arguments for `Router.completion()` calls.
 
         Args:
             model_alias: Router model alias to use.
+            user_id: Optional end-user identifier forwarded to LiteLLM as the
+                ``user`` field so per-user cost attribution is recorded.
             **overrides: Additional keyword arguments to merge.
 
         Returns:
@@ -197,6 +202,8 @@ class LLMProvider:
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
         }
+        if user_id:
+            kwargs["user"] = user_id
         kwargs.update(overrides)
         return kwargs
 
@@ -208,6 +215,8 @@ class LLMProvider:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         response_format: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> LLMResponse:
         """Run a synchronous completion via the Router.
 
@@ -217,11 +226,13 @@ class LLMProvider:
             temperature: Optional sampling temperature override.
             max_tokens: Optional max completion tokens override.
             response_format: Optional response format payload (e.g. JSON mode).
+            timeout: Optional per-call timeout in seconds.
+            user_id: Optional end-user identifier for per-user cost attribution.
 
         Returns:
             Normalized `LLMResponse`.
         """
-        kwargs = self._base_kwargs(model_alias=model_alias)
+        kwargs = self._base_kwargs(model_alias=model_alias, user_id=user_id)
         kwargs["messages"] = messages
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -229,6 +240,8 @@ class LLMProvider:
             kwargs["max_tokens"] = max_tokens
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if timeout is not None:
+            kwargs["timeout"] = timeout
 
         response = self._router.completion(**kwargs)
 
@@ -255,6 +268,8 @@ class LLMProvider:
         model_alias: str = "default",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> Any:
         """Run a synchronous streaming completion.
 
@@ -263,16 +278,20 @@ class LLMProvider:
             model_alias: Router model alias to use.
             temperature: Optional sampling temperature override.
             max_tokens: Optional max completion tokens override.
+            timeout: Optional per-call timeout in seconds.
+            user_id: Optional end-user identifier for per-user cost attribution.
 
         Yields:
             Content chunks (strings).
         """
-        kwargs = self._base_kwargs(model_alias=model_alias, stream=True)
+        kwargs = self._base_kwargs(model_alias=model_alias, user_id=user_id, stream=True)
         kwargs["messages"] = messages
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        if timeout is not None:
+            kwargs["timeout"] = timeout
 
         response = self._router.completion(**kwargs)
         for chunk in response:
@@ -288,6 +307,8 @@ class LLMProvider:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         response_format: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> LLMResponse:
         """Run an async completion via the Router.
 
@@ -297,11 +318,13 @@ class LLMProvider:
             temperature: Optional sampling temperature override.
             max_tokens: Optional max completion tokens override.
             response_format: Optional response format payload (e.g. JSON mode).
+            timeout: Optional per-call timeout in seconds.
+            user_id: Optional end-user identifier for per-user cost attribution.
 
         Returns:
             Normalized `LLMResponse`.
         """
-        kwargs = self._base_kwargs(model_alias=model_alias)
+        kwargs = self._base_kwargs(model_alias=model_alias, user_id=user_id)
         kwargs["messages"] = messages
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -309,6 +332,8 @@ class LLMProvider:
             kwargs["max_tokens"] = max_tokens
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if timeout is not None:
+            kwargs["timeout"] = timeout
 
         response = await self._router.acompletion(**kwargs)
 
@@ -335,6 +360,8 @@ class LLMProvider:
         model_alias: str = "default",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncIterator[str]:
         """Run an async streaming completion.
 
@@ -343,16 +370,20 @@ class LLMProvider:
             model_alias: Router model alias to use.
             temperature: Optional sampling temperature override.
             max_tokens: Optional max completion tokens override.
+            timeout: Optional per-call timeout in seconds.
+            user_id: Optional end-user identifier for per-user cost attribution.
 
         Yields:
             Content chunks (strings).
         """
-        kwargs = self._base_kwargs(model_alias=model_alias, stream=True)
+        kwargs = self._base_kwargs(model_alias=model_alias, user_id=user_id, stream=True)
         kwargs["messages"] = messages
         if temperature is not None:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        if timeout is not None:
+            kwargs["timeout"] = timeout
 
         response = await self._router.acompletion(**kwargs)
         async for chunk in response:
@@ -367,6 +398,8 @@ class LLMProvider:
         model_alias: str = "default",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> LLMResponse:
         """Run a completion expecting a JSON object response.
 
@@ -375,6 +408,8 @@ class LLMProvider:
             model_alias: Router model alias to use.
             temperature: Optional sampling temperature override.
             max_tokens: Optional max completion tokens override.
+            timeout: Optional per-call timeout in seconds.
+            user_id: Optional end-user identifier for per-user cost attribution.
 
         Returns:
             Normalized `LLMResponse`.
@@ -385,6 +420,8 @@ class LLMProvider:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
+            timeout=timeout,
+            user_id=user_id,
         )
 
     def vision_completion(
@@ -396,6 +433,8 @@ class LLMProvider:
         model_alias: str = "vision",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> LLMResponse:
         """Run a vision completion with a base64-encoded image.
 
@@ -406,6 +445,8 @@ class LLMProvider:
             model_alias: Router model alias to use (defaults to "vision").
             temperature: Optional sampling temperature override.
             max_tokens: Optional max completion tokens override.
+            timeout: Optional per-call timeout in seconds.
+            user_id: Optional end-user identifier for per-user cost attribution.
 
         Returns:
             Normalized `LLMResponse`.
@@ -430,6 +471,8 @@ class LLMProvider:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
+            timeout=timeout,
+            user_id=user_id,
         )
 
     def is_available(self, model_alias: str = "default") -> bool:

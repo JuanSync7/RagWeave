@@ -91,8 +91,9 @@ def _record_metric(rail_name: str, verdict: RailVerdict, ms: float) -> None:
 class InputRailExecutor:
     """Run all enabled input rails in parallel (REQ-702).
 
-    Each rail has a per-rail timeout. Timed-out or failed rails
-    return a PASS verdict with a warning logged (REQ-902).
+    Each rail has a per-rail timeout. By default, timed-out or failed rails
+    return a PASS verdict (fail-open). Rails listed in ``fail_closed_rails``
+    return REJECT on timeout or error instead (fail-closed).
     """
 
     def __init__(
@@ -103,6 +104,7 @@ class InputRailExecutor:
         toxicity_filter: Optional[ToxicityFilter] = None,
         topic_safety_checker: Optional[TopicSafetyChecker] = None,
         timeout_seconds: int = 10,
+        fail_closed_rails: frozenset = frozenset(),
     ) -> None:
         """Initialize the input-rail executor.
 
@@ -113,6 +115,9 @@ class InputRailExecutor:
             toxicity_filter: Optional toxicity detection rail.
             topic_safety_checker: Optional on-topic/off-topic detection rail.
             timeout_seconds: Per-rail timeout in seconds.
+            fail_closed_rails: Rail names that return REJECT (not PASS) on
+                timeout or error. Use ``frozenset({"injection", "toxicity"})``
+                to harden security-critical rails.
         """
         self._intent = intent_classifier
         self._injection = injection_detector
@@ -120,6 +125,7 @@ class InputRailExecutor:
         self._toxicity = toxicity_filter
         self._topic_safety = topic_safety_checker
         self._timeout = timeout_seconds
+        self._fail_closed_rails = fail_closed_rails
         self._tracer = get_tracer()
 
     @property
@@ -253,26 +259,46 @@ class InputRailExecutor:
 
                 except TimeoutError:
                     ms = measure_ms(t0)
-                    logger.warning(
-                        "Rail '%s' timed out after %.0fms — defaulting to pass | hash=%s",
-                        name,
-                        ms,
-                        query_hash,
-                    )
-                    executions.append(RailExecution(name, RailVerdict.PASS, ms))
-                    _record_metric(name, RailVerdict.PASS, ms)
+                    if name in self._fail_closed_rails:
+                        logger.warning(
+                            "Rail '%s' timed out after %.0fms — fail-closed: REJECT | hash=%s",
+                            name, ms, query_hash,
+                        )
+                        default_verdict = RailVerdict.REJECT
+                        if name == "injection":
+                            result.injection_verdict = RailVerdict.REJECT
+                        elif name == "toxicity":
+                            result.toxicity_verdict = RailVerdict.REJECT
+                    else:
+                        logger.warning(
+                            "Rail '%s' timed out after %.0fms — defaulting to pass | hash=%s",
+                            name, ms, query_hash,
+                        )
+                        default_verdict = RailVerdict.PASS
+                    executions.append(RailExecution(name, default_verdict, ms))
+                    _record_metric(name, default_verdict, ms)
                     span.end(status="error")
 
                 except Exception as e:
                     ms = measure_ms(t0)
-                    logger.warning(
-                        "Rail '%s' failed: %s — defaulting to pass | hash=%s",
-                        name,
-                        e,
-                        query_hash,
-                    )
-                    executions.append(RailExecution(name, RailVerdict.PASS, ms))
-                    _record_metric(name, RailVerdict.PASS, ms)
+                    if name in self._fail_closed_rails:
+                        logger.warning(
+                            "Rail '%s' failed: %s — fail-closed: REJECT | hash=%s",
+                            name, e, query_hash,
+                        )
+                        default_verdict = RailVerdict.REJECT
+                        if name == "injection":
+                            result.injection_verdict = RailVerdict.REJECT
+                        elif name == "toxicity":
+                            result.toxicity_verdict = RailVerdict.REJECT
+                    else:
+                        logger.warning(
+                            "Rail '%s' failed: %s — defaulting to pass | hash=%s",
+                            name, e, query_hash,
+                        )
+                        default_verdict = RailVerdict.PASS
+                    executions.append(RailExecution(name, default_verdict, ms))
+                    _record_metric(name, default_verdict, ms)
                     span.end(status="error", error=e)
 
         result.rail_executions = executions
@@ -294,6 +320,7 @@ class OutputRailExecutor:
         pii_detector: Optional[PIIDetector] = None,
         toxicity_filter: Optional[ToxicityFilter] = None,
         timeout_seconds: int = 10,
+        fail_closed_rails: frozenset = frozenset(),
     ) -> None:
         """Initialize the output-rail executor.
 
@@ -302,11 +329,15 @@ class OutputRailExecutor:
             pii_detector: Optional PII redaction rail.
             toxicity_filter: Optional toxicity filter rail for generated outputs.
             timeout_seconds: Per-rail timeout in seconds.
+            fail_closed_rails: Rail names that return REJECT on timeout or error
+                instead of PASS. Use ``frozenset({"faithfulness"})`` to reject
+                answers when the faithfulness rail cannot complete.
         """
         self._faithfulness = faithfulness_checker
         self._pii = pii_detector
         self._toxicity = toxicity_filter
         self._timeout = timeout_seconds
+        self._fail_closed_rails = fail_closed_rails
         self._tracer = get_tracer()
 
     def execute(
@@ -408,28 +439,52 @@ class OutputRailExecutor:
 
                 except TimeoutError:
                     ms = measure_ms(t0)
-                    logger.warning(
-                        "Output rail '%s' timed out after %.0fms — defaulting to pass",
-                        name,
-                        ms,
-                    )
-                    executions.append(
-                        RailExecution(f"output_{name}", RailVerdict.PASS, ms)
-                    )
-                    _record_metric(f"output_{name}", RailVerdict.PASS, ms)
+                    if name in self._fail_closed_rails:
+                        logger.warning(
+                            "Output rail '%s' timed out after %.0fms — fail-closed: REJECT",
+                            name, ms,
+                        )
+                        default_verdict = RailVerdict.REJECT
+                        if name == "faithfulness":
+                            from src.guardrails.faithfulness import _FALLBACK_MESSAGE, FaithfulnessResult
+                            rail_results["faithfulness"] = FaithfulnessResult(
+                                overall_score=0.0,
+                                verdict=RailVerdict.REJECT,
+                                fallback_message=_FALLBACK_MESSAGE,
+                            )
+                    else:
+                        logger.warning(
+                            "Output rail '%s' timed out after %.0fms — defaulting to pass",
+                            name, ms,
+                        )
+                        default_verdict = RailVerdict.PASS
+                    executions.append(RailExecution(f"output_{name}", default_verdict, ms))
+                    _record_metric(f"output_{name}", default_verdict, ms)
                     span.end(status="error")
 
                 except Exception as e:
                     ms = measure_ms(t0)
-                    logger.warning(
-                        "Output rail '%s' failed: %s — defaulting to pass",
-                        name,
-                        e,
-                    )
-                    executions.append(
-                        RailExecution(f"output_{name}", RailVerdict.PASS, ms)
-                    )
-                    _record_metric(f"output_{name}", RailVerdict.PASS, ms)
+                    if name in self._fail_closed_rails:
+                        logger.warning(
+                            "Output rail '%s' failed: %s — fail-closed: REJECT",
+                            name, e,
+                        )
+                        default_verdict = RailVerdict.REJECT
+                        if name == "faithfulness":
+                            from src.guardrails.faithfulness import _FALLBACK_MESSAGE, FaithfulnessResult
+                            rail_results["faithfulness"] = FaithfulnessResult(
+                                overall_score=0.0,
+                                verdict=RailVerdict.REJECT,
+                                fallback_message=_FALLBACK_MESSAGE,
+                            )
+                    else:
+                        logger.warning(
+                            "Output rail '%s' failed: %s — defaulting to pass",
+                            name, e,
+                        )
+                        default_verdict = RailVerdict.PASS
+                    executions.append(RailExecution(f"output_{name}", default_verdict, ms))
+                    _record_metric(f"output_{name}", default_verdict, ms)
                     span.end(status="error", error=e)
 
         # ── Consensus Gate ──
