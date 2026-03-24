@@ -26,6 +26,7 @@ class _NeverCalledEmbeddings:
 
 
 def _build_chain_for_budget_tests() -> RAGChain:
+    from collections import OrderedDict
     chain = object.__new__(RAGChain)
     chain.tracer = _DummyTracer()
     chain.retry_provider = _DummyRetryProvider()
@@ -36,6 +37,10 @@ def _build_chain_for_budget_tests() -> RAGChain:
     chain._generator = None
     chain.embeddings = _NeverCalledEmbeddings()
     chain.reranker = None
+    chain._guardrails_input_executor = None
+    chain._guardrails_output_executor = None
+    chain._embedding_cache = OrderedDict()
+    chain._embedding_cache_max = 128
     return chain
 
 

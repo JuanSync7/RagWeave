@@ -78,7 +78,7 @@ class ToxicityResult:
 
     Attributes:
         verdict: PASS/REJECT/MODIFY verdict.
-        score: Optional normalized score in \([0.0, 1.0]\) when available.
+        score: Optional normalized score in [0.0, 1.0] when available.
         message: Optional human-facing message for rejections.
     """
 

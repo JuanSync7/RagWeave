@@ -95,7 +95,7 @@ class FaithfulnessResult:
     """Result of faithfulness evaluation.
 
     Attributes:
-        overall_score: Overall support score in \([0.0, 1.0]\).
+        overall_score: Overall support score in [0.0, 1.0].
         verdict: PASS/REJECT/MODIFY verdict derived from policy.
         warning: Whether to warn while still allowing the answer.
         claim_scores: Optional per-claim breakdown.
@@ -236,7 +236,7 @@ class FaithfulnessChecker:
             formatted_context: Evidence text formatted for the prompt.
 
         Returns:
-            Score in \([0.0, 1.0]\) if available, otherwise None.
+            Score in [0.0, 1.0] if available, otherwise None.
         """
         prompt = (
             "You are given a task to identify if the hypothesis is grounded by / "

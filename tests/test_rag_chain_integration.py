@@ -21,6 +21,7 @@ class _DummyRetryProvider:
 
 
 def _build_chain_without_model_init() -> RAGChain:
+    from collections import OrderedDict
     chain = object.__new__(RAGChain)
     chain.tracer = _DummyTracer()
     chain.retry_provider = _DummyRetryProvider()
@@ -31,6 +32,10 @@ def _build_chain_without_model_init() -> RAGChain:
     chain._generator = None
     chain.embeddings = None
     chain.reranker = None
+    chain._guardrails_input_executor = None
+    chain._guardrails_output_executor = None
+    chain._embedding_cache = OrderedDict()
+    chain._embedding_cache_max = 128
     return chain
 
 
