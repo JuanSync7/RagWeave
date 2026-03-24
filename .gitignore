@@ -45,6 +45,6 @@ logs/*.log
 models/
 
 # TLS certs (generated locally via mkcert)
-certs/
+certs/*
 !certs/.gitkeep
 !certs/README.md
