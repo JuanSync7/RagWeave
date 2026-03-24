@@ -13,6 +13,7 @@ Supports:
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import orjson
 import logging
@@ -291,7 +292,7 @@ async def authenticate_request(
     return Principal(
         subject="anonymous",
         tenant_id="default",
-        roles=["query", "admin"],
+        roles=["query"],
         auth_type="none",
     )
 

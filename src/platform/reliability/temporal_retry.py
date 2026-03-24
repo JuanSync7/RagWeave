@@ -88,7 +88,24 @@ class TemporalRetryProvider(RetryProvider):
         )
 
         try:
-            return asyncio.run(self._execute_via_temporal(payload))
+            # Detect whether we are already inside a running event loop (e.g.
+            # called from a FastAPI async handler).  asyncio.run() raises
+            # RuntimeError in that situation, which would silently bypass
+            # Temporal.  Instead, delegate to a background thread that owns its
+            # own event loop.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is not None and loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(asyncio.run, self._execute_via_temporal(payload))
+                    return future.result()
+            else:
+                return asyncio.run(self._execute_via_temporal(payload))
         except Exception as exc:
             logger.warning("Temporal execution unavailable, falling back to local: %s", exc)
             return fn()

@@ -127,6 +127,7 @@ class ConversationMemoryProvider:
         role: str,
         content: str,
         query_id: str = "",
+        sources: list | None = None,
     ) -> None:
         """Append a single turn to a conversation.
 
@@ -255,6 +256,7 @@ class NoopConversationMemory(ConversationMemoryProvider):
         role: str,
         content: str,
         query_id: str = "",
+        sources: list | None = None,
     ) -> None:
         return
 
@@ -313,8 +315,20 @@ class RedisConversationMemory(ConversationMemoryProvider):
         self._llm_provider = get_llm_provider()
 
     def _scope(self, tenant_id: str, subject: str, project_id: str | None) -> str:
-        """Build the scope key for a tenant/subject/project tuple."""
-        return f"{tenant_id}:{subject}:{project_id or '-'}"
+        """Build the scope key for a tenant/subject/project tuple.
+
+        Each component is percent-encoded so that a colon inside a component
+        (e.g. ``subject="a:b"``) cannot collide with the structural colon
+        separators between components.
+        """
+
+        def _enc(s: str) -> str:
+            return s.replace("%", "%25").replace(":", "%3A")
+
+        parts = [_enc(tenant_id), _enc(subject)]
+        if project_id:
+            parts.append(_enc(project_id))
+        return ":".join(parts)
 
     def _meta_key(self, scope: str, conversation_id: str) -> str:
         """Return the Redis key for conversation metadata."""
@@ -424,6 +438,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
                         content=str(payload.get("content", "")),
                         timestamp_ms=int(payload.get("timestamp_ms", 0)),
                         query_id=str(payload.get("query_id", "")),
+                        sources=payload.get("sources") or [],
                     )
                 )
             except Exception:
@@ -440,6 +455,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
         role: str,
         content: str,
         query_id: str = "",
+        sources: list | None = None,
     ) -> None:
         if not content.strip():
             return
@@ -457,6 +473,7 @@ class RedisConversationMemory(ConversationMemoryProvider):
             "content": sanitize_memory_text(content, max_chars=5000),
             "timestamp_ms": now,
             "query_id": query_id,
+            "sources": sources or [],
         }
         self._client.rpush(key, orjson.dumps(row))
         self._client.hset(

@@ -172,6 +172,11 @@ def get_cache() -> CacheProvider:
 
     The provider is chosen from configuration on first call and then cached.
 
+    **Tenant isolation**: callers that handle multi-tenant requests MUST prefix
+    every cache key with the tenant identifier to prevent cross-tenant key
+    collisions.  Recommended convention: ``f"{tenant_id}:{your_key}"``.
+    Use ``TenantScopedCache`` when available to enforce this automatically.
+
     Returns:
         The configured cache provider:
 
