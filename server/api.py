@@ -57,7 +57,7 @@ from server.routes import (
     create_query_router,
     create_system_router,
 )
-from server.utils import console_ok as _console_ok, error_payload as _error_payload
+from server.utils import console_ok as _console_ok, error_payload as _error_payload, validate_startup_config as _validate_startup_config
 from server.schemas import (
     QueryRequest,
 )
@@ -80,18 +80,6 @@ _api_inflight_semaphore = (
 _api_overload_queue_timeout_ms = max(1, RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS)
 
 API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
-
-
-def _validate_startup_config(
-    workflow_timeout_ms: int = RAG_WORKFLOW_DEFAULT_TIMEOUT_MS,
-) -> None:
-    """Raise ValueError for config values that would cause silent misbehaviour."""
-    if workflow_timeout_ms <= 0:
-        raise ValueError(
-            f"RAG_WORKFLOW_DEFAULT_TIMEOUT_MS must be a positive integer, "
-            f"got {workflow_timeout_ms!r}. "
-            "Set RAG_WORKFLOW_DEFAULT_TIMEOUT_MS to a value > 0 (milliseconds)."
-        )
 
 
 def _enforce_rate_limit(principal: Principal, endpoint: str) -> None:

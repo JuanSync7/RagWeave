@@ -97,22 +97,22 @@ def test_workflow_timeout_custom(monkeypatch):
 
 def test_validate_startup_config_passes_with_valid_value():
     """Valid positive timeout must not raise."""
-    from server.api import _validate_startup_config
-    _validate_startup_config(workflow_timeout_ms=120000)  # must not raise
+    from server.common.utils import validate_startup_config
+    validate_startup_config(workflow_timeout_ms=120000)  # must not raise
 
 
 def test_validate_startup_config_rejects_zero():
     """Zero timeout must raise ValueError."""
-    from server.api import _validate_startup_config
+    from server.common.utils import validate_startup_config
     with pytest.raises(ValueError, match="RAG_WORKFLOW_DEFAULT_TIMEOUT_MS"):
-        _validate_startup_config(workflow_timeout_ms=0)
+        validate_startup_config(workflow_timeout_ms=0)
 
 
 def test_validate_startup_config_rejects_negative():
     """Negative timeout must raise ValueError."""
-    from server.api import _validate_startup_config
+    from server.common.utils import validate_startup_config
     with pytest.raises(ValueError, match="RAG_WORKFLOW_DEFAULT_TIMEOUT_MS"):
-        _validate_startup_config(workflow_timeout_ms=-1000)
+        validate_startup_config(workflow_timeout_ms=-1000)
 
 
 def test_workflow_timeout_not_hardcoded():

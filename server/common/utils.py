@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from config.settings import RAG_WORKFLOW_DEFAULT_TIMEOUT_MS
 from server.common.schemas import ApiErrorDetail, ApiErrorResponse, ConsoleEnvelope
 
 
@@ -38,6 +39,18 @@ def console_ok(request: Request, data: dict) -> ConsoleEnvelope:
     """Build success envelope payload for console endpoints."""
 
     return ConsoleEnvelope(ok=True, request_id=request_id_from_request(request), data=data)
+
+
+def validate_startup_config(
+    workflow_timeout_ms: int = RAG_WORKFLOW_DEFAULT_TIMEOUT_MS,
+) -> None:
+    """Raise ValueError for config values that would cause silent misbehaviour."""
+    if workflow_timeout_ms <= 0:
+        raise ValueError(
+            f"RAG_WORKFLOW_DEFAULT_TIMEOUT_MS must be a positive integer, "
+            f"got {workflow_timeout_ms!r}. "
+            "Set RAG_WORKFLOW_DEFAULT_TIMEOUT_MS to a value > 0 (milliseconds)."
+        )
 
 
 def console_err(
