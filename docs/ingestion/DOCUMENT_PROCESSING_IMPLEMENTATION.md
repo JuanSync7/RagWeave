@@ -1,5 +1,7 @@
 # Document Processing Pipeline — Implementation Plan
 
+> **Historical artifact:** This is the original implementation plan used to build `src/ingest/doc_processing/`. The File Structure section reflects the implemented layout. Other sections (stub code, `- [ ]` task steps) are planning artifacts and may reference draft paths that differ from the final implementation.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the Document Processing Pipeline (FR-101 through FR-587) as a LangGraph StateGraph DAG that transforms source documents into clean Markdown persisted to the Clean Document Store.
@@ -14,33 +16,27 @@
 
 ```
 src/ingest/
-├── pipeline_types.py              # DocumentProcessingState, PipelineConfig, CleanDocumentMetadata, exceptions
-├── pipeline_shared.py             # generate_source_key, compute_source_hash, compute_clean_hash
-├── pipeline_workflow.py           # build_document_processing_graph(), routing functions
-├── clean_store.py                 # CleanDocumentStore class (atomic write/read)
-├── config_loader.py               # Config loading, merging, validation
-├── exceptions.py                  # Pipeline-specific exception types
-├── nodes/
-│   ├── document_ingestion.py      # Node 1: format detection, extraction, hashing
-│   ├── structure_detection.py     # Node 2: section tree, tables, figures, confidence
-│   ├── multimodal_processing.py   # Node 3: VLM figure descriptions (optional)
-│   ├── text_cleaning.py           # Node 4: whitespace, boilerplate, integration
-│   └── document_refactoring.py    # Node 5: self-contained paragraphs (optional)
-├── pipeline/
-│   └── __init__.py                # Public API facade
-└── ingest.py                      # CLI entry point
+├── clean_store.py                          # CleanDocumentStore (atomic read/write)
+├── common/
+│   └── types.py                            # IngestionConfig, Runtime, DocumentProcessingState
+├── doc_processing/
+│   ├── __init__.py                         # Re-exports run_document_processing
+│   ├── state.py                            # DocumentProcessingState TypedDict
+│   ├── workflow.py                         # build_document_processing_graph()
+│   ├── impl.py                             # run_document_processing(...) — entry point
+│   └── nodes/
+│       ├── document_ingestion.py           # Node 1
+│       ├── structure_detection.py          # Node 2
+│       ├── multimodal_processing.py        # Node 3
+│       ├── text_cleaning.py                # Node 4
+│       └── document_refactoring.py         # Node 5
+└── pipeline/
+    ├── __init__.py                         # Public API facade
+    └── impl.py                             # Two-phase orchestrator
 
 tests/ingest/
-├── test_pipeline_config.py        # Task A-1.1
-├── test_dag_skeleton.py           # Task A-1.2
-├── test_document_ingestion.py     # Task A-1.3
-├── test_structure_detection.py    # Task A-1.4
-├── test_text_cleaning.py          # Task A-1.5
-├── test_cli.py                    # Task A-1.11
-├── test_clean_store.py            # Task A-S.1
-├── test_document_refactoring.py   # Task A-2.3
-├── test_multimodal_processing.py  # Task A-3.1
-└── test_pptx_xlsx_extractors.py   # Task A-3.5
+├── test_clean_store.py
+└── test_two_phase_orchestrator.py
 ```
 
 ---

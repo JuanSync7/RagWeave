@@ -1,20 +1,21 @@
 <!-- @summary
-Pipeline orchestration: public API facade, runtime lifecycle, and LangGraph workflow composition.
+Pipeline orchestration: public API facade and two-phase runtime lifecycle (doc_processing → CleanDocumentStore → embedding).
 @end-summary -->
 
 # ingest/pipeline
 
 ## Overview
 
-This directory contains the pipeline orchestration layer -- the public API, runtime lifecycle management, and LangGraph graph topology. It does **not** contain business logic (that lives in `nodes/` and `support/`).
+This directory contains the pipeline orchestration layer — the public API and two-phase runtime lifecycle. It does **not** contain business logic (that lives in `doc_processing/`, `embedding/`, and `support/`).
 
 ## Files
 
 | File | Purpose | Key Exports |
 | --- | --- | --- |
-| `__init__.py` | Public API facade (stable import surface) | `IngestionConfig`, `ingest_directory`, `ingest_file`, `verify_core_design` |
-| `impl.py` | Runtime orchestration: startup checks, directory ingestion loop, manifest management, vector store operations | `ingest_directory`, `ingest_file`, `verify_core_design` |
-| `workflow.py` | LangGraph `StateGraph` composition wiring all 13 nodes with conditional transitions | `build_graph` |
+| `__init__.py` | Public API facade (stable import surface) | `ingest_file`, `ingest_directory` |
+| `impl.py` | Two-phase orchestration: Phase 1 → CleanDocumentStore → Phase 2, manifest management, skip detection | `ingest_file`, `ingest_directory` |
+
+Note: `workflow.py` has been replaced by `src/ingest/doc_processing/workflow.py` and `src/ingest/embedding/workflow.py`.
 
 ## Import Convention
 

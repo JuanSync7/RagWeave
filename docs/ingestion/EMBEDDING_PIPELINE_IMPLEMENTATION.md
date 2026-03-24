@@ -1,5 +1,7 @@
 # Embedding Pipeline — Implementation Plan
 
+> **Historical artifact:** This is the original implementation plan used to build `src/ingest/embedding/`. The File Structure section reflects the implemented layout. Other sections (stub code, `- [ ]` task steps) are planning artifacts and may reference draft paths that differ from the final implementation.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the full Embedding Pipeline (FR-591–FR-1304) using a three-phase contract-first workflow that prevents test bias by isolating agent contexts.
@@ -12,75 +14,32 @@
 
 ## File Structure
 
-All files that will be created or modified, organized by directory.
-
-### Contracts (Phase 0)
-
 ```
 src/ingest/
-├── pipeline_types.py              # MODIFY — add EmbeddingPipelineState TypedDict, PipelineConfig extensions
-├── schemas.py                     # CREATE — ChunkRecord, EnrichedChunk, KGTriple, QualityScore, EmbeddingReport
-├── exceptions.py                  # MODIFY — add embedding-specific exception types
-└── clean_store.py                 # CREATE — CleanDocumentStore reader + change detection
-```
+├── clean_store.py                          # CleanDocumentStore (atomic read/write)
+├── common/
+│   └── types.py                            # IngestionConfig, Runtime
+├── embedding/
+│   ├── __init__.py                         # Re-exports run_embedding_pipeline
+│   ├── state.py                            # EmbeddingPipelineState TypedDict
+│   ├── workflow.py                         # build_embedding_graph()
+│   ├── impl.py                             # run_embedding_pipeline(...) — entry point
+│   └── nodes/
+│       ├── chunking.py                     # Node 6
+│       ├── chunk_enrichment.py             # Node 7
+│       ├── metadata_generation.py          # Node 8
+│       ├── cross_reference_extraction.py   # Node 9
+│       ├── knowledge_graph_extraction.py   # Node 10
+│       ├── quality_validation.py           # Node 11
+│       ├── embedding_storage.py            # Node 12
+│       └── knowledge_graph_storage.py      # Node 13
+└── pipeline/
+    ├── __init__.py                         # Public API facade
+    └── impl.py                             # Two-phase orchestrator
 
-### Nodes (Phase B implementation)
-
-```
-src/ingest/nodes/
-├── chunking.py                    # MODIFY — new Embedding Pipeline chunking node
-├── chunk_enrichment.py            # MODIFY — new Embedding Pipeline enrichment node
-├── metadata_generation.py         # MODIFY — LLM keyword/entity extraction + TF-IDF fallback
-├── cross_reference_extraction.py  # MODIFY — inter-document reference detection
-├── knowledge_graph_extraction.py  # MODIFY — triple extraction + entity normalization
-├── quality_validation.py          # MODIFY — quality scoring + dedup filtering
-├── embedding_storage.py           # MODIFY — embedding generation + Weaviate upsert
-└── knowledge_graph_storage.py     # MODIFY — graph store writer
-```
-
-### Pipeline orchestration (Phase B)
-
-```
-src/ingest/
-├── pipeline/
-│   ├── workflow.py                # MODIFY — build_embedding_pipeline_graph() factory
-│   └── impl.py                    # MODIFY — EmbeddingPipelineRuntime orchestrator
-└── support/
-    ├── vocabulary.py              # CREATE — domain vocabulary loader
-    └── entity.py                  # CREATE — entity consolidation support
-```
-
-### Tests (Phase A)
-
-```
 tests/ingest/
-├── test_clean_store_reader.py     # CREATE
-├── test_embedding_report.py       # CREATE
-├── test_reingestion.py            # CREATE
-└── nodes/
-    ├── __init__.py                # CREATE
-    ├── test_chunking.py           # CREATE
-    ├── test_chunk_enrichment.py   # CREATE
-    ├── test_metadata_generation.py # CREATE
-    ├── test_cross_reference.py    # CREATE
-    ├── test_kg_extraction.py      # CREATE
-    ├── test_entity_consolidation.py # CREATE
-    ├── test_quality_validation.py # CREATE
-    ├── test_embedding_storage.py  # CREATE
-    ├── test_kg_storage.py         # CREATE
-    ├── test_review_tiers.py       # CREATE
-    └── test_pipeline_dag.py       # CREATE
-```
-
-### Supporting files
-
-```
-tests/ingest/
-├── test_domain_vocabulary.py      # CREATE
-├── test_evaluation_framework.py   # CREATE
-├── test_langfuse_integration.py   # CREATE
-├── test_batch_processing.py       # CREATE
-└── test_schema_migration.py       # CREATE
+├── test_clean_store.py
+└── test_two_phase_orchestrator.py
 ```
 
 ---

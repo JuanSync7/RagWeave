@@ -1,0 +1,75 @@
+# @summary
+# LangGraph TypedDict state contract for the Phase 1 Document Processing Pipeline.
+# Exports: DocumentProcessingState
+# Deps: src.ingest.common.types
+# @end-summary
+
+"""State contract for the Document Processing Pipeline (Phase 1, nodes 1–5)."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, TypedDict
+
+from src.ingest.common.types import Runtime
+
+
+class DocumentProcessingState(TypedDict, total=False):
+    """Shared state flowing through the 5-node Document Processing DAG.
+
+    Populated progressively as nodes complete. The orchestrator is responsible
+    for the idempotency check (should_skip) BEFORE invoking this pipeline —
+    these fields are not present in this state.
+
+    Fields
+    ------
+    runtime : Runtime
+        Shared runtime dependencies (config, embedder, weaviate, kg_builder).
+    source_path : str
+        Absolute path to the source file.
+    source_name : str
+        Display name (relative path or human-readable label).
+    source_uri : str
+        Stable URI for the source (e.g. file:///...).
+    source_key : str
+        Stable source identity key (e.g. local_fs:<dev>:<ino>).
+    source_id : str
+        OS-level stable identity (dev:inode).
+    source_hash : str
+        SHA-256 of source file bytes. Renamed from ``content_hash`` in IngestState.
+    connector : str
+        Connector identifier (e.g. ``local_fs``).
+    source_version : str
+        Source version string (mtime nanoseconds as string).
+    raw_text : str
+        Format-converted plain/markdown text from the source file.
+    structure : dict
+        Structure detection results: ``has_figures`` (bool), ``figures`` (list),
+        ``heading_count`` (int), ``docling_enabled`` (bool), ``docling_model`` (str).
+    multimodal_notes : list[str]
+        Vision-generated notes for figures. Empty list if multimodal disabled.
+    cleaned_text : str
+        Boilerplate-stripped, unicode-normalised Markdown text.
+    refactored_text : str | None
+        LLM-rewritten text (self-contained paragraphs). None if refactoring disabled.
+    errors : list[str]
+        Error messages from any node. Non-empty triggers orchestrator failure path.
+    processing_log : list[str]
+        Stage completion log entries for observability.
+    """
+
+    runtime: Runtime
+    source_path: str
+    source_name: str
+    source_uri: str
+    source_key: str
+    source_id: str
+    source_hash: str
+    connector: str
+    source_version: str
+    raw_text: str
+    structure: Dict[str, Any]
+    multimodal_notes: List[str]
+    cleaned_text: str
+    refactored_text: Optional[str]
+    errors: List[str]
+    processing_log: List[str]

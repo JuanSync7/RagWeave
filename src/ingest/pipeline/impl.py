@@ -41,7 +41,6 @@ from src.ingest.support.docling import ensure_docling_ready
 from src.ingest.support.vision import ensure_vision_ready
 from src.ingest.common.schemas import ManifestEntry, SourceIdentity
 from src.ingest.common.utils import load_manifest, save_manifest, sha256_path
-from src.ingest.nodes.document_ingestion import document_ingestion_node
 from src.ingest.common.shared import _extract_keywords_fallback
 from src.ingest.common.types import (
     IngestionConfig,
@@ -50,10 +49,11 @@ from src.ingest.common.types import (
     PIPELINE_NODE_NAMES,
     Runtime,
 )
-from src.ingest.pipeline.workflow import build_graph
+from src.ingest.clean_store import CleanDocumentStore
+from src.ingest.doc_processing.impl import run_document_processing
+from src.ingest.embedding.impl import run_embedding_pipeline
 
 logger = logging.getLogger("rag.ingest.pipeline")
-_GRAPH = build_graph()
 _LOCAL_CONNECTOR = "local_fs"
 
 
@@ -267,7 +267,11 @@ def ingest_file(
     existing_hash: str = "",
     existing_source_uri: str = "",
 ) -> dict:
-    """Run the compiled ingestion graph for a single source file.
+    """Run the two-phase ingestion pipeline for a single source file.
+
+    Phase 1 (Document Processing) extracts and cleans the document.
+    Phase 2 (Embedding Pipeline) chunks, embeds, and stores vectors.
+    The CleanDocumentStore persists Phase 1 output as the boundary.
 
     Args:
         source_path: Source file path.
@@ -276,16 +280,66 @@ def ingest_file(
         source_uri: Stable URI for the source.
         source_key: Stable source key used for idempotency.
         source_id: Stable identity for the source.
-        connector: Connector identifier (e.g., local filesystem).
-        source_version: Source version string (e.g., mtime ns).
+        connector: Connector identifier.
+        source_version: Source version string.
         existing_hash: Previously stored content hash (for incremental updates).
         existing_source_uri: Previously stored URI (for incremental updates).
 
     Returns:
-        The raw ingestion graph result payload.
+        Dict with keys: ``errors`` (list), ``stored_count`` (int),
+        ``metadata_summary`` (str), ``metadata_keywords`` (list),
+        ``processing_log`` (list), ``source_hash`` (str), ``clean_hash`` (str).
     """
-    return _GRAPH.invoke(
-        {
+    config = runtime.config
+    clean_store_dir = config.clean_store_dir
+    store = CleanDocumentStore(Path(clean_store_dir)) if clean_store_dir else None
+
+    # ── Phase 1 ──────────────────────────────────────────────────────────
+    phase1 = run_document_processing(
+        runtime=runtime,
+        source_path=str(source_path),
+        source_name=source_name,
+        source_uri=source_uri,
+        source_key=source_key,
+        source_id=source_id,
+        connector=connector,
+        source_version=source_version,
+    )
+
+    if phase1.get("errors"):
+        return {
+            "errors": phase1["errors"],
+            "stored_count": 0,
+            "metadata_summary": "",
+            "metadata_keywords": [],
+            "processing_log": phase1.get("processing_log", []),
+            "source_hash": phase1.get("source_hash", ""),
+            "clean_hash": "",
+        }
+
+    # Determine final clean text
+    clean_text: str = phase1.get("refactored_text") or phase1.get("cleaned_text", "")
+
+    # ── Persist to CleanDocumentStore ─────────────────────────────────────
+    if store is not None:
+        meta = {
+            "source_key": source_key,
+            "source_name": source_name,
+            "source_uri": source_uri,
+            "source_id": source_id,
+            "connector": connector,
+            "source_version": source_version,
+            "source_hash": phase1.get("source_hash", ""),
+            "refactored_text": phase1.get("refactored_text"),
+        }
+        store.write(source_key, clean_text, meta)
+        clean_hash = store.clean_hash(source_key)
+    else:
+        clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
+
+    # ── Write mirror artifacts (optional) ─────────────────────────────────
+    if config.persist_refactor_mirror:
+        source_identity = {
             "source_path": str(source_path),
             "source_name": source_name,
             "source_uri": source_uri,
@@ -293,26 +347,32 @@ def ingest_file(
             "source_id": source_id,
             "connector": connector,
             "source_version": source_version,
-            "content_hash": "",
-            "existing_hash": existing_hash,
-            "existing_source_uri": existing_source_uri,
-            "should_skip": False,
-            "errors": [],
-            "processing_log": [],
-            "raw_text": "",
-            "structure": {},
-            "multimodal_notes": [],
-            "cleaned_text": "",
-            "refactored_text": "",
-            "chunks": [],
-            "metadata_summary": "",
-            "metadata_keywords": [],
-            "cross_references": [],
-            "kg_triples": [],
-            "stored_count": 0,
-            "runtime": runtime,
         }
+        _write_refactor_mirror_artifacts(source_identity, phase1, config)
+
+    # ── Phase 2 ──────────────────────────────────────────────────────────
+    phase2 = run_embedding_pipeline(
+        runtime=runtime,
+        source_key=source_key,
+        source_name=source_name,
+        source_uri=source_uri,
+        source_id=source_id,
+        connector=connector,
+        source_version=source_version,
+        clean_text=clean_text,
+        clean_hash=clean_hash,
+        refactored_text=phase1.get("refactored_text"),
     )
+
+    return {
+        "errors": phase2.get("errors", []),
+        "stored_count": phase2.get("stored_count", 0),
+        "metadata_summary": phase2.get("metadata_summary", ""),
+        "metadata_keywords": phase2.get("metadata_keywords", []),
+        "processing_log": phase1.get("processing_log", []) + phase2.get("processing_log", []),
+        "source_hash": phase1.get("source_hash", ""),
+        "clean_hash": clean_hash,
+    }
 
 
 def ingest_directory(
@@ -425,6 +485,32 @@ def ingest_directory(
             matched_key, matched_entry = _find_manifest_entry(manifest, source)
             previous_hash = matched_entry.get("content_hash", "") if update else ""
             previous_uri = matched_entry.get("source_uri", "") if update else ""
+            # Idempotency check: skip if source unchanged and clean store entry exists
+            if update and previous_hash:
+                current_hash = sha256_path(source_path)
+                store_ok = (not config.clean_store_dir) or CleanDocumentStore(
+                    Path(config.clean_store_dir)
+                ).exists(source["source_key"])
+                if current_hash == previous_hash and store_ok:
+                    skipped += 1
+                    if matched_key and matched_key != source["source_key"]:
+                        manifest.pop(matched_key, None)
+                    manifest[source["source_key"]] = {
+                        **matched_entry,
+                        "source": source["source_name"],
+                        "source_uri": source["source_uri"],
+                        "source_id": source["source_id"],
+                        "source_key": source["source_key"],
+                        "connector": source["connector"],
+                        "source_version": source["source_version"],
+                        "content_hash": previous_hash,
+                    }
+                    logger.info(
+                        "ingestion_skipped source=%s source_key=%s reason=unchanged",
+                        source["source_name"],
+                        source["source_key"],
+                    )
+                    continue
             result = ingest_file(
                 source_path,
                 runtime,
@@ -447,27 +533,6 @@ def ingest_directory(
                     "; ".join(result["errors"]),
                 )
                 continue
-            if result["should_skip"]:
-                skipped += 1
-                if matched_key and matched_key != source["source_key"]:
-                    manifest.pop(matched_key, None)
-                manifest[source["source_key"]] = {
-                    **matched_entry,
-                    "source": source["source_name"],
-                    "source_uri": source["source_uri"],
-                    "source_id": source["source_id"],
-                    "source_key": source["source_key"],
-                    "connector": source["connector"],
-                    "source_version": source["source_version"],
-                    "content_hash": result["content_hash"],
-                }
-                logger.info(
-                    "ingestion_skipped source=%s source_key=%s reason=unchanged stages=%s",
-                    source["source_name"],
-                    source["source_key"],
-                    " > ".join(result["processing_log"]),
-                )
-                continue
 
             processed += 1
             stored_chunks += int(result["stored_count"])
@@ -475,12 +540,10 @@ def ingest_directory(
                 "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
                 source["source_name"],
                 source["source_key"],
-                len(result["chunks"]),
+                result.get("stored_count", 0),
                 int(result["stored_count"]),
                 " > ".join(result["processing_log"]),
             )
-            if config.persist_refactor_mirror:
-                _write_refactor_mirror_artifacts(source, result, config)
             if matched_key and matched_key != source["source_key"]:
                 manifest.pop(matched_key, None)
             stem = _mirror_file_stem(source["source_name"], source["source_key"])
@@ -491,26 +554,21 @@ def ingest_directory(
                 "source_key": source["source_key"],
                 "connector": source["connector"],
                 "source_version": source["source_version"],
-                "content_hash": result["content_hash"],
-                "chunk_count": len(result["chunks"]),
+                "content_hash": result.get("source_hash", ""),
+                "chunk_count": result.get("stored_count", 0),
                 "summary": result["metadata_summary"],
                 "keywords": result["metadata_keywords"],
                 "processing_log": result["processing_log"][-12:],
                 "mirror_stem": stem,
             }
 
-            if config.export_processed:
-                export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
-                (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(
-                    result["cleaned_text"], encoding="utf-8"
-                )
-                chunk_payload = [
-                    {"chunk_index": idx, "text": chunk.text, "metadata": chunk.metadata}
-                    for idx, chunk in enumerate(result["chunks"])
-                ]
-                (PROCESSED_DIR / f"{export_stem}.chunks.json").write_bytes(
-                    orjson.dumps(chunk_payload, option=orjson.OPT_INDENT_2)
-                )
+            if config.export_processed and config.clean_store_dir:
+                _store = CleanDocumentStore(Path(config.clean_store_dir))
+                if _store.exists(source["source_key"]):
+                    _clean_text, _ = _store.read(source["source_key"])
+                    export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
+                    PROCESSED_DIR.mkdir(exist_ok=True)
+                    (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(_clean_text, encoding="utf-8")
 
         if runtime.kg_builder is not None:
             runtime.kg_builder.save(KG_PATH)

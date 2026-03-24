@@ -1,17 +1,19 @@
 <!-- @summary
-Document ingestion package with a modular 13-node LangGraph workflow, shared utilities, and processing primitives.
+Document ingestion package with a two-phase LangGraph pipeline: doc_processing (5 nodes) and embedding (8 nodes), connected by the Clean Document Store.
 @end-summary -->
 
 # ingest
 
 ## Overview
 
-This package powers embedding ingestion for the RAG system. The workflow is organized as:
+This package powers embedding ingestion for the RAG system. The pipeline is organized as two phases connected by the Clean Document Store:
 
 - `common/`: cross-cutting contracts, state/config types, node helpers, and deterministic utilities
-- `nodes/`: one file per pipeline stage (13 LangGraph nodes)
+- `doc_processing/`: Phase 1 pipeline — document ingestion through clean text output (5 LangGraph nodes)
+- `embedding/`: Phase 2 pipeline — chunking through vector and KG storage (8 LangGraph nodes)
+- `clean_store.py`: `CleanDocumentStore` — the Phase 1→2 boundary (atomic read/write)
 - `support/`: node support libraries (document parsing, vision/VLM, LLM helpers, text processing)
-- `pipeline/`: orchestration layer (public API facade, runtime lifecycle, graph composition)
+- `pipeline/`: orchestration layer (public API facade, two-phase runtime lifecycle)
 
 Stage 2 (`structure_detection`) is the parser front-end: Docling converts source files
 into markdown-first text suitable for downstream LLM and chunking stages, and emits
@@ -21,18 +23,21 @@ figure images (caption + OCR + tags), and appends those notes into cleaned text.
 
 ## Subdirectories
 
-| Directory | Purpose |
+| Directory / File | Purpose |
 | --- | --- |
 | `common/` | Shared schemas, state/config types, universal node helpers, and deterministic utilities |
-| `nodes/` | One file per pipeline stage with stage-specific logic and clear boundaries |
+| `doc_processing/` | Phase 1 — document ingestion through clean text output (5 nodes) |
+| `embedding/` | Phase 2 — chunking through vector and KG storage (8 nodes) |
+| `clean_store.py` | `CleanDocumentStore` — atomic read/write boundary between Phase 1 and Phase 2 |
 | `support/` | Node support libraries: Docling parsing, vision/VLM, LLM helpers, text processing |
-| `pipeline/` | Public API facade, runtime orchestration, and LangGraph workflow composition |
+| `pipeline/` | Public API facade and two-phase runtime orchestration |
 
 ## Internal Dependencies
 
-- `pipeline/impl.py` depends on `pipeline/workflow.py` for graph assembly and `common/types.py` for schema/runtime types.
-- `pipeline/workflow.py` imports all stage nodes from `nodes/` and wires conditional graph transitions.
-- Node modules consume shared helpers from `common/shared.py`, deterministic helpers from `common/utils.py`, and specialized processing from `support/`.
+- `pipeline/impl.py` calls `run_document_processing` (from `doc_processing/`) and `run_embedding_pipeline` (from `embedding/`), and reads `common/types.py` for schema/runtime types.
+- `doc_processing/workflow.py` wires nodes 1–5 with conditional graph transitions for multimodal and refactoring stages.
+- `embedding/workflow.py` wires nodes 6–13 with conditional graph transitions for optional extraction and storage stages.
+- Node modules in both sub-packages consume shared helpers from `common/shared.py`, deterministic helpers from `common/utils.py`, and specialized processing from `support/`.
 
 ## Engineering Documentation
 

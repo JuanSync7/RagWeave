@@ -135,6 +135,7 @@ class IngestionConfig:
     verbose_stage_logs: bool = RAG_INGESTION_VERBOSE_STAGE_LOGS
     persist_refactor_mirror: bool = RAG_INGESTION_PERSIST_REFACTOR_MIRROR
     mirror_output_dir: str = str(RAG_INGESTION_MIRROR_DIR)
+    clean_store_dir: str = "data/clean_store"  # Directory for CleanDocumentStore. Empty string disables persistent store.
     # Retained for backward compat; routing handled by LiteLLM Router.
     ollama_url: str = OLLAMA_BASE_URL
 

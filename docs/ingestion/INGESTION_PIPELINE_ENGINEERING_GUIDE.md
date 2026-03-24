@@ -22,10 +22,11 @@ Top-level entrypoints:
 
 - CLI wrapper: `ingest.py`
 - Public package API: `src/ingest/pipeline/__init__.py`
-- Runtime implementation: `src/ingest/pipeline_impl.py`
-- Graph composition: `src/ingest/pipeline_workflow.py`
+- Runtime orchestrator: `src/ingest/pipeline/impl.py`
+- Phase 1 graph composition: `src/ingest/doc_processing/workflow.py`
+- Phase 2 graph composition: `src/ingest/embedding/workflow.py`
 
-The pipeline is implemented as a 13-node LangGraph workflow with config-driven optional stages.
+The pipeline is implemented as a two-phase LangGraph pipeline with config-driven optional stages.
 
 ## Why the Code Was Split This Way
 
@@ -35,16 +36,17 @@ The previous monolithic ingestion module was hard to maintain and prone to merge
    - `src/ingest/pipeline/__init__.py`
    - Keeps import paths stable for callers.
 2. Runtime orchestration
-   - `src/ingest/pipeline_impl.py`
-   - Handles directory iteration, manifest updates, resource lifecycle, and graph invocation.
-3. Workflow composition
-   - `src/ingest/pipeline_workflow.py`
-   - Encodes stage topology and conditional transitions in one place.
+   - `src/ingest/pipeline/impl.py`
+   - Handles directory iteration, manifest updates, resource lifecycle, and two-phase graph invocation.
+3. Workflow composition — two phases
+   - `src/ingest/doc_processing/workflow.py` — Phase 1 (nodes 1–5): structure, multimodal, cleaning, refactoring.
+   - `src/ingest/embedding/workflow.py` — Phase 2 (nodes 6–13): chunking through KG storage.
 4. Node-per-file stage logic
-   - `src/ingest/nodes/*.py`
+   - `src/ingest/doc_processing/nodes/*.py` (Phase 1)
+   - `src/ingest/embedding/nodes/*.py` (Phase 2)
    - Keeps each stage independently understandable and testable.
 5. Shared utilities and schema
-   - `src/ingest/pipeline_types.py`, `src/ingest/pipeline_shared.py`, `src/ingest/pipeline_llm.py`
+   - `src/ingest/common/types.py`, `src/ingest/common/shared.py`, `src/ingest/support/llm.py`
    - Prevents helper duplication and keeps state and contracts centralized.
 
 This split improves:
@@ -55,11 +57,7 @@ This split improves:
 
 ## Target Architecture: Two-Phase Pipeline
 
-> **Note:** The current codebase implements a monolithic 13-node LangGraph graph. The target
-> architecture described below is defined in the companion specifications and is being
-> implemented incrementally.
-
-The ingestion system is being refactored into two independent pipelines connected by the
+The ingestion system is implemented as two independent pipelines connected by the
 **Clean Document Store** — a filesystem-based boundary contract:
 
 ```
@@ -67,7 +65,7 @@ Source Documents
       │
       ▼
 ┌─────────────────────────┐
-│  Document Processing    │  Nodes 1–5 (current graph nodes 1–6)
+│  Document Processing    │  Nodes 1–5
 │  State: DocumentProcessingState
 │  Spec: DOCUMENT_PROCESSING_SPEC.md
 │  FR-101 through FR-587
@@ -82,7 +80,7 @@ Source Documents
           │
           ▼
 ┌─────────────────────────┐
-│  Embedding Pipeline     │  Nodes 6–13 (current graph nodes 7–13)
+│  Embedding Pipeline     │  Nodes 6–13
 │  State: EmbeddingPipelineState
 │  Spec: EMBEDDING_PIPELINE_SPEC.md
 │  FR-591 through FR-1304
@@ -96,13 +94,13 @@ Source Documents
 
 **Mapping current implementation to target:**
 
-| Current Code | Target Phase | Notes |
+| Before Refactor | Current Implementation | Notes |
 |---|---|---|
-| `IngestState` | `DocumentProcessingState` + `EmbeddingPipelineState` | Will be split into two separate TypedDicts |
-| `IngestionConfig` | `PipelineConfig` (per-phase) | Configuration will be phase-scoped |
-| `content_hash` field | `source_hash` + `clean_hash` | Two-phase change detection replaces single hash |
-| Nodes 1–6 | Document Processing Pipeline | Ingestion, structure detection, multimodal, text cleaning, refactoring, output |
-| Nodes 7–13 | Embedding Pipeline | Chunking, enrichment, metadata, cross-refs, KG, quality, embedding/storage |
+| `IngestState` (monolithic) | `DocumentProcessingState` + `EmbeddingPipelineState` | Split into two separate TypedDicts; `IngestState` retained in `common/types.py` as deprecated alias |
+| `IngestionConfig` | `IngestionConfig` (single, in `common/types.py`) | Shared across both phases; `clean_store_dir` field added |
+| `content_hash` field | `source_hash` + `clean_hash` | Two-phase change detection: `source_hash` (Phase 1), `clean_hash` (Phase 2) |
+| Nodes 1–5 | Document Processing Pipeline (`doc_processing/nodes/`) | Ingestion, structure detection, multimodal, text cleaning, refactoring |
+| Nodes 6–13 | Embedding Pipeline (`embedding/nodes/`) | Chunking, enrichment, metadata, cross-refs, KG, quality, embedding/storage |
 
 ### Review Tiers
 
@@ -123,40 +121,54 @@ The platform spec defines domain vocabulary requirements (`INGESTION_PLATFORM_SP
 
 ```text
 src/ingest/
-  pipeline/__init__.py          # Public API facade
-  pipeline_impl.py              # Runtime orchestration (ingest_file/ingest_directory)
-  pipeline_workflow.py          # StateGraph composition and conditional routing
-  pipeline_types.py             # Dataclasses + typed state schema
-  pipeline_shared.py            # Shared deterministic helpers
-  pipeline_llm.py               # LLM JSON call helper
-  nodes/
-    document_ingestion.py
-    structure_detection.py
-    multimodal_processing.py
-    text_cleaning.py
-    document_refactoring.py
-    chunking.py
-    chunk_enrichment.py
-    metadata_generation.py
-    cross_reference_extraction.py
-    knowledge_graph_extraction.py
-    quality_validation.py
-    embedding_storage.py
-    knowledge_graph_storage.py
+  clean_store.py                  # CleanDocumentStore (Phase 1→2 boundary)
+  common/                         # Shared schemas, types, helpers
+  doc_processing/                 # Phase 1: nodes 1–5
+    __init__.py
+    state.py                      # DocumentProcessingState TypedDict
+    workflow.py                   # build_document_processing_graph()
+    impl.py                       # run_document_processing(...)
+    nodes/
+      document_ingestion.py
+      structure_detection.py
+      multimodal_processing.py
+      text_cleaning.py
+      document_refactoring.py
+  embedding/                      # Phase 2: nodes 6–13
+    __init__.py
+    state.py                      # EmbeddingPipelineState TypedDict
+    workflow.py                   # build_embedding_graph()
+    impl.py                       # run_embedding_pipeline(...)
+    nodes/
+      chunking.py
+      chunk_enrichment.py
+      metadata_generation.py
+      cross_reference_extraction.py
+      knowledge_graph_extraction.py
+      quality_validation.py
+      embedding_storage.py
+      knowledge_graph_storage.py
+  pipeline/
+    __init__.py                   # Public API facade
+    impl.py                       # Two-phase orchestrator
+  support/                        # Node support libs (docling, vision, LLM, text)
 ```
 
 ## End-to-End Execution Flow
 
 1. `ingest.py` creates `IngestionConfig` and calls `ingest_directory(...)`.
-2. `ingest_directory` in `src/ingest/pipeline_impl.py`:
+2. `ingest_directory` in `src/ingest/pipeline/impl.py`:
    - validates config via `verify_core_design(...)`,
    - loads manifest via `_load_manifest(...)`,
    - opens Weaviate client and optional KG builder,
-   - iterates source files and calls `ingest_file(...)`.
-3. `ingest_file(...)` invokes compiled graph `_GRAPH` from `src/ingest/pipeline_workflow.py`.
-4. Each node reads and writes `IngestState` fields.
-5. After node execution:
-   - vectors and metadata are persisted,
+   - iterates source files, checks manifest hash to decide skip, calls `ingest_file(...)`.
+3. `ingest_file(...)` in `src/ingest/pipeline/impl.py`:
+   - calls `run_document_processing(...)` (Phase 1 graph, `src/ingest/doc_processing/impl.py`),
+   - writes clean text to `CleanDocumentStore` (`src/ingest/clean_store.py`),
+   - calls `run_embedding_pipeline(...)` (Phase 2 graph, `src/ingest/embedding/impl.py`).
+4. Each phase node reads and writes its phase-specific state TypedDict fields.
+5. After Phase 2 completes:
+   - vectors and metadata are persisted to Weaviate,
    - optional KG is persisted and optionally exported,
    - manifest is updated and saved.
 
@@ -164,35 +176,33 @@ src/ingest/
 
 | Node | File | Main Input | Main Output |
 | --- | --- | --- | --- |
-| `document_ingestion` | `src/ingest/nodes/document_ingestion.py` | `source_path`, `existing_hash` | `raw_text`, `content_hash`, `should_skip` |
-| `structure_detection` | `src/ingest/nodes/structure_detection.py` | `raw_text` | `structure` |
-| `multimodal_processing` | `src/ingest/nodes/multimodal_processing.py` | `structure`, flags | `multimodal_notes` |
-| `text_cleaning` | `src/ingest/nodes/text_cleaning.py` | `raw_text`, `multimodal_notes` | `cleaned_text` |
-| `document_refactoring` | `src/ingest/nodes/document_refactoring.py` | `cleaned_text`, flags | `refactored_text` |
-| `chunking` | `src/ingest/nodes/chunking.py` | text plus chunk config | `chunks` |
-| `chunk_enrichment` | `src/ingest/nodes/chunk_enrichment.py` | `chunks` | enriched chunk metadata (`chunk_id`, `enriched_content`, `source`, `source_key`, provenance span fields) |
-| `metadata_generation` | `src/ingest/nodes/metadata_generation.py` | content plus LLM/fallback | `metadata_summary`, `metadata_keywords` |
-| `cross_reference_extraction` | `src/ingest/nodes/cross_reference_extraction.py` | refactored text | `cross_references` |
-| `knowledge_graph_extraction` | `src/ingest/nodes/knowledge_graph_extraction.py` | chunks | `kg_triples` |
-| `quality_validation` | `src/ingest/nodes/quality_validation.py` | chunks plus thresholds | filtered `chunks` |
-| `embedding_storage` | `src/ingest/nodes/embedding_storage.py` | chunks plus embedder/vector store | `stored_count` |
-| `knowledge_graph_storage` | `src/ingest/nodes/knowledge_graph_storage.py` | chunks plus KG builder | persisted KG side effect |
+| `document_ingestion` | `src/ingest/doc_processing/nodes/document_ingestion.py` | `source_path`, `existing_hash` | `raw_text`, `source_hash` |
+| `structure_detection` | `src/ingest/doc_processing/nodes/structure_detection.py` | `raw_text` | `structure` |
+| `multimodal_processing` | `src/ingest/doc_processing/nodes/multimodal_processing.py` | `structure`, flags | `multimodal_notes` |
+| `text_cleaning` | `src/ingest/doc_processing/nodes/text_cleaning.py` | `raw_text`, `multimodal_notes` | `cleaned_text` |
+| `document_refactoring` | `src/ingest/doc_processing/nodes/document_refactoring.py` | `cleaned_text`, flags | `refactored_text` |
+| `chunking` | `src/ingest/embedding/nodes/chunking.py` | text plus chunk config | `chunks` |
+| `chunk_enrichment` | `src/ingest/embedding/nodes/chunk_enrichment.py` | `chunks` | enriched chunk metadata (`chunk_id`, `enriched_content`, `source`, `source_key`, provenance span fields) |
+| `metadata_generation` | `src/ingest/embedding/nodes/metadata_generation.py` | content plus LLM/fallback | `metadata_summary`, `metadata_keywords` |
+| `cross_reference_extraction` | `src/ingest/embedding/nodes/cross_reference_extraction.py` | refactored text | `cross_references` |
+| `knowledge_graph_extraction` | `src/ingest/embedding/nodes/knowledge_graph_extraction.py` | chunks | `kg_triples` |
+| `quality_validation` | `src/ingest/embedding/nodes/quality_validation.py` | chunks plus thresholds | filtered `chunks` |
+| `embedding_storage` | `src/ingest/embedding/nodes/embedding_storage.py` | chunks plus embedder/vector store | `stored_count` |
+| `knowledge_graph_storage` | `src/ingest/embedding/nodes/knowledge_graph_storage.py` | chunks plus KG builder | persisted KG side effect |
 
 ## Conditional Routing Decisions
 
-Routing is centralized in `src/ingest/pipeline_workflow.py`:
+Routing is split by phase:
 
-- skip early if unchanged (`should_skip`),
-- run multimodal stage only when enabled and figures exist,
-- run refactoring only when enabled,
-- run cross-reference extraction only when enabled,
-- run KG storage only when enabled.
+- Phase 1 routing in `src/ingest/doc_processing/workflow.py`: multimodal stage (when enabled and figures exist), refactoring stage (when enabled).
+- Phase 2 routing in `src/ingest/embedding/workflow.py`: cross-reference extraction (when enabled), KG storage (when enabled).
+- Skip/idempotency logic in `src/ingest/pipeline/impl.py` (before Phase 1): compares `source_hash` and `clean_hash` against manifest to determine whether to skip either phase.
 
 This keeps stage logic and routing policy separate.
 
 ## Configuration Model
 
-`IngestionConfig` in `src/ingest/pipeline_types.py` is the single behavior contract.
+`IngestionConfig` in `src/ingest/common/types.py` is the single behavior contract.
 
 Important controls:
 
@@ -214,7 +224,7 @@ Design validation:
 
 ## Deterministic vs LLM-Dependent Behavior
 
-Deterministic helpers in `src/ingest/pipeline_shared.py`:
+Deterministic helpers in `src/ingest/common/shared.py`:
 
 - hashing, manifest I/O,
 - fallback keyword extraction,
@@ -226,13 +236,14 @@ LLM-dependent operations:
 - refactoring (`document_refactoring_node`)
 - metadata generation (`metadata_generation_node`)
 
-LLM calls are wrapped in `src/ingest/pipeline_llm.py` and return parsed JSON objects. On failure, nodes fall back to deterministic behavior when possible.
+LLM calls are wrapped in `src/ingest/support/llm.py` and return parsed JSON objects. On failure, nodes fall back to deterministic behavior when possible.
 
 ## Data Persistence and Incremental Ingestion
 
 Incremental behavior is managed by:
 
-- `content_hash` comparison against manifest,
+- `source_hash` (Phase 1) comparison against manifest — detects source file changes,
+- `clean_hash` (Phase 2) comparison against manifest — detects processing output changes,
 - optional cleanup of removed sources in update mode,
 - source-level delete and replace semantics before reinsert.
 
@@ -295,18 +306,18 @@ Edge-case behavior matrix:
 
 Implementation locations:
 
-- identity construction and manifest normalization: `src/ingest/pipeline_impl.py`
-- skip gating: `src/ingest/nodes/document_ingestion.py`
-- replace-on-update storage behavior: `src/ingest/nodes/embedding_storage.py`
+- identity construction and manifest normalization: `src/ingest/pipeline/impl.py`
+- skip gating: `src/ingest/pipeline/impl.py` (orchestrator, before Phase 1)
+- replace-on-update storage behavior: `src/ingest/embedding/nodes/embedding_storage.py`
 - vector metadata and retrieval projection: `src/core/vector_store.py`
 
 ## How to Add or Change a Node Safely
 
-1. Implement stage logic in a new/existing `src/ingest/nodes/<stage>.py`.
-2. Keep I/O explicit: return only fields the node changes.
-3. Add/adjust fields in `IngestState` (`src/ingest/pipeline_types.py`) if needed.
-4. Wire node and routing in `src/ingest/pipeline_workflow.py`.
-5. Update `PIPELINE_NODE_NAMES` in `src/ingest/pipeline_types.py` if node identity changes.
+1. Determine the phase: Phase 1 nodes go in `src/ingest/doc_processing/nodes/`, Phase 2 nodes go in `src/ingest/embedding/nodes/`.
+2. Implement stage logic in a new/existing `<phase>/nodes/<stage>.py`.
+3. Keep I/O explicit: return only fields the node changes.
+4. Add/adjust fields in the relevant state TypedDict: `DocumentProcessingState` in `src/ingest/doc_processing/state.py` (Phase 1) or `EmbeddingPipelineState` in `src/ingest/embedding/state.py` (Phase 2).
+5. Wire node and routing in `src/ingest/doc_processing/workflow.py` (Phase 1) or `src/ingest/embedding/workflow.py` (Phase 2).
 6. Add tests under `tests/ingest/` for:
    - node behavior,
    - config/routing behavior,
@@ -346,9 +357,9 @@ Recommended additions as pipeline evolves:
    - check manifest hash entry vs source content hash.
    - if JSON corruption occurred, check for `manifest.json.corrupt.<timestamp>` artifacts.
 2. Missing stage output
-   - check config toggle and route condition in `src/ingest/pipeline_workflow.py`.
+   - check config toggle and route condition in `src/ingest/doc_processing/workflow.py` (Phase 1) or `src/ingest/embedding/workflow.py` (Phase 2).
 3. LLM output parse failures
-   - validate JSON-only response assumptions in `src/ingest/pipeline_llm.py`.
+   - validate JSON-only response assumptions in `src/ingest/support/llm.py`.
 4. Duplicate or old vectors on update
    - verify `update_mode` and source cleanup path in `embedding_storage_node`.
 5. KG not persisted

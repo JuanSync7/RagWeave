@@ -1,9 +1,5 @@
-# @summary
-# Package marker for ingestion LangGraph node modules.
-# @end-summary
-
-"""Ingestion pipeline node modules.
-
-Each module in this package implements a single pipeline stage ("node") that
-transforms or enriches the shared ingestion state.
-"""
+raise ImportError(
+    "src.ingest.nodes has been removed. "
+    "Phase 1 nodes: src.ingest.doc_processing.nodes "
+    "Phase 2 nodes: src.ingest.embedding.nodes"
+)
