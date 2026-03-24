@@ -1,3 +1,9 @@
+> **Document type:** Technical design document (Layer 4)
+> **Companion spec:** `DOCUMENT_PROCESSING_SPEC.md`
+> **Upstream:** DOCUMENT_PROCESSING_SPEC.md, DOCUMENT_PROCESSING_SPEC_SUMMARY.md
+> **Downstream:** DOCUMENT_PROCESSING_IMPLEMENTATION.md
+> **Last updated:** 2026-03-24
+
 # Document Processing Pipeline — Design Document
 
 | Field | Value |
@@ -44,11 +50,15 @@ detection (skipping unchanged documents) must work from day one.
 variables, and per-run overrides into a frozen `PipelineConfig` dataclass. Validate all values
 at startup and fail fast on invalid combinations.
 
-**Requirements Covered:** FR-109, FR-208, FR-306, FR-502, FR-587
+**Spec requirements:** FR-109, FR-208, FR-306, FR-502, FR-587
 
 **Dependencies:** None
 
-**Complexity:** S
+**Complexity:** Low
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_pipeline_config.py`
+**Phase B source file:** `src/ingest/pipeline_config.py`
 
 **Subtasks:**
 1. Define `PipelineConfig` dataclass in `src/ingest/pipeline_types.py` with fields for all
@@ -75,11 +85,15 @@ detection, text cleaning, clean store write); optional nodes (multimodal, refact
 no-op pass-throughs until their tasks are complete. Conditional edges route based on figure
 detection and config flags.
 
-**Requirements Covered:** FR-302, FR-502
+**Spec requirements:** FR-302, FR-502
 
 **Dependencies:** Task 1.1
 
-**Complexity:** M
+**Complexity:** Medium
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_pipeline_workflow.py`
+**Phase B source file:** `src/ingest/pipeline_workflow.py`
 
 **Subtasks:**
 1. Define `DocumentProcessingState` TypedDict in `pipeline_types.py` with all required state
@@ -108,11 +122,15 @@ extension, converts the file to raw text using format-specific extractors, compu
 content hash for change detection, generates a deterministic `source_key`, and applies the
 encoding fallback chain for text files.
 
-**Requirements Covered:** FR-101, FR-102, FR-103, FR-106, FR-107, FR-108, FR-109, FR-110, FR-111, FR-112, FR-113
+**Spec requirements:** FR-101, FR-102, FR-103, FR-106, FR-107, FR-108, FR-109, FR-110, FR-111, FR-112, FR-113
 
 **Dependencies:** Task 1.2
 
-**Complexity:** M
+**Complexity:** Medium
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`, `src/ingest/pipeline_shared.py`
+**Phase A test file:** `tests/ingest/test_document_ingestion.py`
+**Phase B source file:** `src/ingest/nodes/document_ingestion.py`
 
 **Subtasks:**
 1. Implement format detection from file extension with UNKNOWN fallback (FR-102); exclude
@@ -139,11 +157,15 @@ tests with non-UTF-8 encodings; test that `.log` files are excluded.
 tree, extracts tables and figures with metadata, computes an extraction confidence score, and
 auto-detects abbreviation definitions for merging with the domain vocabulary.
 
-**Requirements Covered:** FR-201, FR-202, FR-203, FR-204, FR-205, FR-206, FR-207, FR-208
+**Spec requirements:** FR-201, FR-202, FR-203, FR-204, FR-205, FR-206, FR-207, FR-208
 
 **Dependencies:** Task 1.3
 
-**Complexity:** M
+**Complexity:** Medium
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_structure_detection.py`
+**Phase B source file:** `src/ingest/nodes/structure_detection.py`
 
 **Subtasks:**
 1. Define the structure detection provider interface (section tree, figures, tables, confidence)
@@ -174,11 +196,15 @@ Normalises whitespace, removes boilerplate using configurable patterns, reduces 
 headers/footers, and integrates VLM-generated figure descriptions and table Markdown
 representations into the text stream at their original positions.
 
-**Requirements Covered:** FR-401, FR-402, FR-403, FR-404, FR-405
+**Spec requirements:** FR-401, FR-402, FR-403, FR-404, FR-405
 
 **Dependencies:** Task 1.4
 
-**Complexity:** S
+**Complexity:** Low
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_text_cleaning.py`
+**Phase B source file:** `src/ingest/nodes/text_cleaning.py`
 
 **Subtasks:**
 1. Implement whitespace normalisation: collapse multiple spaces, limit consecutive newlines to
@@ -206,11 +232,15 @@ it also triggers the downstream Embedding Pipeline after Document Processing com
 
 > **Integration note:** Embedding Pipeline triggering is a platform-level integration concern defined in `INGESTION_PLATFORM_SPEC.md`. This task implements the CLI hook point; the actual orchestration logic lives in the platform layer.
 
-**Requirements Covered:** FR-112
+**Spec requirements:** FR-112
 
 **Dependencies:** Task 1.2, Task 1.1
 
-**Complexity:** S
+**Complexity:** Low
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_cli.py`
+**Phase B source file:** `ingest.py`
 
 **Subtasks:**
 1. Define CLI argument schema: input path, config file, verbosity, dry-run, force-reprocess.
@@ -242,11 +272,15 @@ See `EMBEDDING_PIPELINE_DESIGN.md` → Task S.2 for the reader implementation.
 write to a temp file, then rename. On failure mid-write, the existing clean document for the
 same `source_key` is preserved.
 
-**Requirements Covered:** FR-581, FR-582, FR-583, FR-584, FR-585, FR-586, FR-587
+**Spec requirements:** FR-581, FR-582, FR-583, FR-584, FR-585, FR-586, FR-587
 
 **Dependencies:** Task 1.5
 
-**Complexity:** S
+**Complexity:** Low
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`, `src/ingest/pipeline_shared.py`
+**Phase A test file:** `tests/ingest/test_clean_store.py`
+**Phase B source file:** `src/ingest/clean_store.py`
 
 **Subtasks:**
 1. Define `CleanDocumentStore` class with `write(source_key, md_content, metadata)`,
@@ -294,11 +328,15 @@ into self-contained units by resolving implicit references (e.g., "as mentioned 
 explicit values. Uses a self-correcting bounded iteration loop with fact-check and completeness
 validation. Falls back to the original text if all iterations fail validation.
 
-**Requirements Covered:** FR-501, FR-502, FR-503, FR-504, FR-505, FR-506, FR-507, FR-508, FR-509, FR-510, FR-511
+**Spec requirements:** FR-501, FR-502, FR-503, FR-504, FR-505, FR-506, FR-507, FR-508, FR-509, FR-510, FR-511
 
 **Dependencies:** Task 1.5, Task 1.1
 
-**Complexity:** L
+**Complexity:** High
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_document_refactoring.py`
+**Phase B source file:** `src/ingest/nodes/document_refactoring.py`
 
 **Subtasks:**
 1. Design the refactoring LLM prompt with the five safety constraints: no new information, no
@@ -347,11 +385,15 @@ descriptions of figures detected in Node 2. Only executes when figures were dete
 edge from Node 2). VLM provider is swappable via configuration. Failures for individual figures
 are non-fatal — the figure is recorded without a description.
 
-**Requirements Covered:** FR-301, FR-302, FR-303, FR-304, FR-305, FR-306, FR-307
+**Spec requirements:** FR-301, FR-302, FR-303, FR-304, FR-305, FR-306, FR-307
 
 **Dependencies:** Task 1.4
 
-**Complexity:** L
+**Complexity:** High
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_multimodal_processing.py`
+**Phase B source file:** `src/ingest/nodes/multimodal_processing.py`
 
 **Subtasks:**
 1. Define the VLM provider interface and make it swappable via
@@ -384,11 +426,15 @@ extractor registry. PPTX extracts text frames, speaker notes, and table cells pr
 order; XLSX extracts all sheets with table detection and Markdown conversion, preserving named
 ranges and cell references.
 
-**Requirements Covered:** FR-104, FR-105
+**Spec requirements:** FR-104, FR-105
 
 **Dependencies:** Task 1.3
 
-**Complexity:** M
+**Complexity:** Medium
+
+**Phase 0 contracts:** `src/ingest/pipeline_types.py`
+**Phase A test file:** `tests/ingest/test_pptx_xlsx_extractors.py`
+**Phase B source file:** `src/ingest/nodes/document_ingestion.py`
 
 **Subtasks:**
 1. Implement `PptxExtractor` using `python-pptx`: extract text frames and speaker notes per
@@ -431,20 +477,20 @@ Critical path (full): + Task 2.3
 
 ---
 
-## Task-to-Requirement Mapping
+## Task-to-Requirement Traceability
 
-| Task | Requirements Covered |
-|------|---------------------|
-| 1.1 Pipeline Configuration System | FR-109, FR-208, FR-306, FR-502, FR-587 |
-| 1.2 Document Processing DAG Skeleton | FR-302, FR-502 |
-| 1.3 Node 1: Document Ingestion | FR-101, FR-102, FR-103, FR-106, FR-107, FR-108, FR-109, FR-110, FR-111, FR-112, FR-113 |
-| 1.4 Node 2: Structure Detection | FR-201, FR-202, FR-203, FR-204, FR-205, FR-206, FR-207, FR-208 |
-| 1.5 Node 4: Text Cleaning | FR-401, FR-402, FR-403, FR-404, FR-405 |
-| 1.11 CLI Entry Point | FR-112 |
-| S.1 Clean Document Store Writer | FR-581, FR-582, FR-583, FR-584, FR-585, FR-586, FR-587 |
-| 2.3 Node 5: Document Refactoring | FR-501, FR-502, FR-503, FR-504, FR-505, FR-506, FR-507, FR-508, FR-509, FR-510, FR-511 |
-| 3.1 Node 3: Multimodal Processing | FR-301, FR-302, FR-303, FR-304, FR-305, FR-306, FR-307 |
-| 3.5 PPTX and XLSX Extractors | FR-104, FR-105 |
+| Task | FR Numbers | Phase 0 contracts | Phase A test | Phase B source |
+|------|-----------|-------------------|--------------|----------------|
+| 1.1 Pipeline Configuration System | FR-109, FR-208, FR-306, FR-502, FR-587 | `src/ingest/pipeline_types.py` | `tests/ingest/test_pipeline_config.py` | `src/ingest/pipeline_config.py` |
+| 1.2 Document Processing DAG Skeleton | FR-302, FR-502 | `src/ingest/pipeline_types.py` | `tests/ingest/test_pipeline_workflow.py` | `src/ingest/pipeline_workflow.py` |
+| 1.3 Node 1: Document Ingestion | FR-101, FR-102, FR-103, FR-106, FR-107, FR-108, FR-109, FR-110, FR-111, FR-112, FR-113 | `src/ingest/pipeline_types.py`, `src/ingest/pipeline_shared.py` | `tests/ingest/test_document_ingestion.py` | `src/ingest/nodes/document_ingestion.py` |
+| 1.4 Node 2: Structure Detection | FR-201, FR-202, FR-203, FR-204, FR-205, FR-206, FR-207, FR-208 | `src/ingest/pipeline_types.py` | `tests/ingest/test_structure_detection.py` | `src/ingest/nodes/structure_detection.py` |
+| 1.5 Node 4: Text Cleaning | FR-401, FR-402, FR-403, FR-404, FR-405 | `src/ingest/pipeline_types.py` | `tests/ingest/test_text_cleaning.py` | `src/ingest/nodes/text_cleaning.py` |
+| 1.11 CLI Entry Point | FR-112 | `src/ingest/pipeline_types.py` | `tests/ingest/test_cli.py` | `ingest.py` |
+| S.1 Clean Document Store Writer | FR-581, FR-582, FR-583, FR-584, FR-585, FR-586, FR-587 | `src/ingest/pipeline_types.py`, `src/ingest/pipeline_shared.py` | `tests/ingest/test_clean_store.py` | `src/ingest/clean_store.py` |
+| 2.3 Node 5: Document Refactoring | FR-501, FR-502, FR-503, FR-504, FR-505, FR-506, FR-507, FR-508, FR-509, FR-510, FR-511 | `src/ingest/pipeline_types.py` | `tests/ingest/test_document_refactoring.py` | `src/ingest/nodes/document_refactoring.py` |
+| 3.1 Node 3: Multimodal Processing | FR-301, FR-302, FR-303, FR-304, FR-305, FR-306, FR-307 | `src/ingest/pipeline_types.py` | `tests/ingest/test_multimodal_processing.py` | `src/ingest/nodes/multimodal_processing.py` |
+| 3.5 PPTX and XLSX Extractors | FR-104, FR-105 | `src/ingest/pipeline_types.py` | `tests/ingest/test_pptx_xlsx_extractors.py` | `src/ingest/nodes/document_ingestion.py` |
 
 <!-- VERIFY: All 53 requirements from DOCUMENT_PROCESSING_SPEC.md FR-101–FR-587 appear above. -->
 
@@ -459,6 +505,8 @@ implementation.
 ---
 
 ## B.1 — Document Processing DAG (LangGraph StateGraph)
+
+> **Type: PATTERN** — For Phase B implementation agents ONLY. Must NOT be passed to Phase A test agents.
 
 Constructs the 5-stage Document Processing graph with two conditional routing points: post-structure
 (multimodal optional) and post-cleaning (refactoring optional). Supports Tasks 1.2, 1.3, 1.4,
@@ -552,10 +600,12 @@ def build_document_processing_graph(config: PipelineConfig) -> StateGraph:
 
 ---
 
-## B.2 — Shared State Schema and Node Base Pattern
+## B.2a — Shared State Schema (Contracts)
 
-Defines the typed state flowing through the Document Processing DAG and illustrates the node
-function pattern. Supports all Phase 1 tasks.
+> **Type: CONTRACT** — Copy verbatim into Phase 0. Both Phase A and Phase B agents receive this.
+
+Defines the typed state flowing through the Document Processing DAG and the metadata envelope
+for the Clean Document Store. Supports all Phase 1 tasks.
 
 **Tasks:** Task 1.1, Task 1.3, Task 1.4, Task 1.5, Task S.1
 **Requirements:** FR-101–FR-113, FR-201–FR-208, FR-401–FR-405, FR-581–FR-587
@@ -623,12 +673,25 @@ class CleanDocumentMetadata:
     has_figures: bool
     figure_count: int
     processing_flags: dict[str, bool]  # {"multimodal_enabled": bool, "refactoring_enabled": bool}
+```
 
+---
 
-# --- Sample Node ---
+## B.2b — Node Base Pattern (Sample Implementation)
+
+> **Type: PATTERN** — For Phase B implementation agents ONLY. Must NOT be passed to Phase A test agents.
+
+Illustrates the node function pattern: pure function accepting and returning
+`DocumentProcessingState`, immutable return via spread, built-in timing instrumentation.
+
+**Tasks:** Task 1.5
+**Requirements:** FR-401, FR-402, FR-403, FR-404, FR-405
+
+```python
 # src/ingest/nodes/text_cleaning.py
 
 import re
+import time
 from collections import Counter
 
 from src.ingest.pipeline_types import DocumentProcessingState
@@ -695,6 +758,8 @@ def text_cleaning_node(state: DocumentProcessingState) -> DocumentProcessingStat
 
 ## B.3 — Deterministic ID Generation
 
+> **Type: CONTRACT** — Copy verbatim into Phase 0. Both Phase A and Phase B agents receive this.
+
 Implements `source_key` derivation and the two-hash change-detection scheme used by both
 the Document Processing and Embedding Pipelines. Supports Task 1.3 and Task S.1.
 
@@ -759,3 +824,18 @@ def compute_clean_hash(clean_markdown: str) -> str:
 - **Path-derived `source_key` not content-derived** — the key is stable even if the file
   content changes (re-ingestion of a modified document produces the same key, overwriting the
   previous clean document). Content changes are tracked by `source_hash`, not by the key.
+
+---
+
+## Companion Documents
+
+| Document | Purpose | Relationship |
+|----------|---------|-------------|
+| DOCUMENT_PROCESSING_SPEC.md | Authoritative requirements specification | Source of requirements traced in this design |
+| DOCUMENT_PROCESSING_SPEC_SUMMARY.md | Executive summary | Stakeholder digest of the spec |
+| **DOCUMENT_PROCESSING_DESIGN.md** (this document) | Task decomposition and code appendix | Translates spec into implementable tasks |
+| DOCUMENT_PROCESSING_IMPLEMENTATION.md | Six-phase implementation plan | Operationalizes this design's tasks |
+| DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md | Post-implementation reference | Documents what was built |
+| DOCUMENT_PROCESSING_MODULE_TESTS.md | Phase D white-box test plan | Test specifications |
+
+**Flow:** Spec → Spec Summary → **Design** → Implementation → Engineering Guide → Module Tests

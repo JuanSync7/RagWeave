@@ -1,3 +1,7 @@
+<!-- @summary
+TLS certificates for the nginx HTTPS gateway. Contents are git-ignored; generate with scripts/generate-certs.sh using mkcert.
+@end-summary -->
+
 # TLS Certificates
 
 This directory holds TLS certificates for the nginx HTTPS gateway.

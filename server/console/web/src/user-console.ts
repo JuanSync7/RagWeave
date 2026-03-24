@@ -1,83 +1,227 @@
 // @summary
 // User Console application logic for Aion Chat.
-// Handles sidebar navigation, chat thread interaction, streaming display,
-// settings management, theme system, slash commands, and context attachments.
-// Deps: marked.js (CDN), DOMPurify (CDN)
+// Handles sidebar navigation, chat thread interaction, real SSE streaming,
+// conversation management, dynamic slash commands, settings, and context indicator.
+// Deps: marked (ES module import), DOMPurify (ES module import), /query/stream, /console/* API endpoints
 // @end-summary
+
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 /**
  * User Console — vanilla TypeScript DOM application.
  *
- * This module drives the Aion Chat user-facing console served at /console.
- * It is structured as a self-contained DOMContentLoaded entry point with no
- * framework dependencies.  External libraries (marked, DOMPurify) are loaded
- * from CDN and accessed through window globals.
+ * Drives the Aion Chat user-facing console at /console.
+ * No framework dependencies; external libs (marked, DOMPurify) as ES module imports.
  */
 
 // ──────────────────────────────────────────────
-//  Types and interfaces
+//  Types
 // ──────────────────────────────────────────────
 
 type ThemeValue = "dark" | "light" | "system";
 
-interface PresetConfig {
-    searchLimit: number;
-    rerankTopK: number;
+interface PresetConfig { searchLimit: number; rerankTopK: number; }
+
+interface ContextBreakdown { system: number; memory: number; chunks: number; query: number; }
+
+interface AttachmentChip { id: string; icon: string; label: string; }
+
+interface SlashCommand {
+    name: string;
+    description: string;
+    args_hint?: string;
+    category?: string;
 }
 
-interface ContextBreakdown {
-    system: number;
-    memory: number;
-    chunks: number;
-    query: number;
+interface ConversationMeta {
+    conversation_id: string;
+    title?: string;
+    updated_at_ms?: number;
+    message_count?: number;
 }
 
-interface ContextState {
-    pct: number;
-    breakdown: ContextBreakdown;
+interface ChunkResult {
+    text: string;
+    score: number;
+    metadata: Record<string, unknown>;
 }
 
-interface AttachmentChip {
-    id: string;
-    icon: string;
-    label: string;
+interface SourceRef {
+    source?: string;
+    source_uri?: string;
+    section?: string;
+    score?: number;
+    text?: string;
+    original_char_start?: number;
+    original_char_end?: number;
 }
 
-interface MarkedLike {
-    parse: (markdown: string) => string;
+function sourceRefToChunkResult(ref: SourceRef): ChunkResult {
+    return {
+        text: ref.text ?? "",
+        score: ref.score ?? 0,
+        metadata: {
+            source: ref.source ?? "",
+            source_uri: ref.source_uri ?? "",
+            section: ref.section ?? "",
+            original_char_start: ref.original_char_start,
+            original_char_end: ref.original_char_end,
+        },
+    };
 }
 
-interface DomPurifyLike {
-    sanitize: (dirty: string) => string;
+interface TokenBudget {
+    usage_percent?: number;
+    breakdown?: Record<string, unknown>;
+    input_tokens?: number;
+    context_length?: number;
 }
 
-declare global {
-    interface Window {
-        marked?: MarkedLike;
-        DOMPurify?: DomPurifyLike;
-    }
+interface StreamEventData {
+    token?: string;
+    message?: string;
+    results?: ChunkResult[];
+    conversation_id?: string;
+    token_budget?: TokenBudget;
+    summary?: string;
+    [key: string]: unknown;
+}
+
+interface CommandResult {
+    action?: string;
+    message?: string;
+    data?: Record<string, unknown>;
 }
 
 export {};
 
 // ──────────────────────────────────────────────
-//  DOM element references
+//  Helpers
 // ──────────────────────────────────────────────
 
-/**
- * Typed getElementById helper.  Throws if the element is missing so downstream
- * code never has to null-check.
- */
 const byId = <T extends HTMLElement = HTMLElement>(id: string): T => {
     const el = document.getElementById(id);
-    if (!el) {
-        throw new Error(`Missing required element #${id}`);
-    }
+    if (!el) throw new Error(`Missing required element #${id}`);
     return el as T;
 };
 
+function escHtml(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function fmtTime(ms: number): string {
+    return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtRelative(ms: number): string {
+    const now = Date.now();
+    const diff = now - ms;
+    if (diff < 86400000) return "Today";
+    if (diff < 172800000) return "Yesterday";
+    return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+// ──────────────────────────────────────────────
+//  Markdown configuration
+// ──────────────────────────────────────────────
+
+// Custom code-block renderer: wraps <pre><code> in a copy-button UI.
+// Clicks are handled via event delegation on #thread — no inline onclick needed,
+// which also means DOMPurify does not need to allow event attributes.
+marked.use({
+    gfm: true,   // tables, task lists, strikethrough, autolinks
+    breaks: false,
+    renderer: {
+        code({ text, lang }: { text: string; lang?: string }): string {
+            const langLabel = escHtml(lang ?? "code");
+            const escaped = text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+            return [
+                `<div class="code-block-wrap">`,
+                `<div class="code-block-header">`,
+                `<span>${langLabel}</span>`,
+                `<button class="copy-code-btn">&#128203; Copy</button>`,
+                `</div>`,
+                `<div class="code-block">${escaped}</div>`,
+                `</div>`,
+            ].join("");
+        },
+    },
+});
+
+// ──────────────────────────────────────────────
+//  Markdown normalizer + renderer
+// ──────────────────────────────────────────────
+
+/** Returns true if a word looks like a numbered list marker: "1.", "2.", "10.", etc. */
+function isListMarker(word: string): boolean {
+    if (!word.endsWith(".")) return false;
+    const n = Number(word.slice(0, -1));
+    return Number.isInteger(n) && n > 0;
+}
+
+/**
+ * If a line packs multiple list items inline (e.g. "1. Foo 2. Bar" or "- A - B"),
+ * splits each item onto its own line. Bullet splitting is guarded: only fires when
+ * the line already starts with "- "/"* " so standalone dashes in prose are unaffected.
+ */
+function splitInlineList(line: string): string {
+    const words = line.split(" ");
+    if (words.length < 3) return line;
+
+    const lineStartsWithBullet = words[0] === "-" || words[0] === "*";
+    const subLines: string[] = [];
+    let current: string[] = [];
+
+    for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        const isBulletCont = lineStartsWithBullet && i > 0 && (w === "-" || w === "*");
+        const isNumberedCont = i > 0 && isListMarker(w);
+        if (current.length > 0 && (isBulletCont || isNumberedCont)) {
+            subLines.push(current.join(" "));
+            current = [w];
+        } else {
+            current.push(w);
+        }
+    }
+    if (current.length) subLines.push(current.join(" "));
+    return subLines.length > 1 ? subLines.join("\n") : line;
+}
+
+/**
+ * Pre-process LLM output so list items always start on their own line.
+ * Code fences are split out first so their content is never modified.
+ */
+function normalizeMarkdown(raw: string): string {
+    // Split on complete fences only — partial fences during streaming are left as-is
+    const segments = raw.split(/(```[\s\S]*?```)/);
+    return segments.map((seg, i) => {
+        if (i % 2 === 1) return seg; // inside a fence — leave unchanged
+        return seg.split("\n").map(splitInlineList).join("\n");
+    }).join("");
+}
+
+/**
+ * Render markdown to sanitized HTML.
+ * marked handles the full CommonMark + GFM spec (tables, task lists, strikethrough,
+ * autolinks, block quotes, nested lists, footnotes, etc.).
+ * DOMPurify strips any unsafe HTML before the result is set as innerHTML.
+ * marked.parse is synchronous when no async hooks are configured.
+ */
+function parseMarkdown(raw: string): string {
+    return DOMPurify.sanitize(marked.parse(normalizeMarkdown(raw)) as string);
+}
+
+// ──────────────────────────────────────────────
+//  Main entry point
+// ──────────────────────────────────────────────
+
 document.addEventListener("DOMContentLoaded", () => {
-    // Core layout elements
+
+    // ── Core layout refs ──
     const sidebar = byId("sidebar");
     const backdrop = byId("sidebarBackdrop");
     const settingsOverlay = byId("settingsOverlay");
@@ -86,8 +230,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const fab = byId("scrollFab");
     const dropdown = byId("slashDropdown");
     const ta = byId<HTMLTextAreaElement>("inputArea");
-
-    // Attachment toolbar elements
     const attachPopover = byId("attachPopover");
     const webInputPanel = byId("webInputPanel");
     const kbPanel = byId("kbPanel");
@@ -95,74 +237,98 @@ document.addEventListener("DOMContentLoaded", () => {
     const attachBtn = byId("attachBtn");
     const cmdBtn = byId("cmdBtn");
 
-    // ──────────────────────────────────────────────
-    //  Sidebar logic (collapse, navigation, responsive)
-    // ──────────────────────────────────────────────
+    // ── Application state ──
+    let activeConversationId: string | null =
+        localStorage.getItem("nc_active_conv") || null;
+    let isStreaming = false;
+    let dynamicCmds: SlashCommand[] = [];
+    let allSlashItems: HTMLElement[] = [];
+    let slashSelIdx = 0;
+    let allPickerItems: HTMLElement[] = [];
+    let pickerIdx = 0;
+    let attachments: AttachmentChip[] = [];
+    let userScrolledUp = false;
+    let streamAbortCtrl: AbortController | null = null;
 
-    function isDesktop(): boolean {
-        return window.innerWidth > 1024;
+    // ──────────────────────────────────────────
+    //  Auth & API layer
+    // ──────────────────────────────────────────
+
+    function getSettings(): Record<string, unknown> {
+        const raw = localStorage.getItem("nc_settings");
+        return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
     }
 
-    /** Show a specific sidebar panel by id. */
+    function authHeaders(): Record<string, string> {
+        const s = getSettings();
+        const token = (s.auth_token as string | undefined) || "";
+        const h: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) {
+            h["Authorization"] = `Bearer ${token}`;
+            h["x-api-key"] = token;
+        }
+        return h;
+    }
+
+    function apiBase(): string {
+        const s = getSettings();
+        const ep = ((s.api_endpoint as string | undefined) || "").trim();
+        return ep ? ep.replace(/\/$/, "") : "";
+    }
+
+    async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
+        const url = apiBase() + path;
+        const opts: RequestInit = { method, headers: authHeaders() };
+        if (body !== undefined) opts.body = JSON.stringify(body);
+        const res = await fetch(url, opts);
+        const json = (await res.json()) as { ok: boolean; data?: T; error?: { message: string } };
+        if (!res.ok || !json.ok) {
+            throw new Error(json.error?.message || `HTTP ${res.status}`);
+        }
+        return json.data as T;
+    }
+
+    // ──────────────────────────────────────────
+    //  Sidebar logic
+    // ──────────────────────────────────────────
+
+    function isDesktop(): boolean { return window.innerWidth > 1024; }
+
     function showPanel(panelId: string | undefined): void {
-        document.querySelectorAll<HTMLElement>(".sidebar-panel").forEach((p) => {
-            p.classList.remove("active");
-        });
-        if (panelId) {
-            document.getElementById(panelId)?.classList.add("active");
-        }
+        document.querySelectorAll<HTMLElement>(".sidebar-panel").forEach((p) => p.classList.remove("active"));
+        if (panelId) document.getElementById(panelId)?.classList.add("active");
     }
 
-    /** Mark a nav item as active and reveal its panel. */
     function setNavActive(el: HTMLElement): void {
-        document.querySelectorAll<HTMLElement>(".sidebar-nav-item").forEach((n) => {
-            n.classList.remove("active");
-        });
+        document.querySelectorAll<HTMLElement>(".sidebar-nav-item").forEach((n) => n.classList.remove("active"));
         el.classList.add("active");
-        if (!sidebar.classList.contains("collapsed")) {
-            showPanel(el.dataset.panel);
-        }
-        // On mobile: close sidebar after selection
-        if (!isDesktop()) {
-            closeSidebar();
-        }
+        if (!sidebar.classList.contains("collapsed")) showPanel(el.dataset.panel);
+        if (!isDesktop()) closeSidebar();
     }
 
-    /** Desktop: toggle between expanded (260 px) and icon-rail (56 px). */
     function toggleSidebarCollapse(): void {
         sidebar.classList.toggle("collapsed");
-        const btn = byId("sidebarCollapseBtn");
-        btn.innerHTML = sidebar.classList.contains("collapsed") ? "&#8250;" : "&#8249;";
-        // Hide panels on collapse so icon rail stays clean
+        byId("sidebarCollapseBtn").innerHTML = sidebar.classList.contains("collapsed") ? "&#8250;" : "&#8249;";
         if (sidebar.classList.contains("collapsed")) {
-            document.querySelectorAll<HTMLElement>(".sidebar-panel").forEach((p) => {
-                p.classList.remove("active");
-            });
+            document.querySelectorAll<HTMLElement>(".sidebar-panel").forEach((p) => p.classList.remove("active"));
         } else {
-            // Restore the active nav panel
             const activeNav = sidebar.querySelector<HTMLElement>(".sidebar-nav-item.active");
-            if (activeNav) {
-                showPanel(activeNav.dataset.panel);
-            }
+            if (activeNav) showPanel(activeNav.dataset.panel);
         }
     }
 
-    /** Mobile: overlay open. */
     function openSidebar(): void {
         if (isDesktop()) {
             sidebar.classList.remove("collapsed");
             byId("sidebarCollapseBtn").innerHTML = "&#8249;";
             const activeNav = sidebar.querySelector<HTMLElement>(".sidebar-nav-item.active");
-            if (activeNav) {
-                showPanel(activeNav.dataset.panel);
-            }
+            if (activeNav) showPanel(activeNav.dataset.panel);
         } else {
             sidebar.classList.add("open");
             backdrop.classList.add("active");
         }
     }
 
-    /** Mobile: overlay close. */
     function closeSidebar(): void {
         if (isDesktop()) {
             sidebar.classList.add("collapsed");
@@ -173,51 +339,27 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // External header button — only visible on mobile (CSS hides on desktop)
-    byId("toggleBtn").addEventListener("click", () => {
-        sidebar.classList.contains("open") ? closeSidebar() : openSidebar();
-    });
-
-    // Wire up sidebar nav items
-    document.querySelectorAll<HTMLElement>(".sidebar-nav-item").forEach((item) => {
-        item.addEventListener("click", () => setNavActive(item));
-    });
-
-    // Wire up sidebar collapse button
+    byId("toggleBtn").addEventListener("click", () => sidebar.classList.contains("open") ? closeSidebar() : openSidebar());
+    document.querySelectorAll<HTMLElement>(".sidebar-nav-item").forEach((item) => item.addEventListener("click", () => setNavActive(item)));
     document.getElementById("sidebarCollapseBtn")?.addEventListener("click", toggleSidebarCollapse);
 
-    // On resize: if going to desktop, close mobile overlay
     window.addEventListener("resize", () => {
-        if (isDesktop()) {
-            sidebar.classList.remove("open");
-            backdrop.classList.remove("active");
-        }
+        if (isDesktop()) { sidebar.classList.remove("open"); backdrop.classList.remove("active"); }
     });
 
-    // Touch swipe-to-open (mobile)
     let touchStartX = 0;
-    document.addEventListener(
-        "touchstart",
-        (e: TouchEvent) => {
-            touchStartX = e.touches[0].clientX;
-        },
-        { passive: true },
-    );
-    document.addEventListener(
-        "touchend",
-        (e: TouchEvent) => {
-            const dx = e.changedTouches[0].clientX - touchStartX;
-            if (!isDesktop()) {
-                if (dx > 60 && touchStartX < 30) openSidebar();
-                if (dx < -60 && sidebar.classList.contains("open")) closeSidebar();
-            }
-        },
-        { passive: true },
-    );
+    document.addEventListener("touchstart", (e: TouchEvent) => { touchStartX = e.touches[0].clientX; }, { passive: true });
+    document.addEventListener("touchend", (e: TouchEvent) => {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        if (!isDesktop()) {
+            if (dx > 60 && touchStartX < 30) openSidebar();
+            if (dx < -60 && sidebar.classList.contains("open")) closeSidebar();
+        }
+    }, { passive: true });
 
-    // ──────────────────────────────────────────────
-    //  Settings panel (theme, presets, save/load/reset)
-    // ──────────────────────────────────────────────
+    // ──────────────────────────────────────────
+    //  Settings panel
+    // ──────────────────────────────────────────
 
     const mq: MediaQueryList = window.matchMedia("(prefers-color-scheme: light)");
 
@@ -235,42 +377,39 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     mq.addEventListener("change", () => {
-        if (localStorage.getItem("nc_theme") === "system") {
-            applyThemeToDOM("system");
-        }
+        if (localStorage.getItem("nc_theme") === "system") applyThemeToDOM("system");
     });
 
-    // Wire up theme option buttons
     document.querySelectorAll<HTMLElement>(".theme-opt").forEach((el) => {
-        el.addEventListener("click", () => {
-            const val = el.dataset.themeVal || "dark";
-            setTheme(val);
-        });
+        el.addEventListener("click", () => setTheme(el.dataset.themeVal || "dark"));
     });
 
-    /** Preset definitions for retrieval tuning. */
     const PRESETS: Record<string, PresetConfig> = {
         balanced: { searchLimit: 10, rerankTopK: 5 },
-        precise: { searchLimit: 8, rerankTopK: 3 },
-        broad: { searchLimit: 25, rerankTopK: 10 },
-        fast: { searchLimit: 5, rerankTopK: 2 },
+        precise:  { searchLimit: 8,  rerankTopK: 3 },
+        broad:    { searchLimit: 25, rerankTopK: 10 },
+        fast:     { searchLimit: 5,  rerankTopK: 2 },
     };
 
     function applyPreset(name: string): void {
         const p = PRESETS[name];
         if (!p) return;
-        const searchLimitEl = byId<HTMLInputElement>("searchLimit");
-        const rerankTopKEl = byId<HTMLInputElement>("rerankTopK");
-        searchLimitEl.value = String(p.searchLimit);
+        byId<HTMLInputElement>("searchLimit").value = String(p.searchLimit);
         byId("searchLimitVal").textContent = String(p.searchLimit);
-        rerankTopKEl.value = String(p.rerankTopK);
+        byId<HTMLInputElement>("rerankTopK").value = String(p.rerankTopK);
         byId("rerankVal").textContent = String(p.rerankTopK);
     }
 
-    // Wire up preset selector
     document.getElementById("presetSelect")?.addEventListener("change", (e: Event) => {
-        const target = e.target as HTMLSelectElement;
-        applyPreset(target.value);
+        applyPreset((e.target as HTMLSelectElement).value);
+    });
+
+    // Sync slider display values in real-time
+    document.getElementById("searchLimit")?.addEventListener("input", (e: Event) => {
+        byId("searchLimitVal").textContent = (e.target as HTMLInputElement).value;
+    });
+    document.getElementById("rerankTopK")?.addEventListener("input", (e: Event) => {
+        byId("rerankVal").textContent = (e.target as HTMLInputElement).value;
     });
 
     function openSettings(): void {
@@ -291,7 +430,10 @@ document.addEventListener("DOMContentLoaded", () => {
             searchLimit: byId<HTMLInputElement>("searchLimit").value,
             rerankTopK: byId<HTMLInputElement>("rerankTopK").value,
             streaming: byId<HTMLInputElement>("streamingToggle").checked,
+            memory_enabled: byId<HTMLInputElement>("memoryToggle").checked,
             citations: byId<HTMLInputElement>("citationsToggle").checked,
+            api_endpoint: byId<HTMLInputElement>("apiEndpoint").value.trim(),
+            auth_token: byId<HTMLInputElement>("apiToken").value.trim(),
         };
         localStorage.setItem("nc_settings", JSON.stringify(s));
         closeSettings();
@@ -299,13 +441,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function loadSettings(): void {
-        const raw = localStorage.getItem("nc_settings");
-        const s: Record<string, unknown> = raw ? JSON.parse(raw) : {};
-        const theme = (localStorage.getItem("nc_theme") || (s.theme as string) || "dark");
+        const s = getSettings();
+        const theme = localStorage.getItem("nc_theme") || (s.theme as string) || "dark";
         applyThemeToDOM(theme);
-        if (s.preset) {
-            byId<HTMLSelectElement>("presetSelect").value = s.preset as string;
-        }
+        if (s.preset) byId<HTMLSelectElement>("presetSelect").value = s.preset as string;
         if (s.searchLimit) {
             byId<HTMLInputElement>("searchLimit").value = s.searchLimit as string;
             byId("searchLimitVal").textContent = s.searchLimit as string;
@@ -314,12 +453,11 @@ document.addEventListener("DOMContentLoaded", () => {
             byId<HTMLInputElement>("rerankTopK").value = s.rerankTopK as string;
             byId("rerankVal").textContent = s.rerankTopK as string;
         }
-        if (s.streaming !== undefined) {
-            byId<HTMLInputElement>("streamingToggle").checked = s.streaming as boolean;
-        }
-        if (s.citations !== undefined) {
-            byId<HTMLInputElement>("citationsToggle").checked = s.citations as boolean;
-        }
+        if (s.streaming !== undefined) byId<HTMLInputElement>("streamingToggle").checked = s.streaming as boolean;
+        if (s.memory_enabled !== undefined) byId<HTMLInputElement>("memoryToggle").checked = s.memory_enabled as boolean;
+        if (s.citations !== undefined) byId<HTMLInputElement>("citationsToggle").checked = s.citations as boolean;
+        if (s.api_endpoint) byId<HTMLInputElement>("apiEndpoint").value = s.api_endpoint as string;
+        if (s.auth_token) byId<HTMLInputElement>("apiToken").value = s.auth_token as string;
     }
 
     function resetSettings(): void {
@@ -329,11 +467,13 @@ document.addEventListener("DOMContentLoaded", () => {
         byId<HTMLSelectElement>("presetSelect").value = "balanced";
         applyPreset("balanced");
         byId<HTMLInputElement>("streamingToggle").checked = true;
+        byId<HTMLInputElement>("memoryToggle").checked = true;
         byId<HTMLInputElement>("citationsToggle").checked = true;
+        byId<HTMLInputElement>("apiEndpoint").value = "";
+        byId<HTMLInputElement>("apiToken").value = "";
         showToast("Settings reset to defaults");
     }
 
-    // Wire up settings buttons
     document.getElementById("settingsBtn")?.addEventListener("click", openSettings);
     document.getElementById("customizeOpenSettings")?.addEventListener("click", openSettings);
     settingsOverlay.addEventListener("click", closeSettings);
@@ -341,14 +481,11 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("settingsSaveBtn")?.addEventListener("click", saveSettings);
     document.getElementById("settingsResetBtn")?.addEventListener("click", resetSettings);
 
-    // Apply saved theme on load
     applyThemeToDOM(localStorage.getItem("nc_theme") || "dark");
 
-    // ──────────────────────────────────────────────
-    //  Scroll-to-bottom FAB
-    // ──────────────────────────────────────────────
-
-    let userScrolledUp = false;
+    // ──────────────────────────────────────────
+    //  Scroll FAB
+    // ──────────────────────────────────────────
 
     thread.addEventListener("scroll", () => {
         const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
@@ -356,35 +493,28 @@ document.addEventListener("DOMContentLoaded", () => {
         fab.classList.toggle("visible", userScrolledUp);
     });
 
-    fab.addEventListener("click", () => {
-        thread.scrollTop = thread.scrollHeight;
-    });
+    fab.addEventListener("click", () => { thread.scrollTop = thread.scrollHeight; });
 
     function scrollToBottom(): void {
-        if (!userScrolledUp) {
-            thread.scrollTop = thread.scrollHeight;
-        }
+        if (!userScrolledUp) thread.scrollTop = thread.scrollHeight;
     }
 
-    // ──────────────────────────────────────────────
-    //  Copy helpers and toast
-    // ──────────────────────────────────────────────
+    // ──────────────────────────────────────────
+    //  Toast & copy helpers
+    // ──────────────────────────────────────────
 
     function showToast(msg: string): void {
         const t = byId("toast");
         t.textContent = msg;
         t.classList.add("show");
-        setTimeout(() => t.classList.remove("show"), 2000);
+        setTimeout(() => t.classList.remove("show"), 2200);
     }
 
     function copyMsg(btn: HTMLElement, text: string): void {
         navigator.clipboard.writeText(text).then(() => {
             btn.classList.add("copied");
             btn.textContent = "\u2713 Copied";
-            setTimeout(() => {
-                btn.classList.remove("copied");
-                btn.innerHTML = "&#128203; Copy";
-            }, 2000);
+            setTimeout(() => { btn.classList.remove("copied"); btn.innerHTML = "&#128203; Copy"; }, 2000);
         });
         showToast("Copied to clipboard");
     }
@@ -393,46 +523,449 @@ document.addEventListener("DOMContentLoaded", () => {
         copyMsg(btn, document.getElementById(id)?.innerText || "");
     }
 
-    // Expose copy helpers to inline onclick handlers in HTML
     (window as unknown as Record<string, unknown>)["copyMsg"] = copyMsg;
     (window as unknown as Record<string, unknown>)["copyBubble"] = copyBubble;
     (window as unknown as Record<string, unknown>)["showToast"] = showToast;
 
-    // ──────────────────────────────────────────────
-    //  Citation helpers
-    // ──────────────────────────────────────────────
+    // Single delegated handler for all code-block copy buttons in the thread.
+    // marked's custom renderer emits <button class="copy-code-btn"> with no
+    // onclick; this handler picks it up regardless of when the bubble was rendered.
+    thread.addEventListener("click", (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLElement>(".copy-code-btn");
+        if (!btn) return;
+        const codeDiv = btn.closest(".code-block-wrap")?.querySelector<HTMLElement>(".code-block");
+        if (codeDiv) {
+            navigator.clipboard.writeText(codeDiv.textContent ?? "");
+            showToast("Code copied");
+        }
+    });
 
-    function toggleCitation(card: HTMLElement): void {
-        card.classList.toggle("expanded");
-    }
+    // ──────────────────────────────────────────
+    //  Citation helpers
+    // ──────────────────────────────────────────
+
+    function toggleCitation(card: HTMLElement): void { card.classList.toggle("expanded"); }
 
     function toggleChunk(e: Event, id: string): void {
         e.stopPropagation();
         const el = byId(id);
         el.classList.toggle("show-all");
-        const target = e.target as HTMLElement;
-        target.textContent = el.classList.contains("show-all") ? "Show less" : "Show more";
+        (e.target as HTMLElement).textContent = el.classList.contains("show-all") ? "Show less" : "Show more";
     }
 
-    // Expose citation helpers to inline onclick handlers in HTML
     (window as unknown as Record<string, unknown>)["toggleCitation"] = toggleCitation;
     (window as unknown as Record<string, unknown>)["toggleChunk"] = toggleChunk;
 
-    // ──────────────────────────────────────────────
-    //  Slash-command autocomplete
-    // ──────────────────────────────────────────────
+    // ──────────────────────────────────────────
+    //  Context window indicator
+    // ──────────────────────────────────────────
 
-    const allCmds: HTMLElement[] = Array.from(dropdown.querySelectorAll<HTMLElement>(".slash-item"));
-    let selIdx = 0;
-
-    function closeDropdown(): void {
-        dropdown.classList.remove("open");
+    function updateContextIndicator(pct: number, bd?: Partial<ContextBreakdown>): void {
+        const breakdown: ContextBreakdown = {
+            system: bd?.system ?? 0,
+            memory: bd?.memory ?? 0,
+            chunks: bd?.chunks ?? 0,
+            query:  bd?.query  ?? 0,
+        };
+        const chip = byId("ctxChip");
+        byId("ctxBarFill").style.width = Math.min(pct, 100) + "%";
+        byId("ctxPct").textContent = "~" + Math.round(pct) + "%";
+        chip.classList.remove("warn", "crit");
+        if (pct >= 95) chip.classList.add("crit");
+        else if (pct >= 80) chip.classList.add("warn");
+        const fmt = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+        byId("ttSystem").textContent = fmt(breakdown.system) + " tok";
+        byId("ttMemory").textContent = fmt(breakdown.memory) + " tok";
+        byId("ttChunks").textContent = fmt(breakdown.chunks) + " tok";
+        byId("ttQuery").textContent  = fmt(breakdown.query)  + " tok";
+        const total = breakdown.system + breakdown.memory + breakdown.chunks + breakdown.query;
+        byId("ttTotal").textContent = fmt(total) + " tok";
+        byId("ctxCompactBtn").style.display = pct >= 95 ? "block" : "none";
     }
 
+    byId("ctxCompactBtn").addEventListener("click", async () => {
+        if (!activeConversationId) return;
+        try {
+            await api("POST", `/console/conversations/${activeConversationId}/compact`);
+            showToast("Conversation compacted");
+            updateContextIndicator(0);
+        } catch (err) {
+            showToast("Compact failed: " + String(err));
+        }
+    });
+
+    byId("ctxChip").addEventListener("click", () => {
+        byId("ctxChip").classList.toggle("tooltip-open");
+    });
+
+    // ──────────────────────────────────────────
+    //  Message thread rendering
+    // ──────────────────────────────────────────
+
+    function setEmptyState(visible: boolean): void {
+        const el = document.getElementById("threadEmpty");
+        if (el) el.style.display = visible ? "" : "none";
+    }
+
+    function appendUserMsg(text: string): void {
+        setEmptyState(false);
+        const ts = fmtTime(Date.now());
+        const group = document.createElement("div");
+        group.className = "msg-group";
+        group.innerHTML = `
+            <div class="msg-row user">
+              <div class="avatar user-av">U</div>
+              <div class="bubble-wrap">
+                <div class="bubble">${escHtml(text)}</div>
+                <div class="msg-actions">
+                  <button class="msg-action-btn" onclick="copyMsg(this,'${escHtml(text)}')" >&#128203; Copy</button>
+                </div>
+                <div class="msg-meta">${ts}</div>
+              </div>
+            </div>`;
+        thread.appendChild(group);
+        scrollToBottom();
+    }
+
+    /** Creates a pending assistant bubble with typing indicator. Returns the bubble element. */
+    function appendPendingAssistant(): {
+        group: HTMLElement;
+        bubbleEl: HTMLElement;
+        typingEl: HTMLElement;
+        citationsEl: HTMLElement;
+        actionsEl: HTMLElement;
+        metaEl: HTMLElement;
+    } {
+        setEmptyState(false);
+        const group = document.createElement("div");
+        group.className = "msg-group";
+        group.innerHTML = `
+            <div class="msg-row assistant">
+              <div class="avatar ai-av">AI</div>
+              <div class="bubble-wrap">
+                <div class="typing-indicator">
+                  <div class="typing-dot"></div>
+                  <div class="typing-dot"></div>
+                  <div class="typing-dot"></div>
+                </div>
+                <div class="bubble" style="display:none"></div>
+                <div class="citations" style="display:none"></div>
+                <div class="msg-actions" style="display:none">
+                  <button class="msg-action-btn">&#128203; Copy</button>
+                  <button class="msg-action-btn">&#128257; Regenerate</button>
+                </div>
+                <div class="msg-meta" style="display:none"></div>
+              </div>
+            </div>`;
+        thread.appendChild(group);
+        scrollToBottom();
+        const bw = group.querySelector(".bubble-wrap")!;
+        const bubbleEl   = bw.querySelector<HTMLElement>(".bubble")!;
+        const typingEl   = bw.querySelector<HTMLElement>(".typing-indicator")!;
+        const citationsEl = bw.querySelector<HTMLElement>(".citations")!;
+        const actionsEl  = bw.querySelector<HTMLElement>(".msg-actions")!;
+        const metaEl     = bw.querySelector<HTMLElement>(".msg-meta")!;
+        const copyBtn    = actionsEl.querySelector<HTMLButtonElement>("button");
+        if (copyBtn) {
+            copyBtn.addEventListener("click", () => copyMsg(copyBtn, bubbleEl.innerText));
+        }
+        return { group, bubbleEl, typingEl, citationsEl, actionsEl, metaEl };
+    }
+
+    function buildCitationsHtml(results: ChunkResult[]): string {
+        if (!results.length) return "";
+        let html = `<div class="citation-label">&#128206; ${results.length} source${results.length > 1 ? "s" : ""} cited</div>`;
+        results.forEach((r, i) => {
+            const meta = r.metadata || {};
+            const filename = escHtml(String(meta.source ?? meta.filename ?? "Unknown source"));
+            const section  = escHtml(String(meta.section ?? meta.heading ?? ""));
+            const score    = Math.round(r.score * 100);
+            const scoreClass = score >= 80 ? "high" : score >= 50 ? "mid" : "low";
+            const chunkText = escHtml(r.text || "").slice(0, 400);
+            const chunkId = `chunk-${i}-${Date.now()}`;
+            const sourceUri = String(meta.source_uri ?? "").trim();
+            const source    = String(meta.source ?? "").trim();
+            const start = meta.original_char_start;
+            const end   = meta.original_char_end;
+            let viewHref = "";
+            if (sourceUri || source) {
+                const p = new URLSearchParams();
+                if (sourceUri) p.set("source_uri", sourceUri);
+                else p.set("source", source);
+                if (start !== undefined && end !== undefined) {
+                    p.set("start", String(start));
+                    p.set("end", String(end));
+                }
+                viewHref = `/console/source-document/view?${p.toString()}`;
+            }
+            html += `
+              <div class="citation-card" onclick="toggleCitation(this)">
+                <div class="citation-header">
+                  <span class="citation-icon">&#128196;</span>
+                  <div class="citation-info">
+                    <div class="citation-filename">${filename}${viewHref ? ` <a href="${viewHref}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--accent)">[view]</a>` : ""}</div>
+                    ${section ? `<div class="citation-section">${section}</div>` : ""}
+                  </div>
+                  <div class="relevance-bar-wrap">
+                    <span class="relevance-pct ${scoreClass}">${score}%</span>
+                    <div class="relevance-bar"><div class="relevance-fill ${scoreClass}" style="width:${score}%"></div></div>
+                  </div>
+                  <span class="citation-chevron">&#8964;</span>
+                </div>
+                <div class="citation-body">
+                  <div class="citation-chunk" id="${chunkId}">"${chunkText}${r.text.length > 400 ? "…" : ""}"</div>
+                  <button class="citation-show-more" onclick="event.stopPropagation();toggleChunk(event,'${chunkId}')">Show more</button>
+                </div>
+              </div>`;
+        });
+        return html;
+    }
+
+    function appendSystemMsg(text: string): void {
+        const div = document.createElement("div");
+        div.className = "msg-group";
+        div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">&#9432;</div><div class="bubble-wrap"><div class="bubble">${escHtml(text)}</div></div></div>`;
+        thread.appendChild(div);
+        scrollToBottom();
+    }
+
+    function appendErrorMsg(text: string): void {
+        const div = document.createElement("div");
+        div.className = "msg-group";
+        div.innerHTML = `<div class="msg-row assistant"><div class="avatar ai-av">!</div><div class="bubble-wrap"><div class="bubble error-bubble">&#9888; ${escHtml(text)}</div></div></div>`;
+        thread.appendChild(div);
+        scrollToBottom();
+    }
+
+    // ──────────────────────────────────────────
+    //  Conversation list
+    // ──────────────────────────────────────────
+
+    function setActiveConversation(id: string | null): void {
+        activeConversationId = id;
+        if (id) localStorage.setItem("nc_active_conv", id);
+        else localStorage.removeItem("nc_active_conv");
+    }
+
+    function renderConversationList(convs: ConversationMeta[]): void {
+        const container = byId("convList");
+        if (!convs.length) {
+            container.innerHTML = `<div class="conv-list-empty">No conversations yet.<br>Start one below!</div>`;
+            return;
+        }
+        // Group by date
+        const groups: Record<string, ConversationMeta[]> = {};
+        convs.forEach((c) => {
+            const label = fmtRelative(c.updated_at_ms ?? Date.now());
+            if (!groups[label]) groups[label] = [];
+            groups[label].push(c);
+        });
+        let html = "";
+        for (const [label, items] of Object.entries(groups)) {
+            html += `<div class="conv-section-label">${escHtml(label)}</div>`;
+            items.forEach((c) => {
+                const isActive = c.conversation_id === activeConversationId;
+                const title = escHtml(c.title || c.conversation_id);
+                html += `
+                  <div class="conv-item-wrap">
+                    <div class="conv-item${isActive ? " active" : ""}" data-conv-id="${escHtml(c.conversation_id)}" title="${title}">
+                      <span class="dot"></span>${title}
+                    </div>
+                    <button class="conv-item-del" data-conv-id="${escHtml(c.conversation_id)}" title="Delete">&#10005;</button>
+                  </div>`;
+            });
+        }
+        container.innerHTML = html;
+
+        // Wire click handlers
+        container.querySelectorAll<HTMLElement>(".conv-item").forEach((el) => {
+            el.addEventListener("click", () => {
+                const id = el.dataset.convId;
+                if (id) selectConversation(id);
+            });
+        });
+        container.querySelectorAll<HTMLElement>(".conv-item-del").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.convId;
+                if (id) deleteConversation(id);
+            });
+        });
+    }
+
+    async function loadConversations(): Promise<void> {
+        try {
+            const data = await api<{ conversations: ConversationMeta[] }>("GET", "/console/conversations?limit=50");
+            renderConversationList(data.conversations || []);
+        } catch {
+            // Non-fatal — sidebar just stays empty
+        }
+    }
+
+    async function selectConversation(id: string): Promise<void> {
+        // Abort any in-progress stream before switching
+        if (isStreaming) {
+            streamAbortCtrl?.abort();
+            isStreaming = false;
+        }
+        setActiveConversation(id);
+        // Update active class
+        byId("convList").querySelectorAll<HTMLElement>(".conv-item").forEach((el) => {
+            el.classList.toggle("active", el.dataset.convId === id);
+        });
+        await loadConversationHistory(id);
+    }
+
+    async function loadConversationHistory(id?: string): Promise<void> {
+        const convId = id ?? activeConversationId;
+        if (!convId) return;
+        try {
+            const data = await api<{ conversation_id: string; turns: Array<{ role: string; content: string; timestamp_ms?: number; sources?: SourceRef[] }> }>(
+                "GET", `/console/conversations/${convId}/history?limit=100`
+            );
+            thread.innerHTML = "";
+            if (!data.turns || !data.turns.length) {
+                thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">Empty conversation</div><div class="thread-empty-sub">Send a message to start the conversation.</div></div>`;
+                return;
+            }
+            data.turns.forEach((turn) => {
+                if (turn.role === "user") {
+                    appendUserMsg(turn.content);
+                } else {
+                    // Render assistant turns as completed messages
+                    setEmptyState(false);
+                    const group = document.createElement("div");
+                    group.className = "msg-group";
+                    const ts = fmtTime(turn.timestamp_ms ?? Date.now());
+                    const sources = turn.sources ?? [];
+                    const citationsHtml = sources.length
+                        ? `<div class="citations">${buildCitationsHtml(sources.map(sourceRefToChunkResult))}</div>`
+                        : "";
+                    group.innerHTML = `
+                        <div class="msg-row assistant">
+                          <div class="avatar ai-av">AI</div>
+                          <div class="bubble-wrap">
+                            <div class="bubble">${parseMarkdown(turn.content)}</div>
+                            ${citationsHtml}
+                            <div class="msg-actions">
+                              <button class="msg-action-btn">&#128203; Copy</button>
+                            </div>
+                            <div class="msg-meta">${ts}</div>
+                          </div>
+                        </div>`;
+                    const copyBtn = group.querySelector<HTMLElement>(".msg-action-btn");
+                    if (copyBtn) {
+                        const bubbleEl = group.querySelector<HTMLElement>(".bubble")!;
+                        copyBtn.addEventListener("click", () => copyMsg(copyBtn, bubbleEl.innerText));
+                    }
+                    thread.appendChild(group);
+                }
+            });
+            // Update title
+            const activeConv = document.querySelector<HTMLElement>(`.conv-item[data-conv-id="${convId}"]`);
+            if (activeConv) byId("convTitle").textContent = activeConv.title ?? activeConv.textContent?.trim() ?? "Conversation";
+            setTimeout(() => { thread.scrollTop = thread.scrollHeight; }, 50);
+        } catch (err) {
+            appendErrorMsg("Failed to load conversation history: " + String(err));
+        }
+    }
+
+    async function createNewConversation(): Promise<void> {
+        try {
+            const data = await api<{ conversation: ConversationMeta }>("POST", "/console/conversations/new", {
+                title: "New conversation",
+            });
+            const conv = data.conversation;
+            setActiveConversation(conv.conversation_id);
+            thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
+            byId("convTitle").textContent = conv.title || "New conversation";
+            await loadConversations();
+            showToast("New conversation started");
+        } catch (err) {
+            showToast("Failed to create conversation: " + String(err));
+        }
+    }
+
+    async function deleteConversation(id: string): Promise<void> {
+        try {
+            await api("DELETE", `/console/conversations/${id}`);
+            if (activeConversationId === id) {
+                setActiveConversation(null);
+                thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#9670;</div><div class="thread-empty-title">Aion Chat</div><div class="thread-empty-sub">Ask anything — I'll search your knowledge base and generate a response with sources.</div></div>`;
+                byId("convTitle").textContent = "Aion Chat";
+            }
+            await loadConversations();
+            showToast("Conversation deleted");
+        } catch {
+            showToast("Failed to delete conversation");
+        }
+    }
+
+    byId("newChatBtn").addEventListener("click", createNewConversation);
+
+    // ──────────────────────────────────────────
+    //  Dynamic slash commands
+    // ──────────────────────────────────────────
+
+    function renderSlashDropdown(cmds: SlashCommand[]): void {
+        const container = byId("slashItems");
+        container.innerHTML = cmds.map((c) =>
+            `<div class="slash-item" data-cmd="/${escHtml(c.name)}">` +
+            `<span class="slash-cmd">/${escHtml(c.name)}</span>` +
+            `<span class="slash-desc">${escHtml(c.description)}</span>` +
+            `</div>`
+        ).join("");
+        allSlashItems = Array.from(container.querySelectorAll<HTMLElement>(".slash-item"));
+        allSlashItems.forEach((item) => item.addEventListener("click", () => executeCmd(item.dataset.cmd || "")));
+    }
+
+    function renderCmdPicker(cmds: SlashCommand[]): void {
+        const container = byId("cmdPickerBody");
+        // Group by category
+        const grouped: Record<string, SlashCommand[]> = {};
+        cmds.forEach((c) => {
+            const cat = c.category || "General";
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(c);
+        });
+        let html = "";
+        for (const [cat, items] of Object.entries(grouped)) {
+            html += `<div class="cmd-group-label">${escHtml(cat)}</div>`;
+            items.forEach((c) => {
+                html += `<div class="cmd-picker-item" data-cmd="/${escHtml(c.name)}">` +
+                    `<span class="cmd-picker-icon">&#47;</span>` +
+                    `<span class="cmd-picker-name">/${escHtml(c.name)}</span>` +
+                    `<span class="cmd-picker-desc">${escHtml(c.description)}</span>` +
+                    `</div>`;
+            });
+        }
+        container.innerHTML = html;
+        allPickerItems = Array.from(container.querySelectorAll<HTMLElement>(".cmd-picker-item"));
+        allPickerItems.forEach((item) => item.addEventListener("click", () => executePicker(item)));
+    }
+
+    async function loadCommands(): Promise<void> {
+        try {
+            const data = await api<{ commands: SlashCommand[] }>("GET", "/console/commands?mode=query");
+            dynamicCmds = data.commands || [];
+            renderSlashDropdown(dynamicCmds);
+            renderCmdPicker(dynamicCmds);
+        } catch {
+            // Non-fatal: commands just stay empty
+        }
+    }
+
+    // ──────────────────────────────────────────
+    //  Slash autocomplete UI
+    // ──────────────────────────────────────────
+
+    function closeDropdown(): void { dropdown.classList.remove("open"); }
+
     function setSelected(i: number): void {
-        const vis = allCmds.filter((x) => x.style.display !== "none");
-        selIdx = (i + vis.length) % vis.length;
-        vis.forEach((el, j) => el.classList.toggle("selected", j === selIdx));
+        const vis = allSlashItems.filter((x) => x.style.display !== "none");
+        if (!vis.length) return;
+        slashSelIdx = (i + vis.length) % vis.length;
+        vis.forEach((el, j) => el.classList.toggle("selected", j === slashSelIdx));
     }
 
     function executeCmd(cmd: string): void {
@@ -444,35 +977,336 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function handleSlashInput(): void {
         const val = ta.value;
-        if (!val.startsWith("/")) {
-            closeDropdown();
-            return;
-        }
+        if (!val.startsWith("/")) { closeDropdown(); return; }
         const q = val.slice(1).toLowerCase();
         let vis = 0;
-        allCmds.forEach((item) => {
-            const cmdAttr = item.dataset.cmd || "";
+        allSlashItems.forEach((item) => {
+            const cmdAttr = (item.dataset.cmd || "").toLowerCase();
             const descEl = item.querySelector<HTMLElement>(".slash-desc");
             const descText = descEl ? descEl.textContent?.toLowerCase() || "" : "";
-            const match = cmdAttr.includes("/" + q) || descText.includes(q);
+            const match = cmdAttr.includes(q) || descText.includes(q);
             item.style.display = match ? "" : "none";
             if (match) vis++;
         });
-        if (!vis) {
-            closeDropdown();
-            return;
-        }
+        if (!vis) { closeDropdown(); return; }
         dropdown.classList.add("open");
         setSelected(0);
     }
 
-    allCmds.forEach((item) => {
-        item.addEventListener("click", () => executeCmd(item.dataset.cmd || ""));
-    });
+    // ──────────────────────────────────────────
+    //  Query execution (streaming + non-stream)
+    // ──────────────────────────────────────────
 
-    // ──────────────────────────────────────────────
-    //  Input textarea handling
-    // ──────────────────────────────────────────────
+    function buildQueryBody(queryText: string): Record<string, unknown> {
+        const s = getSettings();
+        return {
+            query: queryText,
+            search_limit: parseInt(String(s.searchLimit ?? "10"), 10),
+            rerank_top_k: parseInt(String(s.rerankTopK ?? "5"), 10),
+            memory_enabled: s.memory_enabled !== false,
+            conversation_id: activeConversationId ?? undefined,
+        };
+    }
+
+    async function streamQuery(queryText: string): Promise<void> {
+        if (isStreaming) {
+            streamAbortCtrl?.abort();
+        }
+        isStreaming = true;
+        streamAbortCtrl = new AbortController();
+
+        appendUserMsg(queryText);
+        const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = appendPendingAssistant();
+
+        const url = apiBase() + "/query/stream";
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                method: "POST",
+                headers: authHeaders(),
+                body: JSON.stringify(buildQueryBody(queryText)),
+                signal: streamAbortCtrl.signal,
+            });
+        } catch (err) {
+            typingEl.remove();
+            bubbleEl.innerHTML = "&#9888; Network error: " + escHtml(String(err));
+            bubbleEl.classList.add("error-bubble");
+            bubbleEl.style.display = "block";
+            isStreaming = false;
+            return;
+        }
+
+        if (!response.ok || !response.body) {
+            typingEl.remove();
+            bubbleEl.innerHTML = `&#9888; Stream error (HTTP ${response.status})`;
+            bubbleEl.classList.add("error-bubble");
+            bubbleEl.style.display = "block";
+            isStreaming = false;
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let answer = "";
+        let started = false;
+        let errorShown = false;
+        let pendingClarification = "";
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split("\n\n");
+                buffer = events.pop() || "";
+
+                for (const evt of events) {
+                    const lines = evt.split("\n");
+                    const evtType = (lines.find((l) => l.startsWith("event: ")) ?? "").slice(7);
+                    const dataRaw = (lines.find((l) => l.startsWith("data: ")) ?? "data: {}").slice(6);
+                    let data: StreamEventData;
+                    try { data = JSON.parse(dataRaw) as StreamEventData; }
+                    catch { data = {}; }
+
+                    if (evtType === "token") {
+                        if (!started) {
+                            typingEl.style.display = "none";
+                            bubbleEl.style.display = "block";
+                            started = true;
+                        }
+                        answer += data.token || "";
+                        bubbleEl.innerHTML = parseMarkdown(answer) + '<span class="cursor"></span>';
+                        scrollToBottom();
+
+                    } else if (evtType === "retrieval") {
+                        const cid = String(data.conversation_id ?? "").trim();
+                        if (cid) setActiveConversation(cid);
+
+                        // Capture clarification message from retrieval (no-results path)
+                        const clar = String(data.clarification_message ?? "").trim();
+                        if (clar) pendingClarification = clar;
+
+                        // Update context indicator from token_budget
+                        const tb = data.token_budget;
+                        if (tb?.usage_percent !== undefined) {
+                            const bd = tb.breakdown ?? {};
+                            updateContextIndicator(tb.usage_percent * 100, {
+                                system: Number(bd.system_tokens ?? bd.system ?? 0),
+                                memory: Number(bd.memory_tokens ?? bd.memory ?? 0),
+                                chunks: Number(bd.chunk_tokens ?? bd.chunks ?? 0),
+                                query:  Number(bd.query_tokens  ?? bd.query  ?? 0),
+                            });
+                        }
+
+                        // Render citations (shown after streaming finishes)
+                        const results = (data.results ?? []) as ChunkResult[];
+                        const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
+                        if (showCitations && results.length) {
+                            citationsEl.innerHTML = buildCitationsHtml(results);
+                        }
+
+                    } else if (evtType === "error") {
+                        errorShown = true;
+                        typingEl.style.display = "none";
+                        bubbleEl.innerHTML = "&#9888; " + escHtml(String(data.message ?? "Unknown error"));
+                        bubbleEl.classList.add("error-bubble");
+                        bubbleEl.style.display = "block";
+                        scrollToBottom();
+
+                    } else if (evtType === "done") {
+                        const cid = String(data.conversation_id ?? "").trim();
+                        if (cid) setActiveConversation(cid);
+
+                        typingEl.style.display = "none";
+                        if (!errorShown) {
+                            if (!started) {
+                                // No tokens: show clarification or fallback ask
+                                const msg = pendingClarification ||
+                                    "I couldn't find relevant information for that query. " +
+                                    "Could you rephrase your question or provide more details?";
+                                bubbleEl.innerHTML = parseMarkdown(msg);
+                                bubbleEl.style.display = "block";
+                            } else {
+                                // Tokens streamed: finalize (remove cursor)
+                                bubbleEl.innerHTML = parseMarkdown(answer);
+                                bubbleEl.style.display = "block";
+                            }
+                        }
+
+                        const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
+                        if (showCitations && citationsEl.innerHTML) citationsEl.style.display = "block";
+                        actionsEl.style.display = "flex";
+                        metaEl.textContent = fmtTime(Date.now());
+                        metaEl.style.display = "block";
+                        scrollToBottom();
+
+                        await loadConversations();
+                        updateConvTitle();
+                    }
+                }
+            }
+        } catch (err) {
+            if ((err as Error).name !== "AbortError") {
+                appendErrorMsg("Stream interrupted: " + String(err));
+            }
+        }
+
+        isStreaming = false;
+    }
+
+    async function nonStreamQuery(queryText: string): Promise<void> {
+        appendUserMsg(queryText);
+        const { bubbleEl, typingEl, citationsEl, actionsEl, metaEl } = appendPendingAssistant();
+        try {
+            const data = await api<{
+                generated_answer?: string;
+                clarification_message?: string;
+                results?: ChunkResult[];
+                conversation_id?: string;
+                token_budget?: TokenBudget;
+            }>("POST", "/console/query", buildQueryBody(queryText));
+
+            const cid = String(data.conversation_id ?? "").trim();
+            if (cid) setActiveConversation(cid);
+
+            typingEl.style.display = "none";
+            const answer = data.generated_answer ?? data.clarification_message ?? "No response.";
+            bubbleEl.innerHTML = parseMarkdown(answer);
+            bubbleEl.style.display = "block";
+
+            const tb = data.token_budget;
+            if (tb?.usage_percent !== undefined) {
+                const bd = tb.breakdown ?? {};
+                updateContextIndicator(tb.usage_percent * 100, {
+                    system: Number(bd.system_tokens ?? 0),
+                    memory: Number(bd.memory_tokens ?? 0),
+                    chunks: Number(bd.chunk_tokens  ?? 0),
+                    query:  Number(bd.query_tokens   ?? 0),
+                });
+            }
+
+            const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
+            const results = data.results ?? [];
+            if (showCitations && results.length) {
+                citationsEl.innerHTML = buildCitationsHtml(results);
+                citationsEl.style.display = "block";
+            }
+
+            actionsEl.style.display = "flex";
+            metaEl.textContent = fmtTime(Date.now());
+            metaEl.style.display = "block";
+            scrollToBottom();
+            await loadConversations();
+            updateConvTitle();
+        } catch (err) {
+            typingEl.style.display = "none";
+            bubbleEl.innerHTML = "&#9888; " + escHtml(String(err));
+            bubbleEl.classList.add("error-bubble");
+            bubbleEl.style.display = "block";
+        }
+    }
+
+    function updateConvTitle(): void {
+        if (!activeConversationId) return;
+        const item = byId("convList").querySelector<HTMLElement>(`.conv-item[data-conv-id="${activeConversationId}"]`);
+        if (item) byId("convTitle").textContent = item.textContent?.trim().replace(/^●/, "").trim() ?? "Conversation";
+    }
+
+    async function sendQuery(text: string): Promise<void> {
+        const s = getSettings();
+        const useStreaming = s.streaming !== false;
+        if (useStreaming) {
+            await streamQuery(text);
+        } else {
+            await nonStreamQuery(text);
+        }
+    }
+
+    // ──────────────────────────────────────────
+    //  Slash command submission
+    // ──────────────────────────────────────────
+
+    async function submitSlashCommand(text: string): Promise<void> {
+        const trimmed = text.trim();
+        const spaceIdx = trimmed.indexOf(" ");
+        const commandName = (spaceIdx === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIdx)).toLowerCase();
+        const arg = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+
+        appendUserMsg(trimmed);
+
+        try {
+            const result = await api<CommandResult>("POST", "/console/command", {
+                mode: "query",
+                command: commandName,
+                arg: arg || undefined,
+                state: { conversation_id: activeConversationId ?? undefined },
+            });
+            const action = String(result.action ?? "noop");
+
+            if (action === "run_stream_query") {
+                // The command wants to execute a query — use the arg or command as the query
+                const queryText = arg || commandName;
+                await streamQuery(queryText);
+
+            } else if (action === "run_non_stream_query") {
+                const queryText = arg || commandName;
+                await nonStreamQuery(queryText);
+
+            } else if (action === "new_conversation") {
+                const conv = result.data?.conversation as ConversationMeta | undefined;
+                if (conv?.conversation_id) setActiveConversation(conv.conversation_id);
+                else await createNewConversation();
+                await loadConversations();
+
+            } else if (action === "switch_conversation") {
+                const cid = String(result.data?.conversation_id ?? arg).trim();
+                if (cid) await selectConversation(cid);
+
+            } else if (action === "list_conversations") {
+                await loadConversations();
+                appendSystemMsg("Conversation list refreshed.");
+
+            } else if (action === "show_history") {
+                await loadConversationHistory();
+
+            } else if (action === "compact_conversation") {
+                const summary = String(result.data?.summary ?? "").trim();
+                appendSystemMsg(summary ? `Compacted. Summary:\n\n${summary}` : "Conversation compacted.");
+                await loadConversations();
+
+            } else if (action === "delete_conversation") {
+                const cid = String(result.data?.conversation_id ?? "").trim();
+                if (cid) await deleteConversation(cid);
+
+            } else if (action === "clear_view") {
+                thread.innerHTML = "";
+                setEmptyState(true);
+
+            } else if (action === "refresh_health") {
+                const h = result.data?.health as Record<string, unknown> | undefined;
+                const status = h ? JSON.stringify(h, null, 2) : "Health data unavailable";
+                appendSystemMsg("Health:\n```json\n" + status + "\n```");
+
+            } else if (action === "render_help") {
+                const cmds = result.data?.commands as SlashCommand[] | undefined;
+                if (cmds?.length) {
+                    const lines = cmds.map((c) => `**/${c.name}** — ${c.description}`).join("\n");
+                    appendSystemMsg("Available commands:\n\n" + lines);
+                }
+
+            } else {
+                const msg = String(result.message ?? "Command executed.");
+                if (msg) appendSystemMsg(msg);
+            }
+        } catch (err) {
+            appendErrorMsg("Command failed: " + String(err));
+        }
+    }
+
+    // ──────────────────────────────────────────
+    //  Input textarea + send
+    // ──────────────────────────────────────────
 
     ta.addEventListener("input", () => {
         ta.style.height = "auto";
@@ -482,212 +1316,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
     ta.addEventListener("keydown", (e: KeyboardEvent) => {
         if (!dropdown.classList.contains("open")) {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                triggerSend();
-            }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); triggerSend(); }
             return;
         }
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setSelected(selIdx + 1);
-        }
-        if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setSelected(selIdx - 1);
-        }
+        if (e.key === "ArrowDown") { e.preventDefault(); setSelected(slashSelIdx + 1); }
+        if (e.key === "ArrowUp")   { e.preventDefault(); setSelected(slashSelIdx - 1); }
         if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
             e.preventDefault();
-            const vis = allCmds.filter((x) => x.style.display !== "none");
-            if (vis[selIdx]) {
-                executeCmd(vis[selIdx].dataset.cmd || "");
-            }
+            const vis = allSlashItems.filter((x) => x.style.display !== "none");
+            if (vis[slashSelIdx]) executeCmd(vis[slashSelIdx].dataset.cmd || "");
         }
-        if (e.key === "Escape") {
-            closeDropdown();
-        }
+        if (e.key === "Escape") closeDropdown();
     });
 
     function triggerSend(): void {
-        if (!ta.value.trim()) return;
+        const text = ta.value.trim();
+        if (!text || isStreaming) return;
         closeDropdown();
         ta.value = "";
         ta.style.height = "auto";
-        startStream();
+        if (text.startsWith("/")) {
+            void submitSlashCommand(text);
+        } else {
+            void sendQuery(text);
+        }
     }
 
     byId("sendBtn").addEventListener("click", triggerSend);
 
-    // ──────────────────────────────────────────────
-    //  Streaming simulation
-    //  (will be replaced with real SSE/fetch API calls)
-    // ──────────────────────────────────────────────
-
-    const STREAM_TEXT =
-        '512 tokens with 50-overlap is solid. Add a **cross-encoder reranker** after retrieval \u2014 it dramatically improves precision:\n\n' +
-        "```python\n" +
-        "from sentence_transformers import CrossEncoder\n\n" +
-        'reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")\n' +
-        "pairs = [(query, chunk.text) for chunk in retrieved]\n" +
-        "scores = reranker.predict(pairs)\n" +
-        "top5 = sorted(zip(scores, retrieved), reverse=True)[:5]\n" +
-        "```\n\n" +
-        "This keeps top-10 recall but cuts the noise sent to the LLM. Give it a try and let me know!";
-
-    /** Minimal markdown-to-HTML converter for streaming preview. */
-    function parseMarkdown(raw: string): string {
-        const lines = raw.split("\n");
-        let html = "";
-        let inCode = false;
-        let codeLines: string[] = [];
-        let lang = "";
-        for (const line of lines) {
-            if (line.startsWith("```")) {
-                if (!inCode) {
-                    inCode = true;
-                    codeLines = [];
-                    lang = line.slice(3) || "code";
-                } else {
-                    const esc = codeLines
-                        .join("\n")
-                        .replace(/</g, "&lt;")
-                        .replace(/>/g, "&gt;");
-                    html +=
-                        '<div class="code-block-wrap">' +
-                        '<div class="code-block-header">' +
-                        `<span>${lang}</span>` +
-                        '<button class="copy-code-btn" onclick="navigator.clipboard.writeText(this.closest(\'.code-block-wrap\').querySelector(\'.code-block\').innerText);showToast(\'Code copied\')">Copy</button>' +
-                        "</div>" +
-                        `<div class="code-block">${esc}</div>` +
-                        "</div>";
-                    inCode = false;
-                }
-                continue;
-            }
-            if (inCode) {
-                codeLines.push(line);
-                continue;
-            }
-            if (line === "") {
-                html += "<br>";
-                continue;
-            }
-            html +=
-                "<p>" +
-                line
-                    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-                    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-                    .replace(/`([^`]+)`/g, "<code>$1</code>") +
-                "</p>";
-        }
-        return html;
-    }
-
-    let streamTimer: ReturnType<typeof setInterval> | null = null;
-
-    function startStream(): void {
-        const bubble = byId("streaming-bubble");
-        const typing = byId("typingIndicator");
-        const actions = byId("streaming-actions");
-        const meta = byId("streaming-meta");
-        const cits = byId("streaming-citations");
-
-        bubble.style.display = "none";
-        bubble.innerHTML = "";
-        typing.style.display = "flex";
-        actions.style.display = "none";
-        meta.style.display = "none";
-        cits.style.display = "none";
-
-        let idx = 0;
-        let acc = "";
-        let started = false;
-        if (streamTimer) clearInterval(streamTimer);
-
-        streamTimer = setInterval(() => {
-            if (idx >= STREAM_TEXT.length) {
-                clearInterval(streamTimer!);
-                bubble.innerHTML = parseMarkdown(acc);
-                const useCitations =
-                    (document.getElementById("citationsToggle") as HTMLInputElement | null)
-                        ?.checked !== false;
-                if (useCitations) cits.style.display = "flex";
-                actions.style.display = "flex";
-                meta.style.display = "block";
-                scrollToBottom();
-
-                // After stream ends, advance context indicator
-                setTimeout(() => {
-                    const state = CTX_STATES[ctxTurn % CTX_STATES.length];
-                    updateContextIndicator(state.pct, state.breakdown);
-                    ctxTurn++;
-                }, 2800);
-
-                return;
-            }
-            if (!started) {
-                typing.style.display = "none";
-                bubble.style.display = "block";
-                started = true;
-            }
-            acc += STREAM_TEXT.slice(idx, idx + 3);
-            idx += 3;
-            bubble.innerHTML = parseMarkdown(acc) + '<span class="cursor"></span>';
-            scrollToBottom();
-        }, 28);
-    }
-
-    // ──────────────────────────────────────────────
-    //  Context window indicator
-    // ──────────────────────────────────────────────
-
-    const CTX_WINDOW = 200000; // Claude Sonnet 4.5 context window (tokens)
-
-    function updateContextIndicator(pct: number, breakdown: ContextBreakdown): void {
-        const chip = byId("ctxChip");
-        const fill = byId("ctxBarFill");
-        const label = byId("ctxPct");
-        const compact = byId("ctxCompactBtn");
-
-        // Update bar
-        fill.style.width = Math.min(pct, 100) + "%";
-        label.textContent = "~" + Math.round(pct) + "%";
-
-        // State class
-        chip.classList.remove("warn", "crit");
-        if (pct >= 95) chip.classList.add("crit");
-        else if (pct >= 80) chip.classList.add("warn");
-
-        // Tooltip breakdown
-        const fmt = (n: number): string => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
-        byId("ttSystem").textContent = fmt(breakdown.system) + " tok";
-        byId("ttMemory").textContent = fmt(breakdown.memory) + " tok";
-        byId("ttChunks").textContent = fmt(breakdown.chunks) + " tok";
-        byId("ttQuery").textContent = fmt(breakdown.query) + " tok";
-        byId("ttTotal").textContent =
-            fmt(breakdown.system + breakdown.memory + breakdown.chunks + breakdown.query) +
-            " / " +
-            fmt(CTX_WINDOW);
-
-        // Show compact button only at critical
-        compact.style.display = pct >= 95 ? "block" : "none";
-    }
-
-    // Simulate increasing context usage across turns
-    const CTX_STATES: ContextState[] = [
-        { pct: 18, breakdown: { system: 1200, memory: 800, chunks: 4200, query: 30 } },
-        { pct: 34, breakdown: { system: 1200, memory: 2400, chunks: 8800, query: 45 } },
-        { pct: 51, breakdown: { system: 1200, memory: 4100, chunks: 13600, query: 62 } },
-        { pct: 83, breakdown: { system: 1200, memory: 7200, chunks: 22400, query: 80 } }, // warn
-        { pct: 97, breakdown: { system: 1200, memory: 9800, chunks: 32000, query: 95 } }, // crit
-    ];
-    let ctxTurn = 0;
-
-    // ──────────────────────────────────────────────
-    //  Attachment toolbar helpers
-    // ──────────────────────────────────────────────
-
-    let attachments: AttachmentChip[] = [];
+    // ──────────────────────────────────────────
+    //  Attachment toolbar
+    // ──────────────────────────────────────────
 
     function renderChips(): void {
         const container = byId("attachChips");
@@ -697,16 +1356,15 @@ document.addEventListener("DOMContentLoaded", () => {
             chip.className = "attach-chip";
             chip.innerHTML =
                 `<span class="attach-chip-icon">${a.icon}</span>` +
-                `<span class="attach-chip-label">${a.label}</span>` +
+                `<span class="attach-chip-label">${escHtml(a.label)}</span>` +
                 `<button class="attach-chip-remove" title="Remove">&#215;</button>`;
-            const removeBtn = chip.querySelector<HTMLButtonElement>(".attach-chip-remove");
-            removeBtn?.addEventListener("click", () => removeChip(a.id));
+            chip.querySelector<HTMLButtonElement>(".attach-chip-remove")?.addEventListener("click", () => removeChip(a.id));
             container.appendChild(chip);
         });
     }
 
     function addChip(icon: string, label: string, id: string): void {
-        if (attachments.find((a) => a.id === id)) return; // dedupe
+        if (attachments.find((a) => a.id === id)) return;
         attachments.push({ id, icon, label });
         renderChips();
     }
@@ -716,10 +1374,8 @@ document.addEventListener("DOMContentLoaded", () => {
         renderChips();
     }
 
-    // Expose removeChip for any inline onclick references
     (window as unknown as Record<string, unknown>)["removeChip"] = removeChip;
 
-    /** Close all attachment / web / KB popovers. */
     function closeAllPopovers(): void {
         attachPopover.classList.remove("open");
         webInputPanel.classList.remove("open");
@@ -734,12 +1390,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function toggleAttachPopover(): void {
         const isOpen = attachPopover.classList.contains("open");
-        closeAllPopovers();
-        closeCmdPicker();
-        if (!isOpen) {
-            attachPopover.classList.add("open");
-            attachBtn.classList.add("active");
-        }
+        closeAllPopovers(); closeCmdPicker();
+        if (!isOpen) { attachPopover.classList.add("open"); attachBtn.classList.add("active"); }
     }
 
     function openWebInput(): void {
@@ -748,20 +1400,13 @@ document.addEventListener("DOMContentLoaded", () => {
         setTimeout(() => document.getElementById("webUrlInput")?.focus(), 50);
     }
 
-    function openKBSelect(): void {
-        closeAllPopovers();
-        kbPanel.classList.add("open");
-    }
+    function openKBSelect(): void { closeAllPopovers(); kbPanel.classList.add("open"); }
 
-    // Wire up attachment button
     attachBtn.addEventListener("click", toggleAttachPopover);
-
-    // Wire up popover action items (file, web, KB)
     document.getElementById("attachOptFile")?.addEventListener("click", triggerFileUpload);
     document.getElementById("attachOptWeb")?.addEventListener("click", openWebInput);
     document.getElementById("attachOptKB")?.addEventListener("click", openKBSelect);
 
-    /** File upload. */
     function triggerFileUpload(): void {
         closeAllPopovers();
         byId<HTMLInputElement>("fileInput").click();
@@ -769,34 +1414,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function handleFileSelect(input: HTMLInputElement): void {
         if (!input.files) return;
-        Array.from(input.files).forEach((file) => {
-            addChip("&#128196;", file.name, "file:" + file.name);
-        });
+        Array.from(input.files).forEach((file) => addChip("&#128196;", file.name, "file:" + file.name));
         input.value = "";
         showToast("File added to context");
     }
 
-    // Wire up file input change
     document.getElementById("fileInput")?.addEventListener("change", (e: Event) => {
         handleFileSelect(e.target as HTMLInputElement);
     });
 
-    // Expose handleFileSelect for inline onchange
     (window as unknown as Record<string, unknown>)["handleFileSelect"] = handleFileSelect;
 
-    /** Web URL attach. */
     function attachWebUrl(): void {
         const input = byId<HTMLInputElement>("webUrlInput");
         const url = input.value.trim();
         if (!url) return;
-        try {
-            new URL(url);
-        } catch {
-            showToast("Invalid URL");
-            return;
-        }
-        const hostname = new URL(url).hostname.replace("www.", "");
-        addChip("&#127760;", hostname, "web:" + url);
+        try { new URL(url); } catch { showToast("Invalid URL"); return; }
+        addChip("&#127760;", new URL(url).hostname.replace("www.", ""), "web:" + url);
         input.value = "";
         webInputPanel.classList.remove("open");
         showToast("Web page added to context");
@@ -806,36 +1440,27 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.key === "Enter") attachWebUrl();
         if (e.key === "Escape") webInputPanel.classList.remove("open");
     });
-
     document.getElementById("webAddBtn")?.addEventListener("click", attachWebUrl);
 
-    /** KB panel filter + attach. */
     function filterKB(q: string): void {
         document.querySelectorAll<HTMLElement>(".kb-item").forEach((el) => {
-            const nameEl = el.querySelector<HTMLElement>(".kb-item-name");
-            const name = nameEl ? nameEl.textContent?.toLowerCase() || "" : "";
+            const name = el.querySelector<HTMLElement>(".kb-item-name")?.textContent?.toLowerCase() || "";
             el.style.display = name.includes(q.toLowerCase()) ? "" : "none";
         });
     }
 
     function attachKBDocs(): void {
-        document
-            .querySelectorAll<HTMLInputElement>("#kbList input[type=checkbox]:checked")
-            .forEach((cb) => {
-                addChip("&#128218;", cb.value, "kb:" + cb.value);
-                cb.checked = false;
-            });
+        document.querySelectorAll<HTMLInputElement>("#kbList input[type=checkbox]:checked").forEach((cb) => {
+            addChip("&#128218;", cb.value, "kb:" + cb.value);
+            cb.checked = false;
+        });
         kbPanel.classList.remove("open");
         showToast("Documents added to context");
     }
 
-    // Wire up KB search and attach
-    document.getElementById("kbSearch")?.addEventListener("input", (e: Event) => {
-        filterKB((e.target as HTMLInputElement).value);
-    });
+    document.getElementById("kbSearch")?.addEventListener("input", (e: Event) => filterKB((e.target as HTMLInputElement).value));
     document.getElementById("kbAddBtn")?.addEventListener("click", attachKBDocs);
 
-    // Expose helpers for inline handlers
     (window as unknown as Record<string, unknown>)["openWebInput"] = openWebInput;
     (window as unknown as Record<string, unknown>)["openKBSelect"] = openKBSelect;
     (window as unknown as Record<string, unknown>)["triggerFileUpload"] = triggerFileUpload;
@@ -843,16 +1468,12 @@ document.addEventListener("DOMContentLoaded", () => {
     (window as unknown as Record<string, unknown>)["attachKBDocs"] = attachKBDocs;
     (window as unknown as Record<string, unknown>)["attachWebUrl"] = attachWebUrl;
 
-    // ──────────────────────────────────────────────
-    //  Command picker (REQ-216)
-    // ──────────────────────────────────────────────
-
-    const allPickerItems: HTMLElement[] = Array.from(
-        document.querySelectorAll<HTMLElement>(".cmd-picker-item"),
-    );
-    let pickerIdx = 0;
+    // ──────────────────────────────────────────
+    //  Command picker
+    // ──────────────────────────────────────────
 
     function setPickerSelected(idx: number): void {
+        if (!allPickerItems.length) return;
         pickerIdx = (idx + allPickerItems.length) % allPickerItems.length;
         allPickerItems.forEach((el, i) => el.classList.toggle("selected", i === pickerIdx));
         allPickerItems[pickerIdx]?.scrollIntoView({ block: "nearest" });
@@ -870,68 +1491,58 @@ document.addEventListener("DOMContentLoaded", () => {
     function toggleCmdPicker(): void {
         const isOpen = cmdPicker.classList.contains("open");
         closeAllPopovers();
-        if (isOpen) {
-            closeCmdPicker();
-        } else {
-            cmdPicker.classList.add("open");
-            cmdBtn.classList.add("active");
-            setPickerSelected(0);
-        }
+        if (isOpen) { closeCmdPicker(); }
+        else { cmdPicker.classList.add("open"); cmdBtn.classList.add("active"); setPickerSelected(0); }
     }
 
     cmdBtn.addEventListener("click", toggleCmdPicker);
     document.getElementById("cmdPickerClose")?.addEventListener("click", closeCmdPicker);
     document.getElementById("kbPanelClose")?.addEventListener("click", closeAllPopovers);
-    allPickerItems.forEach((item) => {
-        item.addEventListener("click", () => executePicker(item));
-    });
 
-    // Keyboard nav for cmd picker
     document.addEventListener("keydown", (e: KeyboardEvent) => {
         if (!cmdPicker.classList.contains("open")) return;
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setPickerSelected(pickerIdx + 1);
-        }
-        if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setPickerSelected(pickerIdx - 1);
-        }
-        if (e.key === "Enter") {
-            e.preventDefault();
-            executePicker(allPickerItems[pickerIdx]);
-        }
-        if (e.key === "Escape") {
-            closeCmdPicker();
-        }
+        if (e.key === "ArrowDown") { e.preventDefault(); setPickerSelected(pickerIdx + 1); }
+        if (e.key === "ArrowUp")   { e.preventDefault(); setPickerSelected(pickerIdx - 1); }
+        if (e.key === "Enter")     { e.preventDefault(); executePicker(allPickerItems[pickerIdx]); }
+        if (e.key === "Escape")    { closeCmdPicker(); }
     });
 
-    // ──────────────────────────────────────────────
+    // ──────────────────────────────────────────
     //  Outside click handler
-    // ──────────────────────────────────────────────
+    // ──────────────────────────────────────────
 
     document.addEventListener("click", (e: MouseEvent) => {
         const target = e.target as HTMLElement;
         if (!target.closest(".input-bar")) {
-            closeAllPopovers();
-            closeCmdPicker();
-            closeDropdown();
+            closeAllPopovers(); closeCmdPicker(); closeDropdown();
             document.getElementById("ctxChip")?.classList.remove("tooltip-open");
         }
     });
 
-    // ──────────────────────────────────────────────
+    // Conversation search
+    document.getElementById("convSearch")?.addEventListener("input", (e: Event) => {
+        const q = (e.target as HTMLInputElement).value.toLowerCase();
+        byId("convList").querySelectorAll<HTMLElement>(".conv-item-wrap").forEach((wrap) => {
+            const text = wrap.querySelector<HTMLElement>(".conv-item")?.textContent?.toLowerCase() || "";
+            wrap.style.display = text.includes(q) ? "" : "none";
+        });
+    });
+
+    // ──────────────────────────────────────────
     //  Initialization
-    // ──────────────────────────────────────────────
+    // ──────────────────────────────────────────
 
-    // Initial context indicator state
-    updateContextIndicator(CTX_STATES[0].pct, CTX_STATES[0].breakdown);
+    // Load settings & theme
+    loadSettings();
 
-    // Scroll thread to bottom on load
-    setTimeout(() => {
-        thread.scrollTop = thread.scrollHeight;
-    }, 100);
+    // Kick off parallel data loads
+    void Promise.all([loadCommands(), loadConversations()]).then(() => {
+        // After conversations load, restore last active conversation
+        if (activeConversationId) {
+            void loadConversationHistory(activeConversationId);
+        }
+    });
 
-    // Kick off initial streaming demo after a short delay
-    setTimeout(startStream, 700);
+    // Scroll to bottom on load
+    setTimeout(() => { thread.scrollTop = thread.scrollHeight; }, 100);
 });

@@ -1,8 +1,17 @@
 # Document Processing Pipeline — Implementation Plan
 
+> **Document type:** Six-phase implementation plan (Layer 5)
+> **Companion spec:** `DOCUMENT_PROCESSING_SPEC.md`
+> **Companion design:** `DOCUMENT_PROCESSING_DESIGN.md`
+> **Upstream:** DOCUMENT_PROCESSING_SPEC.md, DOCUMENT_PROCESSING_DESIGN.md
+> **Downstream:** DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md, DOCUMENT_PROCESSING_MODULE_TESTS.md
+> **Last updated:** 2026-03-24
+
 > **Historical artifact:** This is the original implementation plan used to build `src/ingest/doc_processing/`. The File Structure section reflects the implemented layout. Other sections (stub code, `- [ ]` task steps) are planning artifacts and may reference draft paths that differ from the final implementation.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** This plan has six phases: Phase 0 (contracts), Phase A (spec tests),
+> Phase B (implementation), Phase C (engineering guide), Phase D (white-box tests), Phase E (full suite).
+> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the Document Processing Pipeline (FR-101 through FR-587) as a LangGraph StateGraph DAG that transforms source documents into clean Markdown persisted to the Clean Document Store.
 
@@ -38,6 +47,21 @@ tests/ingest/
 ├── test_clean_store.py
 └── test_two_phase_orchestrator.py
 ```
+
+---
+
+## Phase Gate Tracker
+
+| Phase | Status | Gate Criteria | Approved |
+|-------|--------|--------------|----------|
+| Phase 0 — Contracts | ☐ | All contract files created, types compile | ☐ |
+| Phase A — Spec Tests | ☐ | All test files created, all tests FAIL against stubs | ☐ |
+| Phase B — Implementation | ☐ | All tests PASS, implementation complete | ☐ |
+| Phase C — Engineering Guide | ☐ | All module sections + cross-cutting sections complete | ☐ |
+| Phase D — White-Box Tests | ☐ | All test files created, tests FAIL on first run | ☐ |
+| Phase E — Full Suite | ☐ | All Phase A + Phase D tests PASS | ☐ |
+
+**Rule:** Each phase gate must be approved before the next phase begins.
 
 ---
 
@@ -657,11 +681,13 @@ def build_document_processing_graph(config: PipelineConfig) -> StateGraph:
 ## Phase A — Tests (Isolated from Implementation)
 
 **Agent isolation contract:** The test agent receives ONLY:
-1. The spec requirements (FR numbers + acceptance criteria from `DOCUMENT_PROCESSING_SPEC_SUMMARY.md`)
-2. The contract files from Phase 0 (`pipeline_types.py`, `exceptions.py`, `pipeline_shared.py`, node stubs, `clean_store.py` stub, `pipeline_workflow.py` stub)
-3. The task description from the implementation guide (`DOCUMENT_PROCESSING_DESIGN.md`)
+1. The spec requirements (FR numbers + acceptance criteria)
+2. The contract files from Phase 0 (TypedDicts, signatures, exceptions)
+3. The task description from the design document
 
-**Must NOT receive:** Any `src/ingest/nodes/*.py` implementation code beyond the stub signatures, any `src/ingest/clean_store.py` implementation beyond the stub, any `src/ingest/pipeline_workflow.py` implementation beyond the stub, or any Part B code appendix snippets from `DOCUMENT_PROCESSING_DESIGN.md`. The test agent works ONLY against contracts and spec requirements.
+**Must NOT receive:** Any implementation code, any pattern entries from the design doc's code appendix, any source files beyond Phase 0 stubs.
+
+> **Historical note:** The original isolation contract referenced specific file names (`pipeline_types.py`, `exceptions.py`, `pipeline_shared.py`, node stubs, `clean_store.py` stub, `pipeline_workflow.py` stub) and `DOCUMENT_PROCESSING_SPEC_SUMMARY.md`. The test agent works ONLY against contracts and spec requirements.
 
 ---
 
@@ -1111,13 +1137,15 @@ Expected: FAIL (NotImplementedError from `document_ingestion_node` stub or extra
 
 ## Phase B — Implementation (Against Tests)
 
-**Agent input per task:**
-1. Task description from the implementation guide (`DOCUMENT_PROCESSING_DESIGN.md`)
-2. The specific test file from Phase A (the target to pass)
-3. Contract files from Phase 0 (`pipeline_types.py`, `exceptions.py`, `pipeline_shared.py`, stubs)
-4. Spec requirements (FR numbers + acceptance criteria)
+**Agent isolation contract:** The implementation agent receives:
+1. The task description from the design document
+2. The specific Phase A test file for this task
+3. Phase 0 contract files
+4. FR numbers from the spec
 
-**Must NOT receive:** Test files for OTHER tasks (only the test file for THIS specific task). This prevents implementation from being shaped by unrelated test expectations.
+**Must NOT receive:** Test files for OTHER tasks, pattern entries for other tasks.
+
+> **Historical note:** The original contract referenced specific files (`pipeline_types.py`, `exceptions.py`, `pipeline_shared.py`, stubs) and `DOCUMENT_PROCESSING_DESIGN.md`. This prevents implementation from being shaped by unrelated test expectations.
 
 ---
 
@@ -1461,6 +1489,136 @@ Expected: ALL PASS
 
 ---
 
+## Phase C — Engineering Guide
+
+> **Skill:** `write-engineering-guide`
+> **Output:** `docs/ingestion/DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md`
+
+Phase C documents what was built, producing a post-implementation engineering reference.
+It runs in two sub-phases:
+
+### Phase C-parallel — Module Agents (all parallel)
+
+Each module gets its own documentation agent. All run in parallel.
+
+**Agent isolation contract — include verbatim:**
+> The module doc agent receives ONLY its assigned source file(s) and the spec FR numbers.
+> Must NOT receive: other modules' source files, any test files, the design doc.
+
+| Agent | Source File(s) | Output |
+|-------|---------------|--------|
+| C-1: Document Ingestion | `src/ingest/doc_processing/nodes/document_ingestion.py` | `docs/tmp/module-document-ingestion.md` |
+| C-2: Structure Detection | `src/ingest/doc_processing/nodes/structure_detection.py` | `docs/tmp/module-structure-detection.md` |
+| C-3: Multimodal Processing | `src/ingest/doc_processing/nodes/multimodal_processing.py` | `docs/tmp/module-multimodal-processing.md` |
+| C-4: Text Cleaning | `src/ingest/doc_processing/nodes/text_cleaning.py` | `docs/tmp/module-text-cleaning.md` |
+| C-5: Document Refactoring | `src/ingest/doc_processing/nodes/document_refactoring.py` | `docs/tmp/module-document-refactoring.md` |
+| C-6: Clean Document Store | `src/ingest/clean_store.py` | `docs/tmp/module-clean-store.md` |
+| C-7: Workflow & State | `src/ingest/doc_processing/workflow.py`, `src/ingest/doc_processing/state.py` | `docs/tmp/module-workflow.md` |
+| C-8: Pipeline Orchestrator | `src/ingest/pipeline/impl.py`, `src/ingest/pipeline/__init__.py` | `docs/tmp/module-pipeline.md` |
+
+Each agent writes one module section with all 6 sub-sections:
+1. **Purpose** — What it does and why
+2. **How it works** — Step-by-step walkthrough with code snippets
+3. **Key design decisions** — Decision table
+4. **Configuration** — Parameter table
+5. **Error behavior** — Exceptions, conditions, caller actions
+6. **Test guide** — Behaviors to test, mock requirements, boundary conditions, error scenarios, known gaps
+
+### Phase C-cross — Cross-Cutter Agent (single, sequential)
+
+Runs after ALL Phase C-parallel agents complete.
+
+**Agent isolation contract — include verbatim:**
+> Receives ONLY module section documents from Phase C-parallel and the spec.
+> Must NOT receive: source files directly.
+
+**Input:** All `docs/tmp/module-*.md` files + DOCUMENT_PROCESSING_SPEC.md
+
+**Writes cross-cutting sections:**
+1. System Overview
+2. Architecture Decisions (ADR format)
+3. End-to-End Data Flow (2–3 scenarios with state shapes)
+4. Configuration Reference (complete parameter table)
+5. Integration Contracts (system boundary only)
+6. Testing Guide (testability map, mock boundaries, critical scenarios)
+7. Operational Notes
+8. Known Limitations
+9. Extension Guide
+
+**Assembles final guide:** `docs/ingestion/DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md`
+
+### Phase C Gate
+
+- [ ] All C-parallel agents complete
+- [ ] All C-parallel outputs reviewed
+- [ ] C-cross agent complete
+- [ ] Final engineering guide reviewed and approved
+- [ ] Requirement coverage appendix verified against spec
+
+---
+
+## Phase D — White-Box Tests
+
+> **Skill:** `write-module-tests`
+> **Output:** Test files in `tests/ingest/doc_processing/`
+
+Phase D creates white-box tests derived from the engineering guide, NOT from source code.
+Each module gets its own test agent. All run in parallel.
+
+**Agent isolation contract — include verbatim:**
+> The Phase D test agent receives ONLY:
+> 1. The module section from the engineering guide (Purpose, Error behavior, Test guide sub-sections)
+> 2. The Phase 0 contract files (TypedDicts, signatures, exceptions)
+> 3. FR numbers from the spec
+>
+> Must NOT receive: Any source files, any Phase A test files.
+
+| Agent | Engineering Guide Section | Phase 0 Contracts | FR Numbers | Output Test File |
+|-------|--------------------------|-------------------|------------|-----------------|
+| D-1: Document Ingestion | Module: document_ingestion | `doc_processing/state.py`, `common/types.py` | FR-101–FR-113 | `tests/ingest/doc_processing/test_document_ingestion_coverage.py` |
+| D-2: Structure Detection | Module: structure_detection | `doc_processing/state.py`, `common/types.py` | FR-201–FR-208 | `tests/ingest/doc_processing/test_structure_detection_coverage.py` |
+| D-3: Multimodal Processing | Module: multimodal_processing | `doc_processing/state.py`, `common/types.py` | FR-301–FR-307 | `tests/ingest/doc_processing/test_multimodal_processing_coverage.py` |
+| D-4: Text Cleaning | Module: text_cleaning | `doc_processing/state.py`, `common/types.py` | FR-401–FR-405 | `tests/ingest/doc_processing/test_text_cleaning_coverage.py` |
+| D-5: Document Refactoring | Module: document_refactoring | `doc_processing/state.py`, `common/types.py` | FR-501–FR-511 | `tests/ingest/doc_processing/test_document_refactoring_coverage.py` |
+| D-6: Clean Document Store | Module: clean_store | `doc_processing/state.py`, `common/types.py` | FR-580–FR-587 | `tests/ingest/doc_processing/test_clean_store_coverage.py` |
+
+**Test derivation rules:**
+- One test per documented exception in Error behavior section
+- One test per boundary condition in Test guide section
+- One test per error scenario in Test guide section
+- Known gaps noted in comments (do NOT skip silently)
+
+**Expected outcome:** All Phase D tests FAIL on first run (they test gaps not covered by Phase A).
+
+### Phase D Gate
+
+- [ ] All D-agents complete
+- [ ] All test files created and reviewed
+- [ ] `pytest tests/ingest/doc_processing/test_*_coverage.py -v` run (expected: FAIL)
+- [ ] Known gaps documented in test file comments
+
+---
+
+## Phase E — Full Suite Verification
+
+Run the complete test suite combining Phase A and Phase D tests:
+
+```bash
+pytest tests/ingest/ -v
+```
+
+**Expected:** ALL Phase A tests PASS + ALL Phase D tests PASS.
+
+### Phase E Checklist
+
+- [ ] All Phase A tests pass
+- [ ] All Phase D tests pass
+- [ ] No test isolation violations (Phase D tests don't import source directly beyond contracts)
+- [ ] Coverage report generated
+- [ ] Final review complete
+
+---
+
 ## Task Dependency Graph
 
 ```
@@ -1537,24 +1695,15 @@ Phase B (Implementation — sequential per critical path, parallel where indepen
 
 ---
 
-## Full Test Suite Verification (Post-Implementation)
-
-After all Phase B tasks are complete, run the full test suite to confirm no regressions:
-
-```bash
-pytest tests/ingest/ -v --tb=short
-```
-
-Expected: ALL PASS across all 10 test files.
-
----
-
 ## Companion Documents
 
-| Document | Role |
-|----------|------|
-| `DOCUMENT_PROCESSING_SPEC.md` | Authoritative requirements baseline (FR-101–FR-587) |
-| `DOCUMENT_PROCESSING_SPEC_SUMMARY.md` | Concise requirements digest |
-| `DOCUMENT_PROCESSING_DESIGN.md` | Task descriptions, subtasks, complexity estimates |
-| `EMBEDDING_PIPELINE_DESIGN.md` | Downstream phase implementation plan |
-| `INGESTION_PIPELINE_ENGINEERING_GUIDE.md` | Developer architecture guide |
+| Document | Purpose | Relationship |
+|----------|---------|-------------|
+| DOCUMENT_PROCESSING_SPEC.md | Authoritative requirements specification | Source of FR numbers and acceptance criteria |
+| DOCUMENT_PROCESSING_SPEC_SUMMARY.md | Executive summary | Stakeholder digest |
+| DOCUMENT_PROCESSING_DESIGN.md | Task decomposition and code appendix | Source of tasks, contracts, and patterns |
+| **DOCUMENT_PROCESSING_IMPLEMENTATION.md** (this document) | Six-phase implementation plan | Operationalizes the design |
+| DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md | Post-implementation reference | Produced by Phase C |
+| DOCUMENT_PROCESSING_MODULE_TESTS.md | Phase D white-box test plan | Detailed test specifications for Phase D |
+
+**Flow:** Spec → Spec Summary → Design → **Implementation** → Engineering Guide → Module Tests

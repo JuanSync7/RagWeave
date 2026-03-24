@@ -296,6 +296,7 @@ class ConversationTurnResponse(BaseModel):
     content: str
     timestamp_ms: int
     query_id: str = ""
+    sources: list[dict] = Field(default_factory=list)
 
 
 class ConversationHistoryResponse(BaseModel):

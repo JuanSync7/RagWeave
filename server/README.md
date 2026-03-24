@@ -26,7 +26,8 @@ Users → FastAPI Server → Temporal Server → Temporal Worker(s)
 | **Activities** | `activities.py` | `execute_rag_query` — runs against the preloaded RAGChain singleton. |
 | **CLI Client** | `cli_client.py` | Same REPL as `cli.py`, but talks to the API. Starts instantly. |
 | **Web Console Module** | `console/` | Dedicated console package for web UX routes and console service helpers. |
-| **Web Console UI Asset** | `console/static/console.html` | Lightweight browser console frontend loaded by `server/console/routes.py` with legacy fallback path support. |
+| **User Console UI Asset** | `console/static/user/index.html` | Modern chat interface served at `/console`. |
+| **Admin Console UI Asset** | `console/static/console.html` | Tabbed debug/ops interface served at `/console/admin`. |
 | **Web Console TypeScript Source** | `console/web/` | TypeScript source/build config compiled to static assets served by the API. |
 | **Schemas** | `schemas.py` | Pydantic models for API request/response validation. |
 | **Route Modules** | `routes/` | Domain-split API routers (`query`, `admin`, `system`) included by `api.py`. |
@@ -73,8 +74,9 @@ curl -X POST http://localhost:8000/query \
 # Or browse the API docs
 open http://localhost:8000/docs
 
-# Or use the lightweight operator web console
-open http://localhost:8000/console
+# Or use the web consoles
+open http://localhost:8000/console        # User Console (chat)
+open http://localhost:8000/console/admin  # Admin Console (ops/debug)
 ```
 
 ### 5. MCP Tooling Adapter (optional)

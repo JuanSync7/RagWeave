@@ -21,6 +21,7 @@ class ConversationTurn:
     content: str
     timestamp_ms: int
     query_id: str = ""
+    sources: list = field(default_factory=list)  # lightweight source refs (no full chunk text)
 
 
 @dataclass

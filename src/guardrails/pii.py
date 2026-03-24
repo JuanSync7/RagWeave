@@ -88,6 +88,7 @@ class PIIDetector:
         self,
         extended: bool = False,
         score_threshold: float = 0.4,
+        use_gliner: bool = False,
     ) -> None:
         """Initialize a PII detector.
 
@@ -96,6 +97,10 @@ class PIIDetector:
                 core categories (email/phone/SSN).
             score_threshold: Minimum confidence score for NLP detections when
                 using Presidio.
+            use_gliner: Whether to enable GLiNER as a supplementary NER-based
+                PII detection layer for entity types (PERSON, ORGANIZATION,
+                LOCATION, ADDRESS). GLiNER extends coverage beyond Presidio's
+                pattern-based detection. Requires the ``gliner`` package.
         """
         self._extended = extended
         self._score_threshold = score_threshold
@@ -105,6 +110,7 @@ class PIIDetector:
             _EXTENDED_PRESIDIO_ENTITIES if extended else _DEFAULT_PRESIDIO_ENTITIES
         )
         self._use_presidio = False
+        self._gliner_detector = None
 
         # Try to initialize Presidio
         try:
@@ -124,6 +130,17 @@ class PIIDetector:
                 "PII detector initialized with regex fallback (%d patterns)",
                 len(self._regex_patterns),
             )
+
+        # Try to initialize GLiNER supplementary layer
+        if use_gliner:
+            try:
+                from src.guardrails.gliner_pii import GLiNERPIIDetector
+                self._gliner_detector = GLiNERPIIDetector()
+                logger.info("GLiNER PII layer initialized (supplementary NER)")
+            except (ImportError, RuntimeError) as e:
+                logger.info(
+                    "GLiNER PII not available (%s) — using Presidio/regex only", e
+                )
 
     def _init_presidio(self) -> None:
         """Initialize Presidio analyzer and anonymizer engines.
@@ -160,6 +177,11 @@ class PIIDetector:
     def detect(self, text: str) -> List[PIIDetection]:
         """Find all PII occurrences in text.
 
+        Runs the primary detector (Presidio or regex) and optionally
+        merges results from the GLiNER supplementary layer. GLiNER
+        detections that overlap with primary detections are discarded
+        to prevent double-redaction.
+
         Args:
             text: Input text to scan.
 
@@ -168,8 +190,19 @@ class PIIDetector:
             (safe for in-place string replacement).
         """
         if self._use_presidio:
-            return self._detect_presidio(text)
-        return self._detect_regex(text)
+            primary = self._detect_presidio(text)
+        else:
+            primary = self._detect_regex(text)
+
+        if self._gliner_detector is not None:
+            try:
+                from src.guardrails.gliner_pii import merge_detections
+                gliner_results = self._gliner_detector.detect(text)
+                return merge_detections(primary, gliner_results)
+            except Exception as e:
+                logger.warning("GLiNER detection failed: %s — using primary only", e)
+
+        return primary
 
     def _detect_presidio(self, text: str) -> List[PIIDetection]:
         """Detect PII using Presidio NLP.

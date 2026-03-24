@@ -12,13 +12,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install all project dependencies from pyproject.toml.
 COPY pyproject.toml /app/pyproject.toml
 RUN pip install --upgrade pip && pip install .
 
-RUN groupadd --system app && useradd --system --gid app --create-home app
+RUN groupadd --system app && useradd --system --gid app --create-home app \
+    && mkdir -p /home/app/.litellm /app/logs \
+    && chown -R app:app /home/app /app/logs
 
 COPY --chown=app:app config /app/config
 COPY --chown=app:app src /app/src

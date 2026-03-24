@@ -1,0 +1,27 @@
+# Prompt injection detection patterns.
+# Each entry is a regex pattern (case-insensitive).
+# Add new patterns here — no code changes needed.
+#
+# These patterns are used as a fallback when NeMo Guardrails is not
+# enabled or when the LLM is unavailable. When NeMo is active, its
+# 4-layer injection detection (regex + perplexity + model + LLM)
+# provides stronger coverage.
+
+patterns:
+  - "ignore\\s+(all\\s+)?(previous|above|prior)\\s+(instructions|prompts)"
+  - "you\\s+are\\s+now\\s+"
+  - "system\\s*:\\s*"
+  - "<\\s*/?\\s*(system|prompt|instruction)"
+  - "\\b(ADMIN|ROOT)\\s*:"
+  - "do\\s+not\\s+follow\\s+(your|the)\\s+(rules|instructions)"
+  - "forget\\s+(everything|your\\s+instructions)"
+  - "\\[\\s*INST\\s*\\]"
+  - "```\\s*(system|instruction)"
+  - "disregard.*prompt"
+  - "override.*safety"
+  - "(sudo|admin|root)\\s+(access|mode|command)"
+  - "pretend\\s+(you|to)\\s+(are|be)"
+  - "act\\s+as\\s+(if|a|an)"
+  - "bypass\\s+(all|the|your)\\s+(filters|safety|restrictions)"
+  - "DAN\\s+mode"
+  - "jailbreak"

@@ -1,3 +1,7 @@
+> **Document type:** Authoritative requirements specification (Layer 3)
+> **Downstream:** DOCUMENT_PROCESSING_SPEC_SUMMARY.md, DOCUMENT_PROCESSING_DESIGN.md
+> **Last updated:** 2026-03-24
+
 # Document Processing Pipeline — Specification (v1.0.0)
 
 ## Document Information
@@ -872,3 +876,20 @@ This matrix covers FR-101 through FR-589 — the full scope of this specificatio
 | SHOULD | 3 | FR-110, FR-113, FR-587 |
 | MAY | 0 | — |
 | **Total** | **53** | **FR-101 through FR-587** |
+
+---
+
+## Companion Documents
+
+This specification is part of the Document Processing Pipeline documentation chain:
+
+| Document | Purpose | Relationship |
+|----------|---------|-------------|
+| **DOCUMENT_PROCESSING_SPEC.md** (this document) | Authoritative requirements specification | Source of truth for all requirements |
+| DOCUMENT_PROCESSING_SPEC_SUMMARY.md | Executive summary | Summarizes this spec for stakeholder distribution |
+| DOCUMENT_PROCESSING_DESIGN.md | Task decomposition and code appendix | Translates this spec's requirements into implementation tasks |
+| DOCUMENT_PROCESSING_IMPLEMENTATION.md | Six-phase implementation plan | Operationalizes the design into executable phases |
+| DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md | Post-implementation reference | Documents what was built against this spec |
+| DOCUMENT_PROCESSING_MODULE_TESTS.md | Phase D white-box test plan | Specifies tests derived from the engineering guide |
+
+**Flow:** Spec → Spec Summary → Design → Implementation → Engineering Guide → Module Tests

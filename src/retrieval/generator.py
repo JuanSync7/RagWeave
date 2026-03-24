@@ -5,38 +5,52 @@
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
 
 import logging
-from typing import List, Optional
+import re
+from typing import List, Optional, Tuple
 
 from config.settings import (
     GENERATION_MAX_TOKENS,
     GENERATION_TEMPERATURE,
+    PROMPTS_DIR,
 )
 from src.platform.llm import get_llm_provider
 from src.platform.observability.providers import get_tracer
 
 
-_SYSTEM_PROMPT = (
-    "You are a helpful assistant that answers questions based on the provided context. "
-    "Use ONLY the information from the context below to answer the question. "
-    "If the context doesn't contain enough information to answer, say so clearly. "
-    "Be concise and direct. "
-    "IMPORTANT: Cite your sources using bracketed numbers like [1], [2], etc. "
-    "that correspond to the context chunk numbers provided. "
-    "Every claim should have at least one citation. "
-    "Each context chunk has a relevance score (0-100%). "
-    "Prioritize information from higher-scoring chunks. "
-    "Treat chunks below 10% relevance with caution — they may not be directly relevant. "
-    "Return only the final answer body in markdown (no wrapper sections). "
-    "Do NOT include headings such as 'Output', 'Inputs', 'Outputs', "
-    "'Comprehensive Overview', or 'Top reranked original documents'."
+def _load_system_prompt() -> str:
+    """Load the RAG system prompt from an external file (REQ-601).
+
+    Falls back to a minimal inline prompt if the file is missing,
+    ensuring the pipeline never crashes due to a missing prompt file.
+    """
+    path = PROMPTS_DIR / "rag_system.md"
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    logging.getLogger("rag.generator").warning(
+        "System prompt file not found at %s — using minimal fallback", path
+    )
+    return (
+        "You are a helpful assistant. Answer questions using ONLY the provided context. "
+        "Cite sources using [1], [2], etc. If context is insufficient, say so."
+    )
+
+
+_SYSTEM_PROMPT = _load_system_prompt()
+
+# Regex to extract the CONFIDENCE line from LLM responses
+_CONFIDENCE_RE = re.compile(
+    r"^CONFIDENCE:\s*(high|medium|low)\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 
-_USER_TEMPLATE = """Context:
-{context}
+def _build_user_prompt(context: str, question: str) -> str:
+    """Build user prompt via concatenation — safe against curly braces in documents.
 
-Question: {question}
-
-Answer:"""
+    Using string concatenation instead of .format() prevents KeyError/IndexError
+    when retrieved documents contain Python format specifiers like {variable},
+    JSON examples, or template syntax (REQ-602).
+    """
+    return "Context:\n" + context + "\n\nQuestion: " + question + "\n\nAnswer:"
 
 logger = logging.getLogger("rag.generator")
 
@@ -62,6 +76,8 @@ class OllamaGenerator:
         self.model = self._provider.config.model
         # Last LLM response — populated after generate() for token tracking
         self._last_response = None
+        # Last LLM self-reported confidence — read by rag_chain.py for composite scoring
+        self._last_llm_confidence: str = "medium"
 
     def _build_messages(
         self,
@@ -80,7 +96,7 @@ class OllamaGenerator:
             context = "\n\n".join(
                 f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
             )
-        user_message = _USER_TEMPLATE.format(context=context, question=query)
+        user_message = _build_user_prompt(context, query)
         messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
         if memory_context:
             messages.append(
@@ -147,12 +163,42 @@ class OllamaGenerator:
                 max_tokens=self.max_tokens,
             )
             self._last_response = response
+            raw_content = response.content or None
+            if raw_content:
+                answer, confidence = self._extract_confidence(raw_content)
+                self._last_llm_confidence = confidence
+                span.set_attribute("llm_confidence", confidence)
+                span.end(status="ok")
+                return answer
             span.end(status="ok")
-            return response.content or None
+            return None
         except Exception as e:
             logger.warning("LLM generation failed: %s", e)
             span.end(status="error", error=e)
             return None
+
+    @staticmethod
+    def _extract_confidence(response_text: str) -> Tuple[str, str]:
+        """Extract and strip the CONFIDENCE line from an LLM response.
+
+        The LLM is prompted to append "CONFIDENCE: high|medium|low" on
+        a new line after its answer. This method extracts that line and
+        returns the answer text without it.
+
+        Args:
+            response_text: Raw LLM response text.
+
+        Returns:
+            Tuple of (answer_text_without_confidence_line, confidence_level).
+            Confidence defaults to "medium" if not parseable.
+        """
+        match = _CONFIDENCE_RE.search(response_text)
+        if match:
+            confidence = match.group(1).lower()
+            # Strip the confidence line from the answer
+            answer = _CONFIDENCE_RE.sub("", response_text).rstrip()
+            return answer, confidence
+        return response_text, "medium"
 
     def generate_stream(
         self,

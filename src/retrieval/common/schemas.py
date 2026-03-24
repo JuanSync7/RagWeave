@@ -77,3 +77,17 @@ class RAGResponse:
     conversation_id: Optional[str] = None
     guardrails: Optional[Dict[str, Any]] = None
     token_budget: Optional["TokenBudgetSnapshot"] = None
+    # Composite confidence scoring (populated when confidence routing is enabled)
+    composite_confidence: Optional[float] = None
+    confidence_breakdown: Optional[Dict[str, Any]] = None
+    post_guardrail_action: Optional[str] = None
+    version_conflicts: Optional[List[Dict[str, Any]]] = None
+    retry_count: int = 0
+    verification_warning: Optional[str] = None
+    # Retrieval quality indicator based on reranker scores
+    retrieval_quality: Optional[str] = None  # "strong" | "moderate" | "weak" | "insufficient"
+    retrieval_quality_note: Optional[str] = None  # User-facing explanation
+    # Non-blocking re-retrieval: first response returned immediately,
+    # caller can request a second attempt with broader params
+    re_retrieval_suggested: bool = False
+    re_retrieval_params: Optional[Dict[str, Any]] = None

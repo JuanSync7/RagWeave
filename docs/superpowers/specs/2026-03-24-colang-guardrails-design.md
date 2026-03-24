@@ -61,22 +61,33 @@ config/guardrails/
 └── actions.py            # Python action wrappers — NeMo auto-discovers this file
 ```
 
-| File | Purpose | Flow count |
-|------|---------|------------|
-| `input_rails.co` | Query validation before retrieval | ~4 flows |
-| `conversation.co` | Multi-turn dialog management | ~5 flows |
-| `output_rails.co` | Response quality enforcement | ~4 flows |
-| `safety.co` | Safety & compliance flows | ~4 flows |
-| `dialog_patterns.co` | RAG-specific dialog (no-results, disambiguation, feedback) | ~4 flows |
-| `actions.py` | Registered Python action wrappers | ~8+ actions |
+| File | Purpose | Rail flows | Dialog flows |
+|------|---------|------------|--------------|
+| `input_rails.co` | Query validation + Python executor bridge | 5 | 0 |
+| `conversation.co` | Multi-turn: greetings, farewells, follow-ups, off-topic, topic drift | 1 | 8 |
+| `output_rails.co` | Response quality + Python executor bridge + no-results + disclaimer | 8 | 0 |
+| `safety.co` | Compliance: exfiltration, role boundary, jailbreak escalation, sensitive topic | 4 | 0 |
+| `dialog_patterns.co` | RAG dialog: disambiguation, scope explanation, feedback | 1 | 6 |
+| `actions.py` | Registered Python action wrappers | — | 25 actions |
+
+**Rail flows** follow the `input rails *` / `output rails *` naming convention and are registered in `config.yml`.
+**Dialog flows** are standalone flows auto-discovered by NeMo from `.co` files — they match by intent before the rail pipeline.
 
 The existing `intents.co` will be **replaced** — intent definitions are absorbed into `conversation.co` (greetings, farewells, admin) and `input_rails.co` (off-topic routing).
+
+### Colang 2.0 Syntax Note
+
+The flow examples in this spec use Colang 2.0 intent syntax (`flow user said greeting`, `user said "hello" or user said "hi there"`). The exact syntax will be validated during implementation against the installed `nemoguardrails` parser (≥0.21.0). If the parser requires event-matching syntax (e.g., `match UtteranceUserAction.Finished(final_transcript="hello")`), the flow bodies will be adapted while preserving the same semantics. The spec defines **intent** and **behavior**, not exact parser tokens.
 
 ---
 
 ## Section 2: Python Action Registration (`actions.py`)
 
-NeMo auto-discovers `actions.py` in the config directory. Each action is a thin wrapper calling into existing rail classes:
+NeMo auto-discovers `actions.py` in the config directory. Each action is a thin wrapper calling into existing rail classes. **All** actions used by Colang flows are declared here.
+
+### 2.1 Actions Wrapping Existing Rail Classes
+
+These actions delegate to existing Python rail classes in `src/guardrails/`:
 
 ```python
 # config/guardrails/actions.py
@@ -84,43 +95,142 @@ from nemoguardrails.actions import action
 
 @action()
 async def check_injection(query: str) -> dict:
-    """Wraps InjectionDetector — returns {verdict, method, confidence}"""
+    """Wraps InjectionDetector — returns {verdict: str, method: str, confidence: float}"""
 
 @action()
 async def detect_pii(text: str, direction: str = "input") -> dict:
-    """Wraps PIIDetector — returns {found, entities, redacted_text}"""
+    """Wraps PIIDetector — returns {found: bool, entities: list, redacted_text: str}"""
 
 @action()
 async def check_toxicity(text: str, direction: str = "input") -> dict:
-    """Wraps ToxicityFilter — returns {verdict, score}"""
+    """Wraps ToxicityFilter — returns {verdict: str, score: float}"""
 
 @action()
 async def check_topic_safety(query: str) -> dict:
-    """Wraps TopicSafetyChecker — returns {on_topic, confidence}"""
+    """Wraps TopicSafetyChecker — returns {on_topic: bool, confidence: float}"""
 
 @action()
 async def check_faithfulness(answer: str, context_chunks: list) -> dict:
-    """Wraps FaithfulnessChecker — returns {verdict, score, claim_scores}"""
+    """Wraps FaithfulnessChecker — returns {verdict: str, score: float, claim_scores: list}"""
 
 @action()
+async def run_input_rails(query: str) -> dict:
+    """Wraps InputRailExecutor — runs all Python input rails (injection, PII, toxicity, topic safety)
+    in parallel. Returns {action: str, intent: str, redacted_query: str, metadata: dict}"""
+
+@action()
+async def run_output_rails(answer: str) -> dict:
+    """Wraps OutputRailExecutor — runs all Python output rails (faithfulness, PII, toxicity).
+    Returns {action: str, redacted_answer: str, metadata: dict}"""
+
+@action()
+async def rag_retrieve_and_generate(query: str) -> dict:
+    """Calls the RAG retrieval+generation pipeline (replaces NeMo's default LLM call).
+    Returns {answer: str, sources: list, confidence: float}"""
+```
+
+### 2.2 New Lightweight Actions (No Existing Rail Class)
+
+These are new purpose-built actions for Colang policy flows. They are **deterministic or rule-based** (no LLM calls) unless noted:
+
+```python
+@action()
 async def check_query_length(query: str) -> dict:
-    """Returns {valid, length, reason} — min 3 chars, max 2000 chars"""
+    """Min 3 chars, max 2000 chars. Returns {valid: bool, length: int, reason: str}"""
 
 @action()
 async def detect_language(query: str) -> dict:
-    """Returns {language, supported} — uses simple heuristic or langdetect"""
+    """Uses langdetect library. Returns {language: str, supported: bool}"""
 
 @action()
-async def check_retrieval_results(results: list) -> dict:
-    """Returns {has_results, count, avg_confidence} — for no-results flow"""
+async def check_query_clarity(query: str) -> dict:
+    """Heuristic: word count < 3, all stopwords, no nouns. Returns {clear: bool, suggestion: str}"""
+
+@action()
+async def check_abuse_pattern(query: str) -> dict:
+    """Tracks query rate per session via in-memory counter. Returns {abusive: bool, reason: str}"""
+
+@action()
+async def handle_follow_up(query: str) -> dict:
+    """Checks NeMo conversation context for prior Q&A. Returns {has_context: bool, augmented_query: str}"""
+
+@action()
+async def check_topic_drift(query: str) -> dict:
+    """Compares query embedding similarity to prior turn. Returns {drifted: bool}"""
+
+@action()
+async def check_citations(answer: str) -> dict:
+    """Regex check for [Source: ...] or [1] patterns. Returns {has_citations: bool}"""
+
+@action()
+async def add_citation_reminder(answer: str) -> dict:
+    """Appends 'Note: sources available in metadata.' Returns {answer: str}"""
+
+@action()
+async def check_response_confidence(answer: str) -> dict:
+    """Reads retrieval confidence from NeMo context. Returns {confidence: str}  # 'none'|'low'|'high'"""
+
+@action()
+async def prepend_hedge(answer: str) -> dict:
+    """Prepends 'Based on limited information: ...' Returns {answer: str}"""
+
+@action()
+async def check_answer_length(answer: str) -> dict:
+    """Min 20 chars, max 5000 chars. Returns {valid: bool, reason: str}"""
+
+@action()
+async def adjust_answer_length(answer: str, reason: str) -> dict:
+    """Truncates with '...' or flags terse answer. Returns {answer: str}"""
+
+@action()
+async def check_source_scope(answer: str) -> dict:
+    """LLM-based: does answer stay within retrieved context? Returns {in_scope: bool}"""
+
+@action()
+async def check_sensitive_topic(query: str) -> dict:
+    """Keyword + regex for medical/legal/financial terms. Returns {sensitive: bool, disclaimer: str, domain: str}"""
+
+@action()
+async def check_exfiltration(query: str) -> dict:
+    """Regex for bulk extraction patterns. Returns {attempt: bool, pattern: str}"""
+
+@action()
+async def check_role_boundary(query: str) -> dict:
+    """Regex for role-play/instruction-override patterns. Returns {violation: bool}"""
+
+@action()
+async def check_jailbreak_escalation(query: str) -> dict:
+    """Tracks violation count per session (in-memory dict keyed by session_id from NeMo context).
+    Thresholds: 1-2 violations → 'warn', 3+ → 'block'.
+    Returns {escalation_level: str}  # 'none'|'warn'|'block'"""
+
+@action()
+async def check_retrieval_results(answer: str) -> dict:
+    """Reads retrieval metadata from NeMo context (set by rag_retrieve_and_generate).
+    Returns {has_results: bool, count: int, avg_confidence: float}"""
+
+@action()
+async def prepend_low_confidence_note(answer: str) -> dict:
+    """Prepends 'Note: The following answer is based on limited matches.' Returns {answer: str}"""
+
+@action()
+async def check_query_ambiguity(query: str) -> dict:
+    """LLM-based: does query have multiple valid interpretations? Returns {ambiguous: bool, disambiguation_prompt: str}"""
+
+@action()
+async def get_knowledge_base_summary() -> dict:
+    """Returns static summary from config. Returns {summary: str}"""
 ```
 
-### Design Principles
+### 2.3 Design Principles
 
 - Actions return **dicts** (not dataclasses) because NeMo serializes action results into Colang context variables.
-- Each action wraps an existing rail class instance — **no logic duplication**.
+- Actions wrapping existing rail classes delegate to singleton instances — **no logic duplication**.
 - Actions respect existing env var toggles (e.g., if `RAG_NEMO_INJECTION_ENABLED=false`, `check_injection` returns `{verdict: "pass"}` immediately).
 - `actions.py` lives in `config/guardrails/` (NeMo convention) but imports from `src/guardrails/`.
+- **Lazy initialization:** Rail class instances are created on first action call, not at module import time. This avoids import-time failures when optional dependencies (spacy models, YAML patterns) are unavailable.
+- **Fail-open on action errors:** If any action raises an exception, it catches the error, logs a warning, and returns a passing/no-op result (e.g., `{verdict: "pass"}`, `{valid: True}`). This matches the existing `GuardrailsRuntime` fail-open philosophy.
+- **Session state:** Actions needing per-session state (`check_abuse_pattern`, `check_jailbreak_escalation`) use an in-memory dict keyed by `$session_id` from NeMo's context. Session state is not persisted across worker restarts.
 
 ---
 
@@ -246,13 +356,16 @@ flow handle follow up
 
 ### 4.4 Topic Drift Detection
 
-Flags when conversation jumps domains.
+Sets a context flag when the conversation jumps domains, so the retrieval pipeline clears prior context and searches fresh. This is **not** an input rail — it is a standalone dialog flow that sets context state.
 
 ```colang
-flow input rails check topic drift
+flow check topic drift
+  user said something
   $result = execute check_topic_drift(query=$user_message)
   if $result.drifted == True
-    bot say "It looks like you've shifted topics. I'll search the knowledge base fresh for this new question."
+    $topic_drifted = True
+    # Context flag consumed by rag_retrieve_and_generate action
+    # to clear conversation context and search fresh
 ```
 
 ### 4.5 Off-Topic Routing (Migrated from 1.0, Enhanced)
@@ -298,7 +411,7 @@ flow output rails check confidence
   if $result.confidence == "none"
     bot say "I couldn't find relevant information in the knowledge base to answer that question."
     abort
-  elif $result.confidence == "low"
+  else if $result.confidence == "low"
     $bot_message = execute prepend_hedge(answer=$bot_message)
 ```
 
@@ -348,21 +461,28 @@ Four flows for safety enforcement beyond what Python rails handle:
 
 ### 6.1 Sensitive Topic Escalation
 
-Adds disclaimers for legal/medical/financial content.
+Adds disclaimers for legal/medical/financial content. Sets a context variable that the output rails pick up to prepend the disclaimer to the final response.
 
 ```colang
 flow input rails check sensitive topic
   $result = execute check_sensitive_topic(query=$user_message)
   if $result.sensitive == True
-    bot say $result.disclaimer
+    $sensitive_disclaimer = $result.disclaimer
+    # Does NOT abort — sets context var for output rail to prepend
+```
+
+The corresponding output rail (in `output_rails.co`) prepends the disclaimer:
+
+```colang
+flow output rails prepend disclaimer
+  if $sensitive_disclaimer
+    $bot_message = execute prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
 ```
 
 Example disclaimers:
 - Medical: "This information is from the knowledge base and is not medical advice. Consult a healthcare professional."
 - Legal: "This is informational only and does not constitute legal advice."
 - Financial: "This is not financial advice. Consult a qualified professional."
-
-Note: Does **not** abort — lets retrieval proceed with disclaimer prepended.
 
 ### 6.2 Data Exfiltration Prevention
 
@@ -402,7 +522,7 @@ flow input rails check jailbreak escalation
   if $result.escalation_level == "warn"
     bot say "This query has been flagged as a potential policy violation. Please ask a legitimate question."
     abort
-  elif $result.escalation_level == "block"
+  else if $result.escalation_level == "block"
     bot say "Multiple policy violations detected. Further attempts may result in session restrictions."
     abort
 ```
@@ -415,23 +535,11 @@ The Python action tracks attempt count per session and escalates from warn → b
 
 ## Section 7: RAG-Specific Dialog Patterns (`dialog_patterns.co`)
 
-Four flows for domain-aware RAG interactions:
+Three dialog flows + one input rail for domain-aware RAG interactions:
 
-### 7.1 No-Results Handling
+**Note:** The no-results flow (`output rails check no results`) was moved to `output_rails.co` (Section 5) since it is an output rail, not a standalone dialog pattern.
 
-Graceful response when retrieval returns nothing useful.
-
-```colang
-flow output rails check no results
-  $result = execute check_retrieval_results(answer=$bot_message)
-  if $result.has_results == False
-    bot say "I couldn't find relevant documents to answer your question. Try rephrasing with different keywords, or ask about a different aspect of the topic."
-    abort
-  elif $result.avg_confidence < 0.3
-    $bot_message = execute prepend_low_confidence_note(answer=$bot_message)
-```
-
-### 7.2 Ambiguous Query Disambiguation
+### 7.1 Ambiguous Query Disambiguation
 
 Prompts user to clarify when query matches multiple domains.
 
@@ -445,7 +553,7 @@ flow input rails check ambiguity
 
 Example: User asks "How does attention work?" → "Did you mean attention in the context of transformer architectures, or attention mechanisms in cognitive science? Please clarify."
 
-### 7.3 Document Scope Explanation
+### 7.2 Document Scope Explanation
 
 Tells users what the knowledge base covers.
 
@@ -502,24 +610,29 @@ models:
 rails:
   input:
     flows:
-      # Query validation
+      # Query validation (Colang policy)
       - input rails check query length
       - input rails check language
       - input rails check query clarity
       - input rails check abuse
-      # Safety
+      # Safety (Colang policy)
       - input rails check exfiltration
       - input rails check role boundary
       - input rails check jailbreak escalation
       - input rails check sensitive topic
-      # Conversation
+      # Conversation (Colang policy)
       - input rails check off topic
-      - input rails check topic drift
-      # Dialog
+      # Dialog (Colang policy)
       - input rails check ambiguity
+      # Python executor (heavy compute — MUST be last)
+      - input rails run python executor
   output:
     flows:
-      # Response quality
+      # Python executor (heavy compute — MUST be first)
+      - output rails run python executor
+      # Sensitive topic disclaimer (reads $sensitive_disclaimer context var)
+      - output rails prepend disclaimer
+      # Response quality (Colang policy)
       - output rails check no results
       - output rails check confidence
       - output rails check citations
@@ -539,33 +652,96 @@ rails:
         score_threshold: 0.4
 ```
 
-### Execution Order
+### Execution Order — Single `generate_async()` Architecture
+
+NeMo's `generate_async()` runs the full pipeline (input rails → generation → output rails) in a **single call**. The Python `InputRailExecutor`, `OutputRailExecutor`, and the RAG retrieval pipeline are registered as NeMo actions called from within Colang flows — not as separate pipeline stages outside NeMo.
 
 ```
-User Query
-    ↓
-1. Colang input rails (declarative policy — length, language, abuse, safety)
-    ↓ (abort if blocked)
-2. Python InputRailExecutor (heavy compute — injection 4-layer, PII, toxicity, topic safety)
-    ↓
-3. RailMergeGate (consensus routing)
-    ↓
-4. [Retrieval + Generation]
-    ↓
-5. Python OutputRailExecutor (faithfulness scoring, PII redaction, toxicity)
-    ↓
-6. Colang output rails (policy decisions — citations, confidence, length, scope)
-    ↓
-RAGResponse
+NeMo generate_async() [single call]
+    │
+    ├── Input Rails (Colang, in registered order):
+    │   ├── check query length
+    │   ├── check language
+    │   ├── check query clarity
+    │   ├── check abuse
+    │   ├── check exfiltration
+    │   ├── check role boundary
+    │   ├── check jailbreak escalation
+    │   ├── check sensitive topic (sets $sensitive_disclaimer)
+    │   ├── check off topic
+    │   ├── check ambiguity
+    │   └── run python input rails ← calls InputRailExecutor + RailMergeGate as action
+    │
+    ├── Generation (custom action replaces NeMo's default LLM call):
+    │   └── rag_retrieve_and_generate() ← calls RAG retrieval pipeline
+    │
+    └── Output Rails (Colang, in registered order):
+        ├── run python output rails ← calls OutputRailExecutor as action
+        ├── prepend disclaimer (if $sensitive_disclaimer set)
+        ├── check no results
+        ├── check confidence
+        ├── check citations
+        ├── check length
+        └── check scope
 ```
 
-### Integration Change
+### Key Integration Changes
 
-The `rag_chain.py` `_init_guardrails()` method already initializes `GuardrailsRuntime`. The change is to call Colang input rails *before* the Python executor and Colang output rails *after* the Python executor — two `generate_async()` calls bracketing the existing pipeline.
+**1. Custom generation action:** Register `rag_retrieve_and_generate` as the action that replaces NeMo's default LLM call. This action calls the existing retrieval pipeline (embedding → search → reranking → LLM generation) and sets retrieval metadata in NeMo context for downstream output rails.
+
+**2. Python executor as last input rail / first output rail:** The Colang flows `input rails run python executor` and `output rails run python executor` call the existing `InputRailExecutor` and `OutputRailExecutor` as NeMo actions. These are defined in `input_rails.co` and `output_rails.co` respectively:
+
+```colang
+# Last input rail — runs Python executor (injection, PII, toxicity, topic safety)
+flow input rails run python executor
+  $result = execute run_input_rails(query=$user_message)
+  if $result.action == "reject"
+    bot say $result.reject_message
+    abort
+  else if $result.action == "modify"
+    $user_message = $result.redacted_query
+
+# First output rail — runs Python executor (faithfulness, PII, toxicity)
+flow output rails run python executor
+  $result = execute run_output_rails(answer=$bot_message)
+  if $result.action == "reject"
+    bot say $result.reject_message
+    abort
+  else if $result.action == "modify"
+    $bot_message = $result.redacted_answer
+```
+
+**3. `rag_chain.py` simplification:** The `_run_guardrails_input()` and `_run_guardrails_output()` methods in `rag_chain.py` are replaced by a single `generate_async()` call. The `GuardrailsRuntime` becomes the sole entry point. The `InputRailExecutor` and `OutputRailExecutor` are still instantiated, but invoked by the NeMo action wrappers rather than directly by `rag_chain.py`.
+
+### Standalone Dialog Flows (Not Registered as Rails)
+
+NeMo auto-discovers all `.co` files in the config directory. Flows that do **not** follow the `input rails *` or `output rails *` naming convention are treated as standalone dialog flows — they are matched by NeMo's intent engine before the rail pipeline runs. These include:
+
+- `handle greeting`, `handle farewell`, `handle administrative` (conversation.co)
+- `handle follow up`, `check topic drift` (conversation.co)
+- `handle scope question`, `handle positive feedback`, `handle negative feedback` (dialog_patterns.co)
+
+### Migration of Existing NeMo Built-In Flows
+
+The current `config.yml` registers NeMo built-in flows:
+- **Input:** `check jailbreak`, `jailbreak detection heuristics` — these are **intentionally removed** because the Python `InjectionDetector` provides a superior 4-layer defense (regex + perplexity heuristics + model classifier + LLM semantic check). The built-in NeMo jailbreak flows only use perplexity heuristics.
+- **Output:** `check faithfulness`, `self check facts`, `self check output` — these are **intentionally removed** because the Python `FaithfulnessChecker` and `ToxicityFilter` provide richer analysis (per-claim scoring, entity hallucination detection). The built-in NeMo output flows are simpler single-prompt checks.
+
+Both sets of capabilities are preserved through the `run_input_rails` and `run_output_rails` Colang actions, which call the full Python executor stack.
 
 ### Configuration
 
 **No new env vars needed.** The existing `RAG_NEMO_ENABLED` master toggle controls the entire Colang+Python stack. Individual Python rail toggles (e.g., `RAG_NEMO_INJECTION_ENABLED`) continue to work — the `actions.py` wrappers check them before calling into rail classes.
+
+### `$bot_message` Modification in Output Rails
+
+Output rail flows that modify `$bot_message` (e.g., `add_citation_reminder`, `prepend_hedge`, `adjust_answer_length`) use the NeMo-supported pattern of reassigning the context variable via action return. The action returns a dict with the modified answer, and the flow assigns it back:
+
+```colang
+$bot_message = execute prepend_hedge(answer=$bot_message)
+```
+
+NeMo uses the final value of `$bot_message` after all output rails complete as the response returned by `generate_async()`.
 
 ---
 

@@ -51,6 +51,30 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json_mod.dumps(data).decode()}\n\n"
 
 
+def _source_refs(results: list) -> list[dict]:
+    """Extract lightweight source references from RAG results (no full chunk text)."""
+    refs = []
+    for r in results:
+        meta: dict = r.get("metadata", {}) if isinstance(r, dict) else getattr(r, "metadata", {}) or {}
+        score: float = r.get("score", 0.0) if isinstance(r, dict) else getattr(r, "score", 0.0)
+        text: str = r.get("text", "") if isinstance(r, dict) else getattr(r, "text", "")
+        ref: dict = {
+            "source": meta.get("source", ""),
+            "source_uri": meta.get("source_uri", ""),
+            "section": meta.get("section") or meta.get("heading", ""),
+            "score": score,
+            "text": text[:200] if text else "",
+        }
+        start = meta.get("original_char_start")
+        end = meta.get("original_char_end")
+        if start is not None:
+            ref["original_char_start"] = start
+        if end is not None:
+            ref["original_char_end"] = end
+        refs.append(ref)
+    return refs
+
+
 def _aggregate_stage_totals(stage_timings: list[dict]) -> dict:
     bucket_totals: dict[str, float] = {}
     for stage in stage_timings:
@@ -71,7 +95,7 @@ def _stream_llm(
 ):
     """Stream generation tokens via LLMProvider (provider-agnostic)."""
     from src.platform.llm import get_llm_provider
-    from src.retrieval.generator import _SYSTEM_PROMPT, _USER_TEMPLATE
+    from src.retrieval.generator import _SYSTEM_PROMPT, _build_user_prompt
 
     def _record_stage(stage: str, bucket: str, started_at: float) -> None:
         if stage_timings is None:
@@ -88,7 +112,7 @@ def _stream_llm(
         )
     else:
         context = "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks))
-    user_message = _USER_TEMPLATE.format(context=context, question=query)
+    user_message = _build_user_prompt(context=context, question=query)
 
     messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
     if memory_context:
@@ -228,6 +252,7 @@ async def run_query(
                     role="assistant",
                     content=assistant_text,
                     query_id=workflow_id,
+                    sources=_source_refs(result.get("results", [])),
                 )
             MEMORY_OP_MS.labels(operation="append_turn").observe(
                 (time.perf_counter() - mem_start) * 1000
@@ -422,6 +447,7 @@ def create_query_router(
                                 role="assistant",
                                 content=clar,
                                 query_id=workflow_id,
+                                sources=[],
                             )
                         MEMORY_OP_MS.labels(operation="append_turn").observe(
                             (time.perf_counter() - mem_start) * 1000
@@ -517,6 +543,7 @@ def create_query_router(
                             role="assistant",
                             content=assistant_text,
                             query_id=workflow_id,
+                            sources=_source_refs(chunks),
                         )
                     MEMORY_OP_MS.labels(operation="append_turn").observe(
                         (time.perf_counter() - mem_start) * 1000

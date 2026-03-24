@@ -1,22 +1,28 @@
 <!-- @summary
-Web console module for operator UX: routes, service helpers, and UI asset handling.
+Web console module for dual-console UX: User Console at /console, Admin Console at /console/admin.
+Routes, service helpers, and UI asset handling for both surfaces.
 @end-summary -->
 
 # server/console
 
 ## Overview
 
-This package owns the operator web console backend:
+This package owns the dual web console backend:
 
 - `routes.py`: all `/console/*` FastAPI endpoints.
 - `services.py`: shared console helpers (health probe, logs tail, source rendering, static UI path resolution).
-- `static/console.html`: bundled UI asset served by `/console`.
-- `web/src/main.ts`: TypeScript source for console browser behavior.
+- `static/user/index.html`: User Console (modern chat interface) served at `/console`.
+- `static/console.html`: Admin Console (tabbed debug/ops interface) served at `/console/admin`.
+- `web/src/user-console.ts`: TypeScript source for the User Console.
+- `web/src/main.ts`: TypeScript source for the Admin Console.
 - `web/tsconfig.json` + `web/package.json`: TypeScript build config.
 
-The primary console UI HTML location is `server/console/static/console.html`.
-`services.py` also keeps a fallback to `server/console.html` for older local
-checkouts that still have the legacy file path.
+## Console URLs
+
+| URL | Interface | Purpose |
+|-----|-----------|---------|
+| `http://localhost:8000/console` | **User Console** | Modern chat interface for end users |
+| `http://localhost:8000/console/admin` | **Admin Console** | Tabbed debug/ops interface for operators |
 
 ## Build TypeScript UI
 
@@ -78,4 +84,4 @@ while scope is small, then migrate incrementally:
 
 1. introduce a typed frontend build (`ui/` with TS + lightweight framework),
 2. generate/derive API types from server schemas where possible,
-3. preserve `/console` route behavior while swapping static asset build output.
+3. preserve `/console` and `/console/admin` route behavior while swapping static asset build output.

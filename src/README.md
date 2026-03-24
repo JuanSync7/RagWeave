@@ -1,6 +1,6 @@
 <!-- @summary
 Source tree for the RAG platform, organized by functional domains: shared core
-primitives, ingestion pipeline, retrieval runtime, and platform capabilities.
+primitives, ingestion pipeline, retrieval runtime, platform capabilities, and guardrails.
 @end-summary -->
 
 # src
@@ -18,6 +18,7 @@ primitives, ingestion pipeline, retrieval runtime, and platform capabilities.
 | `ingest/` | Modular document ingestion pipeline and LangGraph stage workflow. |
 | `retrieval/` | Query processing, retrieval orchestration, reranking, generation integration. |
 | `platform/` | Security/auth, limits, cache, metrics, observability, and retry providers. |
+| `guardrails/` | NeMo Guardrails integration for input/output safety rails (intent, injection, PII, toxicity, topic safety, faithfulness). |
 
 ## Cross-Directory Notes
 
@@ -25,3 +26,4 @@ primitives, ingestion pipeline, retrieval runtime, and platform capabilities.
 - Ingestion uses `core/` storage primitives and its own pipeline modules.
 - `common/` contains cross-domain helpers that are reused by multiple feature directories.
 - Server modules in `server/` consume `src/retrieval/` and `src/platform/` APIs.
+- `guardrails/` is consumed by the retrieval pipeline for input/output safety gating.

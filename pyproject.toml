@@ -39,6 +39,30 @@ dev = [
   "pytest",
   "pytest-mock",
 ]
+pii = [
+  "presidio-analyzer",
+  "presidio-anonymizer",
+  "spacy",
+]
+gliner = [
+  "gliner",
+]
+chromadb = [
+  "chromadb",
+]
+pinecone = [
+  "pinecone-client",
+]
+qdrant = [
+  "qdrant-client",
+]
+all = [
+  "rag[pii]",
+  "rag[gliner]",
+  "rag[chromadb]",
+  "rag[pinecone]",
+  "rag[qdrant]",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

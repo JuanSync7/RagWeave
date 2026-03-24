@@ -137,7 +137,8 @@ Then use the CLI client or web console:
 # CLI client (targets the API server)
 python -m server.cli_client
 
-# Web console: open http://localhost:8000/console
+# User Console (chat):  open http://localhost:8000/console
+# Admin Console (ops):  open http://localhost:8000/console/admin
 ```
 
 ## Running Tests
