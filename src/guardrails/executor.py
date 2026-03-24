@@ -122,6 +122,11 @@ class InputRailExecutor:
         self._timeout = timeout_seconds
         self._tracer = get_tracer()
 
+    @property
+    def pii_detector(self):
+        """Public accessor for the PII detector used in the pre-LLM redaction step."""
+        return self._pii
+
     def execute(
         self,
         query: str,

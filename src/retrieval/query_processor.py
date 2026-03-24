@@ -146,34 +146,60 @@ def _get_kg_terms() -> tuple:
             "Loaded %d KG terms (%d index keys) for reformulation context",
             len(_KG_TERMS), len(_KG_WORD_INDEX),
         )
-    except (json.JSONDecodeError, KeyError) as e:
+    except (orjson.JSONDecodeError, KeyError) as e:
         logger.warning("Failed to load KG terms: %s", e)
 
     return _KG_TERMS, _KG_WORD_INDEX
 
 
 # ---------------------------------------------------------------------------
-# Guardrails — prompt injection detection
+# Guardrails — prompt injection detection (fallback when NeMo is disabled)
 # ---------------------------------------------------------------------------
 
-_INJECTION_PATTERNS = [
-    re.compile(
-        r"ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts)", re.I
-    ),
-    re.compile(r"you\s+are\s+now\s+", re.I),
-    re.compile(r"system\s*:\s*", re.I),
-    re.compile(r"<\s*/?\s*(system|prompt|instruction)", re.I),
-    re.compile(r"\b(ADMIN|ROOT)\s*:", re.I),
-    re.compile(r"do\s+not\s+follow\s+(your|the)\s+(rules|instructions)", re.I),
-    re.compile(r"forget\s+(everything|your\s+instructions)", re.I),
-    re.compile(r"\[\s*INST\s*\]", re.I),
-    re.compile(r"```\s*(system|instruction)", re.I),
-]
+_INJECTION_PATTERNS: Optional[List[re.Pattern]] = None
+
+
+def _load_injection_patterns() -> List[re.Pattern]:
+    """Load injection patterns from config/injection_patterns.yaml.
+
+    Patterns are loaded once and cached. Falls back to a minimal
+    hardcoded set if the YAML file is missing or unreadable.
+    """
+    global _INJECTION_PATTERNS
+    if _INJECTION_PATTERNS is not None:
+        return _INJECTION_PATTERNS
+
+    try:
+        import yaml
+        patterns_path = PROMPTS_DIR.parent / "config" / "injection_patterns.yaml"
+        if patterns_path.exists():
+            with open(patterns_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            raw_patterns = data.get("patterns", [])
+            _INJECTION_PATTERNS = [re.compile(p, re.I) for p in raw_patterns]
+            logger.info("Loaded %d injection patterns from %s", len(_INJECTION_PATTERNS), patterns_path)
+            return _INJECTION_PATTERNS
+    except Exception as e:
+        logger.warning("Failed to load injection patterns file: %s — using fallback", e)
+
+    # Minimal fallback if file is missing
+    _INJECTION_PATTERNS = [
+        re.compile(r"ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts)", re.I),
+        re.compile(r"you\s+are\s+now\s+", re.I),
+        re.compile(r"forget\s+(everything|your\s+instructions)", re.I),
+    ]
+    return _INJECTION_PATTERNS
 
 
 def _detect_injection(query: str) -> bool:
-    """Check for common prompt injection patterns."""
-    return any(p.search(query) for p in _INJECTION_PATTERNS)
+    """Check for prompt injection patterns (fallback for when NeMo is disabled).
+
+    When NeMo Guardrails is enabled, its 4-layer injection detection
+    (regex + perplexity + model + LLM) handles this. This function
+    serves as a lightweight fallback for environments without NeMo.
+    """
+    patterns = _load_injection_patterns()
+    return any(p.search(query) for p in patterns)
 
 
 # ---------------------------------------------------------------------------

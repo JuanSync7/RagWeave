@@ -497,6 +497,9 @@ RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES = int(
     os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES", "1")
 )
 
+# --- Reranker ---
+RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))
+
 # --- Document Formatting ---
 RAG_DOCUMENT_FORMATTING_ENABLED = os.environ.get(
     "RAG_DOCUMENT_FORMATTING_ENABLED", "false"

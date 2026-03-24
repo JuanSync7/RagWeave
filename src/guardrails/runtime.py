@@ -86,7 +86,7 @@ class GuardrailsRuntime:
             logger.error(
                 "NeMo Guardrails init failed: %s — auto-disabling guardrails", e
             )
-            self._auto_disabled = True
+            cls._auto_disabled = True
 
     @property
     def rails(self) -> Any | None:
@@ -128,7 +128,7 @@ class GuardrailsRuntime:
             logger.warning(
                 "Rail execution failed: %s — auto-disabling guardrails", e
             )
-            self._auto_disabled = True
+            type(self)._auto_disabled = True
             return {"role": "assistant", "content": ""}
 
     def shutdown(self) -> None:

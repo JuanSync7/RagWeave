@@ -14,7 +14,7 @@ from typing import List
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from config.settings import RERANKER_MODEL_PATH, RERANK_TOP_K
+from config.settings import RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH
 from src.platform.observability.providers import get_tracer
 from src.retrieval.schemas import RankedResult
 
@@ -62,7 +62,7 @@ class LocalBGEReranker:
             pairs,
             padding=True,
             truncation=True,
-            max_length=512,
+            max_length=RERANKER_MAX_LENGTH,
             return_tensors="pt",
         ).to(self.device)
 

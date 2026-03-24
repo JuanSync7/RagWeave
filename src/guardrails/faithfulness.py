@@ -238,9 +238,15 @@ class FaithfulnessChecker:
         Returns:
             Score in \([0.0, 1.0]\) if available, otherwise None.
         """
-        prompt = _SELF_CHECK_FACTS_PROMPT.format(
-            evidence=formatted_context,
-            hypothesis=answer,
+        prompt = (
+            "You are given a task to identify if the hypothesis is grounded by / "
+            "supported by the evidence.\n"
+            "You will only use the contents of the evidence and not rely on external knowledge.\n\n"
+            "Based on the evidence, is the hypothesis true? Respond with a score from 0.0 to 1.0.\n"
+            "1.0 means fully supported by the evidence, 0.0 means completely unsupported.\n"
+            "Output only a number.\n\n"
+            f"<evidence>{formatted_context}</evidence>\n\n"
+            f"<hypothesis>{answer}</hypothesis>"
         )
 
         try:
@@ -280,8 +286,15 @@ class FaithfulnessChecker:
         Returns:
             List of `ClaimScore` objects. Returns an empty list on failure.
         """
-        prompt = _CLAIM_SCORING_PROMPT.format(
-            context=formatted_context, answer=answer
+        prompt = (
+            "You are a faithfulness evaluator. Given an answer and context chunks, "
+            "score how well each claim in the answer is supported by the context.\n\n"
+            "For each sentence in the answer, output a JSON array:\n"
+            '[{"claim": "sentence text", "score": 0.0, "supported": true}]\n\n'
+            "Score 1.0 = fully supported by the context, 0.0 = completely unsupported.\n"
+            "Output ONLY the JSON array, no other text.\n\n"
+            f"<context>{formatted_context}</context>\n\n"
+            f"<answer_to_evaluate>{answer}</answer_to_evaluate>"
         )
 
         try:

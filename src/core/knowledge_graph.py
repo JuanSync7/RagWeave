@@ -526,8 +526,10 @@ def export_obsidian(graph: nx.DiGraph, output_dir: Path) -> int:
 
     for node, data in graph.nodes(data=True):
         safe_name = re.sub(r"[^\w\s\-]", "", node).strip()
+        # Ensure safe_name is a bare filename with no directory components
+        safe_name = Path(safe_name).name if safe_name else "unnamed_node"
         if not safe_name:
-            continue
+            safe_name = "unnamed_node"
 
         lines = [f"# {node}"]
         lines.append(f"\n**Type**: {data.get('type', 'unknown')}")

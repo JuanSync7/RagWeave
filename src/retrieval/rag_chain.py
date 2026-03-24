@@ -53,6 +53,16 @@ from config.settings import (
 )
 from src.platform.timing import TimingPool
 from config.settings import RAG_NEMO_ENABLED
+from config.settings import (
+    RAG_CONFIDENCE_ROUTING_ENABLED,
+    RAG_CONFIDENCE_HIGH_THRESHOLD,
+    RAG_CONFIDENCE_LOW_THRESHOLD,
+    RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+    RAG_CONFIDENCE_LLM_WEIGHT,
+    RAG_CONFIDENCE_CITATION_WEIGHT,
+    RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
+    RAG_DOCUMENT_FORMATTING_ENABLED,
+)
 
 logger = logging.getLogger("rag.rag_chain")
 
@@ -126,6 +136,12 @@ class RAGChain:
             self.embeddings, self.reranker = fut_models.result()
             self._kg_expander: Optional[GraphQueryExpander] = fut_kg.result()
             self._generator: Optional[OllamaGenerator] = fut_gen.result()
+
+        # Embedding LRU cache — avoids re-computing embeddings for repeated
+        # exact queries (REQ-306). Keyed on the exact query string.
+        from collections import OrderedDict
+        self._embedding_cache: OrderedDict = OrderedDict()
+        self._embedding_cache_max = 128
 
         # Initialize NeMo Guardrails (REQ-701: once at startup, not per-query)
         self._guardrails_input_executor = None
@@ -205,10 +221,13 @@ class RAGChain:
             if RAG_NEMO_INJECTION_ENABLED
             else None
         )
+        from config.settings import RAG_NEMO_PII_GLINER_ENABLED
+
         pii_detector = (
             PIIDetector(
                 extended=RAG_NEMO_PII_EXTENDED,
                 score_threshold=RAG_NEMO_PII_SCORE_THRESHOLD,
+                use_gliner=RAG_NEMO_PII_GLINER_ENABLED,
             )
             if RAG_NEMO_PII_ENABLED
             else None
@@ -315,6 +334,7 @@ class RAGChain:
         memory_context: Optional[str] = None,
         memory_recent_turns: Optional[List[Dict[str, str]]] = None,
         conversation_id: Optional[str] = None,
+        _retry_count: int = 0,
     ) -> RAGResponse:
         """Execute the full RAG pipeline.
 
@@ -375,17 +395,46 @@ class RAGChain:
                 )
 
             # Run query processing and input rails in parallel (REQ-702)
+            # PII gate: if PII detection is enabled, scan the query FIRST
+            # before sending it to the LLM for reformulation. This prevents
+            # PII from being sent to the LLM in the parallel execution window.
             guardrails_metadata = None
             input_rail_result = None
             merge_decision = None
+            pii_gated_query = processing_query
 
             if self._guardrails_input_executor is not None:
                 from concurrent.futures import ThreadPoolExecutor as _TP, Future as _Fut
 
+                # PII gate: run PII detection synchronously before parallel stage
+                pii_detector = getattr(self._guardrails_input_executor, 'pii_detector', None)
+                if pii_detector is not None:
+                    try:
+                        pii_span = self.tracer.start_span("rag_chain.pii_gate", parent=root_span)
+                        redacted_text, pii_detections = pii_detector.redact(query)
+                        if pii_detections:
+                            # Use redacted query for LLM processing
+                            pii_gated_query = redacted_text
+                            if memory_context:
+                                pii_gated_query = (
+                                    "Conversation context:\n"
+                                    f"{memory_context}\n\n"
+                                    "Current user question:\n"
+                                    f"{redacted_text}"
+                                )
+                            logger.info(
+                                "PII gate: %d detections redacted before LLM processing",
+                                len(pii_detections),
+                            )
+                        pii_span.end(status="ok")
+                    except Exception as e:
+                        logger.warning("PII gate failed: %s — continuing with original query", e)
+                        pii_gated_query = processing_query
+
                 with _TP(max_workers=2, thread_name_prefix="stage1") as stage1_pool:
                     qp_future: _Fut = stage1_pool.submit(
                         process_query,
-                        processing_query,
+                        pii_gated_query,
                         QUERY_CONFIDENCE_THRESHOLD,
                         max_query_iterations,
                         RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
@@ -526,10 +575,20 @@ class RAGChain:
             else:
                 bm25_query = processed_query
 
-            # Stage 3: Query embedding
+            # Stage 3: Query embedding (with LRU cache for exact repeats)
             t0 = time.perf_counter()
             embed_span = self.tracer.start_span("rag_chain.embed_query", parent=root_span)
-            query_embedding = self.embeddings.embed_query(processed_query)
+            cache_hit = processed_query in self._embedding_cache
+            if cache_hit:
+                query_embedding = self._embedding_cache[processed_query]
+                self._embedding_cache.move_to_end(processed_query)
+                embed_span.set_attribute("cache_hit", True)
+            else:
+                query_embedding = self.embeddings.embed_query(processed_query)
+                self._embedding_cache[processed_query] = query_embedding
+                if len(self._embedding_cache) > self._embedding_cache_max:
+                    self._embedding_cache.popitem(last=False)
+                embed_span.set_attribute("cache_hit", False)
             embed_span.end(status="ok")
             tp.record("embedding", "retrieval", started_at=t0)
             if tp.check_stage_budget("embedding"):
@@ -642,6 +701,43 @@ class RAGChain:
                     conversation_id=conversation_id,
                 )
 
+            # Classify retrieval quality based on reranker scores (REQ-403)
+            retrieval_quality = "insufficient"
+            retrieval_quality_note = None
+            if reranked:
+                best_score = max(r.score for r in reranked)
+                if best_score >= 0.75:
+                    retrieval_quality = "strong"
+                elif best_score >= 0.50:
+                    retrieval_quality = "moderate"
+                elif best_score >= 0.30:
+                    retrieval_quality = "weak"
+                    retrieval_quality_note = (
+                        "Retrieved documents have limited relevance to your query. "
+                        "The answer below is based on the best available evidence."
+                    )
+                else:
+                    retrieval_quality = "insufficient"
+                    retrieval_quality_note = (
+                        "No highly relevant documents were found. The answer below "
+                        "is generated from loosely related content and may not be reliable."
+                    )
+
+            # Stage 5.5: Document formatting (REQ-501–REQ-503)
+            version_conflicts = []
+            formatted_context_str = None
+            if RAG_DOCUMENT_FORMATTING_ENABLED and reranked:
+                t0 = time.perf_counter()
+                from src.retrieval.document_formatter import format_context
+                fmt_span = self.tracer.start_span("rag_chain.format_context", parent=root_span)
+                formatted = format_context(reranked)
+                formatted_context_str = formatted.context_string
+                version_conflicts = formatted.version_conflicts
+                fmt_span.set_attribute("chunk_count", formatted.chunk_count)
+                fmt_span.set_attribute("version_conflicts", len(version_conflicts))
+                fmt_span.end(status="ok")
+                tp.record("document_formatting", "retrieval", started_at=t0)
+
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
             if not skip_generation and self._generator and reranked and not tp.budget_exhausted:
@@ -649,13 +745,24 @@ class RAGChain:
                 generate_span = self.tracer.start_span("rag_chain.generate", parent=root_span)
                 context_chunks = [r.text for r in reranked]
                 scores = [r.score for r in reranked]
-                generated_answer = self._generator.generate(
-                    query=processed_query,
-                    context_chunks=context_chunks,
-                    scores=scores,
-                    memory_context=memory_context,
-                    recent_turns=memory_recent_turns,
-                )
+
+                # Use formatted context if document formatting is enabled
+                if formatted_context_str:
+                    generated_answer = self._generator.generate(
+                        query=processed_query,
+                        context_chunks=[formatted_context_str],
+                        scores=None,
+                        memory_context=memory_context,
+                        recent_turns=memory_recent_turns,
+                    )
+                else:
+                    generated_answer = self._generator.generate(
+                        query=processed_query,
+                        context_chunks=context_chunks,
+                        scores=scores,
+                        memory_context=memory_context,
+                        recent_turns=memory_recent_turns,
+                    )
                 generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 generate_span.end(status="ok")
                 tp.record("generation", "generation", started_at=t0)
@@ -738,6 +845,120 @@ class RAGChain:
                     r.execution_ms for r in output_rail_result.rail_executions
                 )
 
+            # Stage 7.25: Output sanitization (REQ-704)
+            if generated_answer:
+                from src.retrieval.output_sanitizer import sanitize_answer
+                generated_answer = sanitize_answer(
+                    generated_answer,
+                    system_prompt=_GEN_SYSTEM_PROMPT,
+                )
+
+            # Stage 7.5: Composite confidence scoring + routing (REQ-701, REQ-706)
+            composite_confidence = None
+            confidence_breakdown_dict = None
+            post_guardrail_action = None
+            verification_warning = None
+            re_retrieval_suggested = False
+            re_retrieval_params = None
+
+            if (
+                RAG_CONFIDENCE_ROUTING_ENABLED
+                and generated_answer
+                and reranked
+                and not tp.budget_exhausted
+            ):
+                t0 = time.perf_counter()
+                conf_span = self.tracer.start_span("rag_chain.confidence_routing", parent=root_span)
+
+                from src.retrieval.confidence.scoring import compute_composite_confidence
+                from src.retrieval.confidence.routing import route_by_confidence
+                from src.retrieval.confidence.schemas import PostGuardrailAction
+
+                reranker_scores = [r.score for r in reranked]
+                llm_confidence_text = (
+                    self._generator._last_llm_confidence
+                    if self._generator
+                    else "medium"
+                )
+                context_texts = [r.text for r in reranked]
+
+                breakdown = compute_composite_confidence(
+                    reranker_scores=reranker_scores,
+                    llm_confidence_text=llm_confidence_text,
+                    answer=generated_answer,
+                    retrieved_texts=context_texts,
+                    retrieval_weight=RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+                    llm_weight=RAG_CONFIDENCE_LLM_WEIGHT,
+                    citation_weight=RAG_CONFIDENCE_CITATION_WEIGHT,
+                )
+                composite_confidence = breakdown.composite
+                confidence_breakdown_dict = {
+                    "retrieval_score": breakdown.retrieval_score,
+                    "llm_score": breakdown.llm_score,
+                    "citation_score": breakdown.citation_score,
+                    "composite": breakdown.composite,
+                    "retrieval_weight": breakdown.retrieval_weight,
+                    "llm_weight": breakdown.llm_weight,
+                    "citation_weight": breakdown.citation_weight,
+                }
+
+                action = route_by_confidence(
+                    composite=breakdown.composite,
+                    retry_count=_retry_count,
+                    high_threshold=RAG_CONFIDENCE_HIGH_THRESHOLD,
+                    low_threshold=RAG_CONFIDENCE_LOW_THRESHOLD,
+                    max_retries=RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
+                )
+                post_guardrail_action = action.value
+
+                conf_span.set_attribute("composite_confidence", breakdown.composite)
+                conf_span.set_attribute("routing_action", action.value)
+                conf_span.set_attribute("retry_count", _retry_count)
+                conf_span.end(status="ok")
+                tp.record("confidence_routing", "retrieval", started_at=t0)
+
+                logger.info(
+                    "Confidence routing: composite=%.2f action=%s retry=%d "
+                    "(retrieval=%.2f llm=%.2f citation=%.2f)",
+                    breakdown.composite,
+                    action.value,
+                    _retry_count,
+                    breakdown.retrieval_score,
+                    breakdown.llm_score,
+                    breakdown.citation_score,
+                )
+
+                # Act on routing decision (non-blocking: return first response
+                # immediately, suggest re-retrieval for caller to request)
+                re_retrieval_suggested = False
+                re_retrieval_params = None
+
+                if action == PostGuardrailAction.RE_RETRIEVE:
+                    # Don't block — return the first answer and suggest re-retrieval.
+                    # The caller (UI/API) can request a second attempt with these
+                    # broader params. The user sees both side-by-side and chooses.
+                    re_retrieval_suggested = True
+                    re_retrieval_params = {
+                        "alpha": max(0.0, alpha - 0.15),
+                        "search_limit": search_limit + 5,
+                        "rerank_top_k": rerank_top_k,
+                        "fast_path": True,
+                    }
+                    verification_warning = (
+                        "This answer has moderate confidence. A broader search "
+                        "may yield better results — re-retrieval is available."
+                    )
+                elif action == PostGuardrailAction.BLOCK:
+                    generated_answer = (
+                        "Insufficient documentation found to provide a reliable answer. "
+                        "Please try a more specific query."
+                    )
+                elif action == PostGuardrailAction.FLAG:
+                    verification_warning = (
+                        "This answer has limited confidence. "
+                        "Please verify against source documents before relying on it."
+                    )
+
             tp.log_summary()
 
             return RAGResponse(
@@ -755,6 +976,20 @@ class RAGChain:
                 conversation_id=conversation_id,
                 guardrails=guardrails_metadata,
                 token_budget=token_budget,
+                composite_confidence=composite_confidence,
+                confidence_breakdown=confidence_breakdown_dict,
+                post_guardrail_action=post_guardrail_action,
+                version_conflicts=(
+                    [{"spec_stem": c.spec_stem, "versions": c.versions} for c in version_conflicts]
+                    if version_conflicts
+                    else None
+                ),
+                retry_count=_retry_count,
+                verification_warning=verification_warning,
+                retrieval_quality=retrieval_quality,
+                retrieval_quality_note=retrieval_quality_note,
+                re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
+                re_retrieval_params=re_retrieval_params,
             )
         except Exception as exc:
             span_status = "error"
