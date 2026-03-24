@@ -44,7 +44,7 @@ def build_document_processing_graph():
     )
     graph.add_conditional_edges(
         "structure_detection",
-        lambda state: (
+        lambda state: "end" if state.get("errors") else (
             "multimodal_processing"
             if (
                 state["runtime"].config.enable_multimodal_processing
@@ -52,7 +52,7 @@ def build_document_processing_graph():
             )
             else "text_cleaning"
         ),
-        {"multimodal_processing": "multimodal_processing", "text_cleaning": "text_cleaning"},
+        {"multimodal_processing": "multimodal_processing", "text_cleaning": "text_cleaning", "end": END},
     )
     graph.add_edge("multimodal_processing", "text_cleaning")
     graph.add_conditional_edges(

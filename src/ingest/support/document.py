@@ -110,8 +110,6 @@ _BOILERPLATE_PATTERNS = [
     re.compile(r"^.*Let me know if you have questions.*$", re.MULTILINE),
     # Sign-off name + title lines (after "Best,")
     re.compile(r"^\s*(?:Principal|Senior|Lead|Staff)\s+\w+.*$", re.MULTILINE),
-    # Company name in signature
-    re.compile(r"^\s*ACME\s+Technologies?\s*$", re.MULTILINE),
     # "We'll be doing..." meeting/event references
     re.compile(r"^.*(?:deep-dive|tech talk|meeting|session).*(?:Friday|Monday|next week).*$", re.MULTILINE | re.IGNORECASE),
 ]

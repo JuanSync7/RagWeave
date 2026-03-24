@@ -29,8 +29,9 @@ def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict:
                 state, "cross_reference_extraction:skipped"
             )
         }
+    text = state.get("refactored_text") or state.get("cleaned_text", "")
     return {
-        "cross_references": _cross_refs(state["refactored_text"]),
+        "cross_references": _cross_refs(text),
         "processing_log": append_processing_log(
             state, "cross_reference_extraction:ok"
         ),

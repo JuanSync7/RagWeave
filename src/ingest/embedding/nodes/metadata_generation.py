@@ -28,21 +28,20 @@ def metadata_generation_node(state: EmbeddingPipelineState) -> dict:
         and an updated ``processing_log``.
     """
     config = state["runtime"].config
+    text = state.get("refactored_text") or state.get("cleaned_text", "")
     prompt = (
         'Return {"summary":"...","keywords":[]} for:\n'
-        + state["refactored_text"][:10000]
+        + text[:10000]
     )
     response = _llm_json(prompt, config, 250)
-    summary = str(response.get("summary", "")).strip() or state["refactored_text"][
-        :240
-    ].strip()
+    summary = str(response.get("summary", "")).strip() or text[:240].strip()
 
     keywords = response.get("keywords")
     if isinstance(keywords, list):
         parsed_keywords = [str(keyword).strip() for keyword in keywords]
     else:
         parsed_keywords = _extract_keywords_fallback(
-            state["refactored_text"], config.max_keywords
+            text, config.max_keywords
         )
     parsed_keywords = parsed_keywords[: config.max_keywords]
     joined_keywords = ", ".join(parsed_keywords)

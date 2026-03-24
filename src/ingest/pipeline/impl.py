@@ -511,64 +511,74 @@ def ingest_directory(
                         source["source_key"],
                     )
                     continue
-            result = ingest_file(
-                source_path,
-                runtime,
-                source_name=source["source_name"],
-                source_uri=source["source_uri"],
-                source_key=source["source_key"],
-                source_id=source["source_id"],
-                connector=source["connector"],
-                source_version=source["source_version"],
-                existing_hash=previous_hash if update else "",
-                existing_source_uri=previous_uri if update else "",
-            )
-            if result["errors"]:
-                failed += 1
-                errors.extend(result["errors"])
-                logger.error(
-                    "ingestion_failed source=%s source_key=%s errors=%s",
+            try:
+                result = ingest_file(
+                    source_path,
+                    runtime,
+                    source_name=source["source_name"],
+                    source_uri=source["source_uri"],
+                    source_key=source["source_key"],
+                    source_id=source["source_id"],
+                    connector=source["connector"],
+                    source_version=source["source_version"],
+                    existing_hash=previous_hash if update else "",
+                    existing_source_uri=previous_uri if update else "",
+                )
+                if result["errors"]:
+                    failed += 1
+                    errors.extend(result["errors"])
+                    logger.error(
+                        "ingestion_failed source=%s source_key=%s errors=%s",
+                        source["source_name"],
+                        source["source_key"],
+                        "; ".join(result["errors"]),
+                    )
+                    continue
+
+                processed += 1
+                stored_chunks += int(result["stored_count"])
+                logger.info(
+                    "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
                     source["source_name"],
                     source["source_key"],
-                    "; ".join(result["errors"]),
+                    result.get("stored_count", 0),
+                    int(result["stored_count"]),
+                    " > ".join(result["processing_log"]),
                 )
+                if matched_key and matched_key != source["source_key"]:
+                    manifest.pop(matched_key, None)
+                stem = _mirror_file_stem(source["source_name"], source["source_key"])
+                manifest[source["source_key"]] = {
+                    "source": source["source_name"],
+                    "source_uri": source["source_uri"],
+                    "source_id": source["source_id"],
+                    "source_key": source["source_key"],
+                    "connector": source["connector"],
+                    "source_version": source["source_version"],
+                    "content_hash": result.get("source_hash", ""),
+                    "chunk_count": result.get("stored_count", 0),
+                    "summary": result["metadata_summary"],
+                    "keywords": result["metadata_keywords"],
+                    "processing_log": result["processing_log"][-12:],
+                    "mirror_stem": stem,
+                }
+
+                if config.export_processed and config.clean_store_dir:
+                    _store = CleanDocumentStore(Path(config.clean_store_dir))
+                    if _store.exists(source["source_key"]):
+                        _clean_text, _ = _store.read(source["source_key"])
+                        export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
+                        PROCESSED_DIR.mkdir(exist_ok=True)
+                        (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(_clean_text, encoding="utf-8")
+            except Exception as exc:
+                failed += 1
+                logger.exception(
+                    "ingestion_unhandled_error source=%s error=%s",
+                    source.get("source_name", "unknown"),
+                    exc,
+                )
+                errors.append(f"unhandled:{source.get('source_name', 'unknown')}:{exc}")
                 continue
-
-            processed += 1
-            stored_chunks += int(result["stored_count"])
-            logger.info(
-                "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
-                source["source_name"],
-                source["source_key"],
-                result.get("stored_count", 0),
-                int(result["stored_count"]),
-                " > ".join(result["processing_log"]),
-            )
-            if matched_key and matched_key != source["source_key"]:
-                manifest.pop(matched_key, None)
-            stem = _mirror_file_stem(source["source_name"], source["source_key"])
-            manifest[source["source_key"]] = {
-                "source": source["source_name"],
-                "source_uri": source["source_uri"],
-                "source_id": source["source_id"],
-                "source_key": source["source_key"],
-                "connector": source["connector"],
-                "source_version": source["source_version"],
-                "content_hash": result.get("source_hash", ""),
-                "chunk_count": result.get("stored_count", 0),
-                "summary": result["metadata_summary"],
-                "keywords": result["metadata_keywords"],
-                "processing_log": result["processing_log"][-12:],
-                "mirror_stem": stem,
-            }
-
-            if config.export_processed and config.clean_store_dir:
-                _store = CleanDocumentStore(Path(config.clean_store_dir))
-                if _store.exists(source["source_key"]):
-                    _clean_text, _ = _store.read(source["source_key"])
-                    export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
-                    PROCESSED_DIR.mkdir(exist_ok=True)
-                    (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(_clean_text, encoding="utf-8")
 
         if runtime.kg_builder is not None:
             runtime.kg_builder.save(KG_PATH)

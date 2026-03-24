@@ -28,7 +28,7 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict:
         ``processing_log``. When the workflow is skipped or there are no chunks,
         returns ``stored_count=0``.
     """
-    if state["should_skip"] or not state["chunks"]:
+    if state.get("should_skip", False) or not state["chunks"]:
         return {
             "stored_count": 0,
             "processing_log": append_processing_log(state, "embedding_storage:skipped"),
