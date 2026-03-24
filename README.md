@@ -193,6 +193,21 @@ The `gateway` profile requires the `app` profile. See `certs/README.md` for deta
 
 > **Security note:** When the gateway is active, port 8000 remains directly accessible (bypassing TLS). For LAN demos, set `RAG_API_HOST_PORT=127.0.0.1:8000` in `.env` to restrict direct access to localhost only.
 
+### Internet access (Cloudflare Tunnel)
+
+For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free) to get a public HTTPS URL:
+
+```bash
+# Install (one-time)
+sudo apt install cloudflared          # Debian/Ubuntu
+# brew install cloudflared             # macOS
+
+# Start a quick tunnel pointing to your local nginx
+cloudflared tunnel --url https://localhost:443 --no-tls-verify
+```
+
+This prints a public URL like `https://random-name.trycloudflare.com` — share it with anyone. Kill with Ctrl+C when done.
+
 ## Podman Setup
 
 Podman is supported as a rootless, daemonless alternative to Docker. One-time setup:
