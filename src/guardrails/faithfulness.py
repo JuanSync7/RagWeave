@@ -81,7 +81,7 @@ class ClaimScore:
 
     Attributes:
         claim: Claim text (typically a sentence from the answer).
-        score: Score in \([0.0, 1.0]\) measuring support by context.
+        score: Score in [0.0, 1.0] measuring support by context.
         supported: Boolean support flag (typically derived from a threshold).
     """
 
