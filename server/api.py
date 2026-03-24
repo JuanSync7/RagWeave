@@ -34,6 +34,7 @@ from config.settings import (
     TEMPORAL_TARGET_HOST,
     RAG_API_MAX_INFLIGHT_REQUESTS,
     RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS,
+    RAG_API_CORS_ORIGINS,
     RATE_LIMIT_ENABLED,
     RATE_LIMIT_REQUESTS_PER_MINUTE,
     RATE_LIMIT_WINDOW_SECONDS,
@@ -155,7 +156,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=RAG_API_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
