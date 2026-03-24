@@ -189,6 +189,9 @@ RAG_API_CORS_ORIGINS: list[str] = [
     for o in os.environ.get("RAG_API_CORS_ORIGINS", "*").split(",")
     if o.strip()
 ] or ["*"]
+RAG_WORKFLOW_DEFAULT_TIMEOUT_MS = int(
+    os.environ.get("RAG_WORKFLOW_DEFAULT_TIMEOUT_MS", "120000")
+)
 
 # --- Auth / tenancy ---
 AUTH_API_KEYS_REQUIRED = os.environ.get("RAG_AUTH_API_KEYS_REQUIRED", "false").lower() in (

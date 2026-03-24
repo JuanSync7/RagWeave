@@ -35,6 +35,7 @@ from config.settings import (
     RAG_API_MAX_INFLIGHT_REQUESTS,
     RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS,
     RAG_API_CORS_ORIGINS,
+    RAG_WORKFLOW_DEFAULT_TIMEOUT_MS,
     RATE_LIMIT_ENABLED,
     RATE_LIMIT_REQUESTS_PER_MINUTE,
     RATE_LIMIT_WINDOW_SECONDS,
@@ -79,6 +80,18 @@ _api_inflight_semaphore = (
 _api_overload_queue_timeout_ms = max(1, RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS)
 
 API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
+
+
+def _validate_startup_config(
+    workflow_timeout_ms: int = RAG_WORKFLOW_DEFAULT_TIMEOUT_MS,
+) -> None:
+    """Raise ValueError for config values that would cause silent misbehaviour."""
+    if workflow_timeout_ms <= 0:
+        raise ValueError(
+            f"RAG_WORKFLOW_DEFAULT_TIMEOUT_MS must be a positive integer, "
+            f"got {workflow_timeout_ms!r}. "
+            "Set RAG_WORKFLOW_DEFAULT_TIMEOUT_MS to a value > 0 (milliseconds)."
+        )
 
 
 def _enforce_rate_limit(principal: Principal, endpoint: str) -> None:
@@ -133,6 +146,7 @@ def _release_request_slot(acquired: bool) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _validate_startup_config()
     global _temporal_client
     logger.info("Connecting to Temporal at %s", TEMPORAL_TARGET_HOST)
     _temporal_client = await Client.connect(TEMPORAL_TARGET_HOST)

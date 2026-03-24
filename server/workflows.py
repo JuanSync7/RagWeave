@@ -9,6 +9,8 @@
 from datetime import timedelta
 import math
 
+from config.settings import RAG_WORKFLOW_DEFAULT_TIMEOUT_MS
+
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
@@ -32,7 +34,7 @@ class RAGQueryWorkflow:
 
     @workflow.run
     async def run(self, request: dict) -> dict:
-        timeout_ms = int(request.get("overall_timeout_ms", 120000))
+        timeout_ms = int(request.get("overall_timeout_ms", RAG_WORKFLOW_DEFAULT_TIMEOUT_MS))
         # Honor client timeout budgets by rounding up milliseconds to seconds.
         timeout_seconds = max(1, math.ceil(timeout_ms / 1000))
         return await workflow.execute_activity(

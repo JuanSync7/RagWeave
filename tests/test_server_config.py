@@ -71,3 +71,57 @@ def test_api_cors_not_hardcoded():
     assert "RAG_API_CORS_ORIGINS" in source, (
         "server/api.py does not import or use RAG_API_CORS_ORIGINS."
     )
+
+
+# ---------------------------------------------------------------------------
+# RAG_WORKFLOW_DEFAULT_TIMEOUT_MS — settings parsing
+# ---------------------------------------------------------------------------
+
+def test_workflow_timeout_default(monkeypatch):
+    """Unset env var -> 120000 ms (preserves current behaviour)."""
+    monkeypatch.delenv("RAG_WORKFLOW_DEFAULT_TIMEOUT_MS", raising=False)
+    mod = importlib.reload(_settings)
+    assert mod.RAG_WORKFLOW_DEFAULT_TIMEOUT_MS == 120000
+
+
+def test_workflow_timeout_custom(monkeypatch):
+    """Custom value is parsed as int."""
+    monkeypatch.setenv("RAG_WORKFLOW_DEFAULT_TIMEOUT_MS", "60000")
+    mod = importlib.reload(_settings)
+    assert mod.RAG_WORKFLOW_DEFAULT_TIMEOUT_MS == 60000
+
+
+# ---------------------------------------------------------------------------
+# _validate_startup_config — validation logic
+# ---------------------------------------------------------------------------
+
+def test_validate_startup_config_passes_with_valid_value():
+    """Valid positive timeout must not raise."""
+    from server.api import _validate_startup_config
+    _validate_startup_config(workflow_timeout_ms=120000)  # must not raise
+
+
+def test_validate_startup_config_rejects_zero():
+    """Zero timeout must raise ValueError."""
+    from server.api import _validate_startup_config
+    with pytest.raises(ValueError, match="RAG_WORKFLOW_DEFAULT_TIMEOUT_MS"):
+        _validate_startup_config(workflow_timeout_ms=0)
+
+
+def test_validate_startup_config_rejects_negative():
+    """Negative timeout must raise ValueError."""
+    from server.api import _validate_startup_config
+    with pytest.raises(ValueError, match="RAG_WORKFLOW_DEFAULT_TIMEOUT_MS"):
+        _validate_startup_config(workflow_timeout_ms=-1000)
+
+
+def test_workflow_timeout_not_hardcoded():
+    """server/workflows.py must use RAG_WORKFLOW_DEFAULT_TIMEOUT_MS, not 120000."""
+    source = (_PROJECT_ROOT / "server" / "workflows.py").read_text()
+    assert "120000" not in source, (
+        "server/workflows.py still hardcodes 120000. "
+        "Replace with RAG_WORKFLOW_DEFAULT_TIMEOUT_MS."
+    )
+    assert "RAG_WORKFLOW_DEFAULT_TIMEOUT_MS" in source, (
+        "server/workflows.py does not import or use RAG_WORKFLOW_DEFAULT_TIMEOUT_MS."
+    )
