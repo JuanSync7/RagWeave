@@ -220,6 +220,10 @@ async def check_query_ambiguity(query: str) -> dict:
 @action()
 async def get_knowledge_base_summary() -> dict:
     """Returns static summary from config. Returns {summary: str}"""
+
+@action()
+async def prepend_text(text: str, answer: str) -> dict:
+    """Prepends text (e.g., disclaimer) to answer. Returns {answer: str}"""
 ```
 
 ### 2.3 Design Principles
@@ -282,19 +286,25 @@ flow input rails check abuse
     abort
 ```
 
-### Registration
+### 3.5 Python Input Executor Bridge (MUST be last)
 
-```yaml
-rails:
-  input:
-    flows:
-      - input rails check query length
-      - input rails check language
-      - input rails check query clarity
-      - input rails check abuse
+Runs the Python `InputRailExecutor` (injection 4-layer, PII, toxicity, topic safety) + `RailMergeGate` as the last input rail.
+
+```colang
+flow input rails run python executor
+  $result = execute run_input_rails(query=$user_message)
+  if $result.action == "reject"
+    bot say $result.reject_message
+    abort
+  else if $result.action == "modify"
+    $user_message = $result.redacted_query
 ```
 
-Flows use NeMo's `input rails` naming convention — NeMo auto-wires them in order. `abort` stops the pipeline and returns the bot message.
+### Registration
+
+See Section 8 `config.yml` for the full input rails registration. Order matters: Colang policy checks run first (fast, deterministic), Python executor runs last (heavy compute).
+
+Flows use NeMo's `input rails` naming convention — NeMo auto-wires them in registered order. `abort` stops the pipeline and returns the bot message.
 
 ---
 
@@ -388,9 +398,47 @@ flow input rails check off topic
 
 ## Section 5: Output Rails (`output_rails.co`)
 
-Four flows that run after generation, before returning the response:
+Eight flows that run after generation, before returning the response. Includes the Python executor bridge (first), disclaimer prepending, no-results handling, and policy checks.
 
-### 5.1 Citation Enforcement
+### 5.1 Python Output Executor Bridge (MUST be first)
+
+Runs the Python `OutputRailExecutor` (faithfulness, PII, toxicity) as the first output rail.
+
+```colang
+flow output rails run python executor
+  $result = execute run_output_rails(answer=$bot_message)
+  if $result.action == "reject"
+    bot say $result.reject_message
+    abort
+  else if $result.action == "modify"
+    $bot_message = $result.redacted_answer
+```
+
+### 5.2 Sensitive Topic Disclaimer
+
+Prepends disclaimer if `$sensitive_disclaimer` was set by the input rail in `safety.co`.
+
+```colang
+flow output rails prepend disclaimer
+  if $sensitive_disclaimer
+    $bot_message = execute prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
+```
+
+### 5.3 No-Results Handling
+
+Graceful response when retrieval returned nothing useful.
+
+```colang
+flow output rails check no results
+  $result = execute check_retrieval_results(answer=$bot_message)
+  if $result.has_results == False
+    bot say "I couldn't find relevant documents to answer your question. Try rephrasing with different keywords, or ask about a different aspect of the topic."
+    abort
+  else if $result.avg_confidence < 0.3
+    $bot_message = execute prepend_low_confidence_note(answer=$bot_message)
+```
+
+### 5.4 Citation Enforcement
 
 Ensures responses reference source documents.
 
@@ -401,7 +449,7 @@ flow output rails check citations
     $bot_message = execute add_citation_reminder(answer=$bot_message)
 ```
 
-### 5.2 Confidence-Based Routing
+### 5.5 Confidence-Based Routing
 
 Hedges or refuses when retrieval confidence is low.
 
@@ -415,7 +463,7 @@ flow output rails check confidence
     $bot_message = execute prepend_hedge(answer=$bot_message)
 ```
 
-### 5.3 Answer Length Governance
+### 5.6 Answer Length Governance
 
 Prevents excessively verbose or terse responses.
 
@@ -426,7 +474,7 @@ flow output rails check length
     $bot_message = execute adjust_answer_length(answer=$bot_message, reason=$result.reason)
 ```
 
-### 5.4 Source Scope Enforcement
+### 5.7 Source Scope Enforcement
 
 Strips claims outside the knowledge base.
 
@@ -440,18 +488,9 @@ flow output rails check scope
 
 ### Registration
 
-```yaml
-rails:
-  output:
-    flows:
-      - output rails check no results
-      - output rails check confidence
-      - output rails check citations
-      - output rails check length
-      - output rails check scope
-```
+See Section 8 `config.yml` for the full output rails registration. Order matters: Python executor runs first (heavy compute), then Colang policy flows.
 
-**Design note:** These run *after* the existing Python output rails (faithfulness, PII, toxicity). Python handles heavy compute (hallucination scoring, PII redaction). Colang handles policy decisions (hedging, citation reminders) that are better expressed declaratively.
+**Design note:** The Python executor bridge (5.1) runs the existing `OutputRailExecutor` (faithfulness scoring, PII redaction, toxicity filtering). The remaining Colang flows handle policy decisions (hedging, citation reminders, length governance) that are better expressed declaratively.
 
 ---
 
@@ -568,7 +607,7 @@ flow handle scope question
   bot say $result.summary
 ```
 
-### 7.4 Feedback Collection
+### 7.3 Feedback Collection
 
 Captures user satisfaction signals.
 
@@ -779,3 +818,37 @@ NeMo uses the final value of `$bot_message` after all output rails complete as t
 
 - Remove `colang_demo.py` (replaced by real implementation)
 - Remove `config/guardrails/intents.co` (absorbed into modular `.co` files)
+
+---
+
+## Section 10: Test Plan
+
+### 10.1 Unit Tests — Actions (`tests/guardrails/test_colang_actions.py`)
+
+Test each action in isolation (no NeMo runtime needed):
+- **Deterministic actions:** `check_query_length`, `check_citations`, `check_answer_length`, `check_exfiltration`, `check_role_boundary`, `prepend_hedge`, `prepend_text`, `add_citation_reminder`, `prepend_low_confidence_note`, `adjust_answer_length`
+- **Env var toggle tests:** Verify actions return pass/no-op when their backing rail is disabled
+- **Fail-open tests:** Verify actions catch exceptions and return passing verdicts
+- **Session state tests:** `check_abuse_pattern` and `check_jailbreak_escalation` escalation thresholds
+
+### 10.2 Integration Tests — Colang Flows (`tests/guardrails/test_colang_flows.py`)
+
+Test each `.co` file against NeMo runtime with a test `config.yml`:
+- **Input rail blocking:** Verify queries that should be blocked (too short, non-English, abusive, exfiltration, role boundary, off-topic) return the expected bot message and do not reach generation
+- **Input rail pass-through:** Verify legitimate RAG queries pass all input rails
+- **Output rail modification:** Verify `$bot_message` is correctly modified by citation, hedge, length, and disclaimer flows
+- **Output rail blocking:** Verify no-results and out-of-scope responses are caught
+- **Dialog flow matching:** Verify greeting, farewell, administrative, feedback, and scope queries are matched by standalone dialog flows (not rail flows)
+
+### 10.3 End-to-End Tests (`tests/guardrails/test_colang_e2e.py`)
+
+Test the full `generate_async()` pipeline:
+- A legitimate RAG query passes all input rails, triggers `rag_retrieve_and_generate`, passes all output rails, returns a response with metadata
+- A jailbreak attempt is caught by the Python input executor (via Colang action bridge) and returns a rejection
+- A query about a sensitive topic returns the answer with disclaimer prepended
+- A query that returns no results gets the no-results handling response
+
+### 10.4 Regression Tests
+
+- Verify existing Python rail behavior is unchanged when invoked through Colang action wrappers vs. direct calls
+- Verify `RAG_NEMO_ENABLED=false` bypasses all Colang flows (no NeMo import)
