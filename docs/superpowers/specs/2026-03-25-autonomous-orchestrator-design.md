@@ -153,7 +153,12 @@ Each stage produces a typed artifact that the next stage consumes:
 
 Overridable per-invocation: `--template bugfix` or `--stages brainstorm,design,code`
 
-**Stage skip rules:** When using `--stages`, the orchestrator validates that required predecessors are present. If `code` is in the list, at least one of `impl` or `design` must also be present (code needs a plan). If validation fails, the orchestrator reports the missing dependency and asks for confirmation.
+**Stage skip rules:** When using `--stages`, the orchestrator validates that required predecessors are present:
+- `code` requires at least one of: `impl`, `design` (code needs a plan)
+- `tests` requires: `eng-guide` (write-module-tests derives tests from the engineering guide, not source files)
+- `spec-summary` requires: `spec` (spec-summary reads and summarizes the spec)
+
+If validation fails, the orchestrator reports the missing dependency and asks for confirmation.
 
 ### Pipeline Evolution Path
 
@@ -279,7 +284,7 @@ provisional_decisions: []
 stages:
   brainstorm:
     status: completed      # pending | in_progress | completed | failed | escalated
-    output: "docs/superpowers/specs/2026-03-25-api-caching-design.md"
+    output: "docs/superpowers/specs/2026-03-25-api-caching-sketch.md"
     verdict: APPROVE
     iterations: 2
     provisional: false
