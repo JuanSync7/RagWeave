@@ -1,5 +1,5 @@
 <!-- @summary
-Retrieval pipeline documentation: query/ranking spec, generation/safety spec, NeMo Guardrails, design docs, implementation guide, engineering guide, and onboarding checklist.
+Retrieval pipeline documentation: query/ranking spec, generation/safety spec, design docs, implementation guide, engineering guide, and onboarding checklist.
 @end-summary -->
 
 # docs/retrieval
@@ -15,15 +15,11 @@ Engineering documentation for the retrieval and query-serving pipeline.
 | `RETRIEVAL_QUERY_SPEC.md` | Query processing and ranking specification |
 | `RETRIEVAL_GENERATION_SPEC.md` | Generation and safety specification |
 | `RETRIEVAL_SPEC_SUMMARY.md` | Concise retrieval spec summary |
-| `RETRIEVAL_DESIGN.md` | Retrieval design document (task decomposition, contracts) |
-| `RETRIEVAL_IMPLEMENTATION.md` | Retrieval implementation guide |
 | `RETRIEVAL_ENGINEERING_GUIDE.md` | Implementation-oriented walkthrough: architecture, flow, decisions, troubleshooting |
 | `RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md` | One-page onboarding checklist for new engineers |
-| `NEMO_GUARDRAILS_SPEC.md` | NeMo Guardrails integration specification |
-| `NEMO_GUARDRAILS_IMPLEMENTATION.md` | NeMo Guardrails implementation guide |
 
 ## Key Starting Points
 
 - **New to the codebase?** Start with `RETRIEVAL_ENGINEERING_GUIDE.md`
 - **Understanding requirements?** Read `RETRIEVAL_QUERY_SPEC.md` + `RETRIEVAL_GENERATION_SPEC.md`
-- **Guardrails setup?** `NEMO_GUARDRAILS_SPEC.md`
+- **Guardrails setup?** See `docs/guardrails/nemo_guardrails/`
