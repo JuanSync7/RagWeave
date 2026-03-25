@@ -1,5 +1,5 @@
 # @summary
-# Shared data contracts for the NeMo Guardrails integration.
+# Shared data contracts for the guardrails subsystem (backend-agnostic).
 # Exports: RailVerdict, RailExecution, InputRailResult, OutputRailResult, GuardrailsMetadata
 # Deps: dataclasses, enum, typing
 # @end-summary

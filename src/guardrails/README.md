@@ -1,12 +1,16 @@
 <!-- @summary
-NeMo Guardrails integration for input/output safety: intent detection, injection detection, PII filtering, toxicity, topic safety, and faithfulness checks. Rails run in parallel with per-rail timeouts and a consensus merge gate.
+Swappable guardrails subsystem for input/output safety: config-driven backend dispatcher,
+GuardrailBackend ABC, NeMo backend, and backend-agnostic ML rails (intent, injection, PII,
+toxicity, topic safety, faithfulness). Rails run in parallel with per-rail timeouts and a
+consensus merge gate. Backend is selected via GUARDRAIL_BACKEND config key.
 @end-summary -->
 
 # src/guardrails
 
 ## Overview
 
-This package implements NeMo Guardrails integration for RAG query safety. Input and output rails run in parallel with per-rail timeouts; a consensus gate (`RailMergeGate`) merges individual verdicts into a single routing decision.
+Swappable guardrails subsystem for RAG query safety. The backend is selected at config level
+via `GUARDRAIL_BACKEND` — swapping backends requires zero changes to retrieval code.
 
 **Input rails** (run on user query before retrieval): intent, injection, PII, toxicity, topic safety.
 **Output rails** (run on generated answer before delivery): faithfulness, PII, toxicity.
@@ -15,63 +19,51 @@ This package implements NeMo Guardrails integration for RAG query safety. Input 
 
 | File | Purpose | Key Exports |
 | --- | --- | --- |
-| `executor.py` | Parallel rail execution orchestration with timeout + consensus merge | `InputRailExecutor`, `OutputRailExecutor`, `RailMergeGate` |
-| `runtime.py` | Singleton NeMo Guardrails runtime lifecycle manager (lazy import) | `GuardrailsRuntime` |
-| `intent.py` | Intent classification rail | `IntentRail` |
-| `injection.py` | Prompt injection detection rail | `InjectionRail` |
-| `pii.py` | PII detection rail (presidio-based, requires `[pii]` extra) | `PIIRail` |
-| `gliner_pii.py` | GLiNER-based PII detection rail (requires `[gliner]` extra) | `GLiNERPIIRail` |
-| `toxicity.py` | Toxicity detection rail | `ToxicityRail` |
-| `topic_safety.py` | Topic safety / off-topic detection rail | `TopicSafetyRail` |
-| `faithfulness.py` | Output faithfulness rail (checks answer grounding in retrieved chunks) | `FaithfulnessRail` |
-| `__init__.py` | Package facade | re-exports |
+| `__init__.py` | Public API + config-driven backend dispatcher | `run_input_rails`, `run_output_rails`, `redact_pii`, `register_rag_chain`, `RailMergeGate` |
+| `backend.py` | `GuardrailBackend` ABC — formal backend contract | `GuardrailBackend` |
 
 ## Subdirectories
 
 | Directory | Purpose |
 | --- | --- |
-| `common/` | Shared typed contracts (verdict enum, execution result, metadata) |
+| `common/` | Shared typed contracts (`RailVerdict`, `InputRailResult`, `OutputRailResult`, `GuardrailsMetadata`, `RailMergeGate`) |
+| `shared/` | Backend-agnostic ML rail modules (PII, injection, toxicity, intent, topic safety, faithfulness) |
+| `nemo_guardrails/` | NeMo Guardrails backend: `NemoBackend`, `GuardrailsRuntime`, `InputRailExecutor`, `OutputRailExecutor` |
 
 ## Configuration
 
-Guardrails are configured via YAML files in `config/guardrails/`. Optional dependencies:
-- `presidio`, `spacy` — required for `pii.py` (install with `uv pip install -e ".[pii]"`)
-- `gliner` — required for `gliner_pii.py` (install with `uv pip install -e ".[gliner]"`)
+Select backend via `GUARDRAIL_BACKEND` environment variable (default: `"nemo"`):
+
+| Value | Behavior |
+| --- | --- |
+| `"nemo"` | NeMo Guardrails backend (default) |
+| `""` or `"none"` | Disabled — all rail calls are no-ops |
+
+Optional ML dependencies:
+- `presidio`, `spacy` — required for PII detection (`shared/pii.py`)
+- `gliner` — required for GLiNER supplementary PII layer (`shared/gliner_pii.py`)
 
 ## Architecture
 
 ```
-User query
-    ↓
-InputRailExecutor (parallel, per-rail timeout)
-    ├─ IntentRail
-    ├─ InjectionRail
-    ├─ PIIRail
-    ├─ ToxicityRail
-    └─ TopicSafetyRail
-    ↓
-RailMergeGate → routing decision (allow / reject / modify)
-    ↓
-[retrieval + generation]
-    ↓
-OutputRailExecutor (parallel)
-    ├─ FaithfulnessRail
-    ├─ PIIRail
-    └─ ToxicityRail
-    ↓
-RailMergeGate → final response
+rag_chain.py
+    │
+    ├─ redact_pii(query)                    # pre-LLM PII gate (synchronous)
+    ├─ run_input_rails(query, tenant_id)    # parallel: intent, injection, PII, toxicity, topic
+    │       └─ GuardrailBackend [dispatched by GUARDRAIL_BACKEND]
+    │               └─ NemoBackend → nemo_guardrails/executor.py → shared/ rails
+    │
+    ├─ RailMergeGate.merge(query_result, rail_result)  # routing: reject / canned / search
+    │
+    └─ run_output_rails(answer, context_chunks)        # parallel: faithfulness, PII, toxicity
+            └─ GuardrailBackend [dispatched by GUARDRAIL_BACKEND]
 ```
 
-## Colang Integration (Dual-Layer Architecture)
+## Adding a New Backend
 
-The guardrails subsystem uses a **dual-layer architecture**:
+1. Create `src/guardrails/<backend_name>/backend.py` with a class that subclasses `GuardrailBackend`
+2. Implement `run_input_rails`, `run_output_rails`, `redact_pii`
+3. Add an `elif GUARDRAIL_BACKEND == "<backend_name>":` branch to `_get_backend()` in `__init__.py`
+4. Set `GUARDRAIL_BACKEND=<backend_name>` — no other changes needed
 
-1. **Colang 2.0 flows** (`config/guardrails/*.co`) — Declarative policy layer for intent routing, dialog management, and lightweight checks (query length, language, exfiltration patterns). These run as NeMo input/output rails.
-
-2. **Python executors** (`src/guardrails/executor.py`) — Compute-heavy layer for parallel rail execution (injection detection, PII redaction, toxicity filtering, faithfulness scoring). These are called by Colang flows via registered NeMo actions.
-
-The Colang flows call into the Python executors through two bridge actions:
-- `run_input_rails` — wraps `InputRailExecutor` + `RailMergeGate`
-- `run_output_rails` — wraps `OutputRailExecutor`
-
-See `docs/guardrails/COLANG_DESIGN_GUIDE.md` for the full architecture and how to extend it.
+See `docs/guardrails/` for full design and engineering docs.

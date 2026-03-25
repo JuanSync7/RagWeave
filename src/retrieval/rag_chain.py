@@ -52,7 +52,15 @@ from config.settings import (
     RAG_STAGE_BUDGET_GENERATION_MS,
 )
 from src.platform.timing import TimingPool
-from config.settings import RAG_NEMO_ENABLED
+from config.settings import GUARDRAIL_BACKEND
+from src.guardrails import (
+    run_input_rails,
+    run_output_rails,
+    register_rag_chain,
+    redact_pii,
+    RailMergeGate,
+)
+from src.guardrails.common.schemas import GuardrailsMetadata
 from config.settings import (
     RAG_CONFIDENCE_ROUTING_ENABLED,
     RAG_CONFIDENCE_HIGH_THRESHOLD,
@@ -143,11 +151,9 @@ class RAGChain:
         self._embedding_cache: OrderedDict = OrderedDict()
         self._embedding_cache_max = 128
 
-        # Initialize NeMo Guardrails (REQ-701: once at startup, not per-query)
-        self._guardrails_input_executor = None
-        self._guardrails_output_executor = None
+        # Initialize guardrail backend (REQ-701: once at startup, not per-query)
         self._guardrails_merge_gate = None
-        if RAG_NEMO_ENABLED:
+        if GUARDRAIL_BACKEND:
             self._init_guardrails()
 
         logger.info("RAG chain ready.")
@@ -163,131 +169,11 @@ class RAGChain:
             logger.info("Weaviate connection closed.")
 
     def _init_guardrails(self) -> None:
-        """Initialize NeMo Guardrails runtime and rail executors."""
-        from config.settings import (
-            RAG_NEMO_CONFIG_DIR,
-            RAG_NEMO_FAITHFULNESS_ACTION,
-            RAG_NEMO_FAITHFULNESS_ENABLED,
-            RAG_NEMO_FAITHFULNESS_SELF_CHECK,
-            RAG_NEMO_FAITHFULNESS_THRESHOLD,
-            RAG_NEMO_INJECTION_ENABLED,
-            RAG_NEMO_INJECTION_LP_THRESHOLD,
-            RAG_NEMO_INJECTION_MODEL_ENABLED,
-            RAG_NEMO_INJECTION_PERPLEXITY_ENABLED,
-            RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
-            RAG_NEMO_INJECTION_SENSITIVITY,
-            RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
-            RAG_NEMO_OUTPUT_PII_ENABLED,
-            RAG_NEMO_OUTPUT_TOXICITY_ENABLED,
-            RAG_NEMO_PII_ENABLED,
-            RAG_NEMO_PII_EXTENDED,
-            RAG_NEMO_PII_SCORE_THRESHOLD,
-            RAG_NEMO_RAIL_TIMEOUT_SECONDS,
-            RAG_NEMO_TOPIC_SAFETY_ENABLED,
-            RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
-            RAG_NEMO_TOXICITY_ENABLED,
-            RAG_NEMO_TOXICITY_THRESHOLD,
-        )
-        from src.guardrails.executor import (
-            InputRailExecutor,
-            OutputRailExecutor,
-            RailMergeGate,
-        )
-        from src.guardrails.faithfulness import FaithfulnessChecker
-        from src.guardrails.injection import InjectionDetector
-        from src.guardrails.intent import IntentClassifier
-        from src.guardrails.pii import PIIDetector
-        from src.guardrails.runtime import GuardrailsRuntime
-        from src.guardrails.topic_safety import TopicSafetyChecker
-        from src.guardrails.toxicity import ToxicityFilter
-
-        logger.info("Initializing NeMo Guardrails...")
-        runtime = GuardrailsRuntime.get()
-        runtime.initialize(RAG_NEMO_CONFIG_DIR)
-
-        # Build input rail components (only if individually enabled)
-        intent_classifier = IntentClassifier(
-            confidence_threshold=RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
-        )  # Intent is always enabled when NeMo is on
-
-        injection_detector = (
-            InjectionDetector(
-                sensitivity=RAG_NEMO_INJECTION_SENSITIVITY,
-                enable_perplexity=RAG_NEMO_INJECTION_PERPLEXITY_ENABLED,
-                enable_model_classifier=RAG_NEMO_INJECTION_MODEL_ENABLED,
-                lp_threshold=RAG_NEMO_INJECTION_LP_THRESHOLD,
-                ps_ppl_threshold=RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
-            )
-            if RAG_NEMO_INJECTION_ENABLED
-            else None
-        )
-        from config.settings import RAG_NEMO_PII_GLINER_ENABLED
-
-        pii_detector = (
-            PIIDetector(
-                extended=RAG_NEMO_PII_EXTENDED,
-                score_threshold=RAG_NEMO_PII_SCORE_THRESHOLD,
-                use_gliner=RAG_NEMO_PII_GLINER_ENABLED,
-            )
-            if RAG_NEMO_PII_ENABLED
-            else None
-        )
-        toxicity_filter = (
-            ToxicityFilter(threshold=RAG_NEMO_TOXICITY_THRESHOLD)
-            if RAG_NEMO_TOXICITY_ENABLED
-            else None
-        )
-        # Shared instances for output rails (same config → reuse to avoid
-        # loading spacy/Presidio models twice)
-        shared_pii = pii_detector  # reuse if output PII uses same config
-        shared_toxicity = toxicity_filter
-        topic_safety_checker = (
-            TopicSafetyChecker(
-                custom_instructions=RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
-            )
-            if RAG_NEMO_TOPIC_SAFETY_ENABLED
-            else None
-        )
-
-        self._guardrails_input_executor = InputRailExecutor(
-            intent_classifier=intent_classifier,
-            injection_detector=injection_detector,
-            pii_detector=pii_detector,
-            toxicity_filter=toxicity_filter,
-            topic_safety_checker=topic_safety_checker,
-            timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
-        )
-
-        # Build output rail components
-        faithfulness_checker = (
-            FaithfulnessChecker(
-                threshold=RAG_NEMO_FAITHFULNESS_THRESHOLD,
-                action=RAG_NEMO_FAITHFULNESS_ACTION,
-                use_self_check=RAG_NEMO_FAITHFULNESS_SELF_CHECK,
-            )
-            if RAG_NEMO_FAITHFULNESS_ENABLED
-            else None
-        )
-        output_pii = shared_pii if RAG_NEMO_OUTPUT_PII_ENABLED else None
-        output_toxicity = shared_toxicity if RAG_NEMO_OUTPUT_TOXICITY_ENABLED else None
-
-        self._guardrails_output_executor = OutputRailExecutor(
-            faithfulness_checker=faithfulness_checker,
-            pii_detector=output_pii,
-            toxicity_filter=output_toxicity,
-            timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
-        )
-
+        """Initialize the guardrail backend and merge gate."""
+        logger.info("Initializing guardrails backend (backend=%r)...", GUARDRAIL_BACKEND)
         self._guardrails_merge_gate = RailMergeGate()
-        logger.info("NeMo Guardrails initialized successfully")
-
-        # Register custom Colang actions with the NeMo runtime
-        try:
-            from config.guardrails.actions import set_rag_chain
-            set_rag_chain(self)
-            logger.info("RAG chain reference set for Colang rag_retrieve_and_generate action")
-        except ImportError:
-            logger.warning("Could not register RAG chain reference — config.guardrails.actions not found")
+        register_rag_chain(self)
+        logger.info("Guardrails backend initialized.")
 
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, wv_filter):
         """Run hybrid search against Weaviate (persistent or transient client)."""
@@ -411,33 +297,31 @@ class RAGChain:
             merge_decision = None
             pii_gated_query = processing_query
 
-            if self._guardrails_input_executor is not None:
+            if GUARDRAIL_BACKEND:
                 from concurrent.futures import ThreadPoolExecutor as _TP, Future as _Fut
 
                 # PII gate: run PII detection synchronously before parallel stage
-                pii_detector = getattr(self._guardrails_input_executor, 'pii_detector', None)
-                if pii_detector is not None:
-                    try:
-                        pii_span = self.tracer.start_span("rag_chain.pii_gate", parent=root_span)
-                        redacted_text, pii_detections = pii_detector.redact(query)
-                        if pii_detections:
-                            # Use redacted query for LLM processing
-                            pii_gated_query = redacted_text
-                            if memory_context:
-                                pii_gated_query = (
-                                    "Conversation context:\n"
-                                    f"{memory_context}\n\n"
-                                    "Current user question:\n"
-                                    f"{redacted_text}"
-                                )
-                            logger.info(
-                                "PII gate: %d detections redacted before LLM processing",
-                                len(pii_detections),
+                try:
+                    pii_span = self.tracer.start_span("rag_chain.pii_gate", parent=root_span)
+                    redacted_text, pii_detections = redact_pii(query)
+                    if pii_detections:
+                        # Use redacted query for LLM processing
+                        pii_gated_query = redacted_text
+                        if memory_context:
+                            pii_gated_query = (
+                                "Conversation context:\n"
+                                f"{memory_context}\n\n"
+                                "Current user question:\n"
+                                f"{redacted_text}"
                             )
-                        pii_span.end(status="ok")
-                    except Exception as e:
-                        logger.warning("PII gate failed: %s — continuing with original query", e)
-                        pii_gated_query = processing_query
+                        logger.info(
+                            "PII gate: %d detections redacted before LLM processing",
+                            len(pii_detections),
+                        )
+                    pii_span.end(status="ok")
+                except Exception as e:
+                    logger.warning("PII gate failed: %s — continuing with original query", e)
+                    pii_gated_query = processing_query
 
                 with _TP(max_workers=2, thread_name_prefix="stage1") as stage1_pool:
                     qp_future: _Fut = stage1_pool.submit(
@@ -448,10 +332,9 @@ class RAGChain:
                         RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
                     )
                     rail_future: _Fut = stage1_pool.submit(
-                        self._guardrails_input_executor.execute,
+                        run_input_rails,
                         query,
                         tenant_id or "",
-                        root_span,
                     )
 
                     query_result = qp_future.result()
@@ -470,8 +353,6 @@ class RAGChain:
 
             # Apply merge gate if input rails ran (REQ-707)
             if input_rail_result is not None and self._guardrails_merge_gate is not None:
-                from src.guardrails.common.schemas import GuardrailsMetadata
-
                 merge_decision = self._guardrails_merge_gate.merge(
                     query_result, input_rail_result
                 )
@@ -810,7 +691,7 @@ class RAGChain:
             # Stage 7: Output rails (REQ-703: parallel with consensus gate)
             if (
                 generated_answer
-                and self._guardrails_output_executor is not None
+                and GUARDRAIL_BACKEND
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
@@ -818,10 +699,9 @@ class RAGChain:
                     "rag_chain.output_rails", parent=root_span
                 )
                 context_chunks = [r.text for r in reranked]
-                output_rail_result = self._guardrails_output_executor.execute(
+                output_rail_result = run_output_rails(
                     answer=generated_answer,
                     context_chunks=context_chunks,
-                    parent_span=root_span,
                 )
                 output_rail_span.end(status="ok")
                 tp.record("output_rails", "guardrails", started_at=t0)
