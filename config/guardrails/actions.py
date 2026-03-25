@@ -134,7 +134,7 @@ async def check_citations(answer: str) -> dict:
 @_fail_open({"answer": ""})
 async def add_citation_reminder(answer: str) -> dict:
     """Append citation reminder to answer."""
-    return {"answer": f"{answer}\n\nNote: Source documents are available in the response metadata."}
+    return {"answer": f"{answer}\n\nNote: Sources are available in the response metadata."}
 
 
 @action()
