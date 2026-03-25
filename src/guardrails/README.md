@@ -61,3 +61,17 @@ OutputRailExecutor (parallel)
     ↓
 RailMergeGate → final response
 ```
+
+## Colang Integration (Dual-Layer Architecture)
+
+The guardrails subsystem uses a **dual-layer architecture**:
+
+1. **Colang 2.0 flows** (`config/guardrails/*.co`) — Declarative policy layer for intent routing, dialog management, and lightweight checks (query length, language, exfiltration patterns). These run as NeMo input/output rails.
+
+2. **Python executors** (`src/guardrails/executor.py`) — Compute-heavy layer for parallel rail execution (injection detection, PII redaction, toxicity filtering, faithfulness scoring). These are called by Colang flows via registered NeMo actions.
+
+The Colang flows call into the Python executors through two bridge actions:
+- `run_input_rails` — wraps `InputRailExecutor` + `RailMergeGate`
+- `run_output_rails` — wraps `OutputRailExecutor`
+
+See `docs/guardrails/COLANG_DESIGN_GUIDE.md` for the full architecture and how to extend it.
