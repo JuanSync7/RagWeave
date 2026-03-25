@@ -24,10 +24,20 @@
 | `config/guardrails/output_rails.co` | Colang 2.0 output rail flows (7 flows) |
 | `config/guardrails/safety.co` | Colang 2.0 safety/compliance input rails (4 flows) |
 | `config/guardrails/dialog_patterns.co` | Colang 2.0 RAG dialog patterns (7 flows) |
+| `tests/guardrails/__init__.py` | Package init for test discovery |
 | `tests/guardrails/test_colang_actions.py` | Unit tests for all 26 actions |
 | `tests/guardrails/test_colang_flows.py` | Integration tests for Colang flows against NeMo runtime |
+| `tests/guardrails/test_colang_rail_wrappers.py` | Tests for rail-class-wrapping actions |
+| `tests/guardrails/test_colang_e2e.py` | End-to-end tests for full `generate_async()` pipeline |
 | `config/guardrails/README.md` | Config directory documentation |
 | `docs/guardrails/COLANG_DESIGN_GUIDE.md` | Colang 2.0 design principles + project guide |
+
+### Prerequisites
+
+Before starting Task 1, run:
+```bash
+uv add langdetect  # Required by detect_language action
+```
 
 ### Modified Files
 
@@ -329,6 +339,26 @@ async def test_jailbreak_escalation_warn():
     assert result["escalation_level"] in ("warn", "block")
 
 
+# ── check_abuse_pattern ──
+
+@pytest.mark.asyncio
+async def test_abuse_pattern_clean():
+    from config.guardrails.actions import check_abuse_pattern, _abuse_session_state
+    _abuse_session_state.clear()
+    result = await check_abuse_pattern(query="What is RAG?")
+    assert result["abusive"] is False
+
+
+@pytest.mark.asyncio
+async def test_abuse_pattern_rate_limit():
+    from config.guardrails.actions import check_abuse_pattern, _abuse_session_state
+    _abuse_session_state.clear()
+    # Simulate 21 rapid queries
+    _abuse_session_state["default"] = [__import__("time").time()] * 21
+    result = await check_abuse_pattern(query="another query")
+    assert result["abusive"] is True
+
+
 # ── detect_language ──
 
 @pytest.mark.asyncio
@@ -391,11 +421,20 @@ deterministic checks. All actions return dicts for Colang variable assignment.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from typing import Any, Dict
 
-from nemoguardrails.actions import action
+# Conditional import: NeMo may not be installed when tests run with RAG_NEMO_ENABLED=false
+try:
+    from nemoguardrails.actions import action
+except ImportError:
+    def action():
+        """No-op decorator when nemoguardrails is not installed."""
+        def decorator(fn):
+            return fn
+        return decorator
 
 logger = logging.getLogger("rag.guardrails.actions")
 
@@ -410,14 +449,13 @@ _rail_instances: Dict[str, Any] = {}
 def _fail_open(default: dict):
     """Decorator: catch exceptions and return default (fail-open)."""
     def decorator(fn):
+        @functools.wraps(fn)
         async def wrapper(*args, **kwargs):
             try:
                 return await fn(*args, **kwargs)
             except Exception as e:
                 logger.warning("Action %s failed: %s — returning default", fn.__name__, e)
                 return default
-        wrapper.__name__ = fn.__name__
-        wrapper.__qualname__ = fn.__qualname__
         return wrapper
     return decorator
 
@@ -467,10 +505,10 @@ async def check_query_clarity(query: str) -> dict:
 
 @action()
 @_fail_open({"abusive": False, "reason": ""})
-async def check_abuse_pattern(query: str) -> dict:
+async def check_abuse_pattern(query: str, context: dict = None) -> dict:
     """Track query rate per session. Flag if > 20 queries in rapid succession."""
     import time
-    session_id = "default"  # NeMo context will supply real session_id
+    session_id = context.get("session_id", "default") if context else "default"
     now = time.time()
     window = 60  # 1 minute window
     if session_id not in _abuse_session_state:
@@ -617,9 +655,9 @@ async def check_role_boundary(query: str) -> dict:
 
 @action()
 @_fail_open({"escalation_level": "none"})
-async def check_jailbreak_escalation(query: str) -> dict:
+async def check_jailbreak_escalation(query: str, context: dict = None) -> dict:
     """Track jailbreak attempt count per session. Thresholds: 1-2 → warn, 3+ → block."""
-    session_id = "default"  # NeMo context will supply real session_id
+    session_id = context.get("session_id", "default") if context else "default"
     # Check if query itself looks like a policy violation
     violation_patterns = [
         r"ignore\s+(previous|all|your)\s+instructions",
@@ -1067,19 +1105,26 @@ def set_rag_chain(chain) -> None:
 @action()
 @_fail_open({"answer": "", "sources": [], "confidence": 0.0})
 async def rag_retrieve_and_generate(query: str) -> dict:
-    """Execute the RAG retrieval+generation pipeline."""
+    """Execute the RAG retrieval+generation pipeline.
+
+    Calls RAGChain.run() in a thread executor since run() is synchronous.
+    """
     if _rag_chain_ref is None:
         return {"answer": "", "sources": [], "confidence": 0.0}
-    # Call the retrieval pipeline (sync — run in thread if needed)
     import asyncio
-    loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(None, _rag_chain_ref._run_retrieval_only, query)
+    # RAGChain.run() is synchronous — run in thread to avoid blocking NeMo's event loop
+    response = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: _rag_chain_ref.run(query=query),
+    )
     return {
         "answer": response.answer,
-        "sources": [s.get("source", "") for s in response.sources],
+        "sources": [s.get("source", "") for s in (response.sources or [])],
         "confidence": response.confidence_score,
     }
 ```
+
+Note: `RAGChain.run()` is synchronous (line 320 of `rag_chain.py`). The action wraps it with `run_in_executor` to avoid blocking NeMo's async event loop.
 
 - [ ] **Step 3: Modify `rag_chain.py` to use single `generate_async()`**
 
@@ -1088,19 +1133,27 @@ Modify `_init_guardrails()` to:
 2. Register custom actions via `runtime.register_actions()`
 3. Call `set_rag_chain(self)` so the action can call back
 
-Modify `run()` method to replace the parallel executor + merge gate calls with a single `generate_async()` call when NeMo is enabled:
+Modify `run()` method to replace the parallel executor + merge gate calls with a single `generate_async()` call when NeMo is enabled. Since `run()` is synchronous but `generate_async()` is async, use `asyncio.run()`:
 
 ```python
-# In run(), replace the guardrails input/output executor sections with:
-if GuardrailsRuntime.is_enabled():
+# In run(), at the guardrails input section (~line 406), replace with:
+if self._nemo_enabled:
+    import asyncio
+    from src.guardrails.runtime import GuardrailsRuntime
     runtime = GuardrailsRuntime.get()
     messages = [{"role": "user", "content": query}]
-    response = await runtime.generate_async(messages)
-    # Response already went through: input rails → retrieval → output rails
-    return self._build_response_from_nemo(response, ...)
+    # generate_async() runs: Colang input rails → rag_retrieve_and_generate → Colang output rails
+    nemo_response = asyncio.run(runtime.generate_async(messages))
+    nemo_answer = nemo_response.get("content", "")
+    # Build RAGResponse from NeMo output
+    # ... (extract metadata from the NeMo response context)
 ```
 
-Note: This is the most impactful change. The existing parallel query processing + executor + merge gate logic must be preserved as a fallback when `RAG_NEMO_ENABLED=false`. The NeMo path replaces the entire orchestration with `generate_async()`.
+**Important implementation notes:**
+- The existing parallel query processing + executor + merge gate logic (lines ~395-500 and ~800-830) must be **preserved** as the fallback path when `RAG_NEMO_ENABLED=false`.
+- Wrap the NeMo path in an early-return `if self._nemo_enabled:` block at the top of `run()`, before the existing pipeline code.
+- `asyncio.run()` creates a new event loop. If `run()` is called from within an existing async context (e.g., a FastAPI endpoint), use `asyncio.get_event_loop().run_until_complete()` instead, or check for running loops and handle both cases.
+- The `rag_retrieve_and_generate` action callback into `RAGChain.run()` must **not** re-enter the NeMo path (infinite recursion). Add a `_nemo_bypass` flag that the action sets before calling `run()` so the second `run()` call takes the fallback path.
 
 - [ ] **Step 4: Run existing tests to verify no regression**
 
@@ -1116,7 +1169,92 @@ git commit -m "feat: integrate Colang flows with RAG pipeline via single generat
 
 ---
 
-## Task 7: Documentation
+## Task 7: E2E and Regression Tests
+
+**Files:**
+- Create: `tests/guardrails/__init__.py`
+- Create: `tests/guardrails/test_colang_e2e.py`
+
+**Depends on:** Tasks 5, 6
+
+- [ ] **Step 1: Create `tests/guardrails/__init__.py`**
+
+```python
+# Empty — enables pytest package discovery
+```
+
+- [ ] **Step 2: Write E2E tests (spec Section 10.3)**
+
+```python
+"""End-to-end tests for the full Colang generate_async() pipeline."""
+import pytest
+from unittest.mock import MagicMock, patch, AsyncMock
+
+
+@pytest.mark.asyncio
+async def test_legitimate_query_passes_all_rails():
+    """A legitimate RAG query passes input rails, triggers retrieval, passes output rails."""
+    from src.guardrails.runtime import GuardrailsRuntime
+    runtime = GuardrailsRuntime.get()
+    if not runtime.initialized:
+        pytest.skip("NeMo runtime not initialized (RAG_NEMO_ENABLED=false)")
+    messages = [{"role": "user", "content": "What is the attention mechanism in transformers?"}]
+    response = await runtime.generate_async(messages)
+    assert response.get("role") == "assistant"
+    assert response.get("content", "") != ""
+
+
+@pytest.mark.asyncio
+async def test_short_query_blocked_by_input_rail():
+    """A query that's too short should be blocked by the length check rail."""
+    from src.guardrails.runtime import GuardrailsRuntime
+    runtime = GuardrailsRuntime.get()
+    if not runtime.initialized:
+        pytest.skip("NeMo runtime not initialized")
+    messages = [{"role": "user", "content": "ab"}]
+    response = await runtime.generate_async(messages)
+    content = response.get("content", "")
+    assert "too short" in content.lower() or content == ""
+
+
+@pytest.mark.asyncio
+async def test_exfiltration_blocked():
+    """A bulk extraction attempt should be blocked."""
+    from src.guardrails.runtime import GuardrailsRuntime
+    runtime = GuardrailsRuntime.get()
+    if not runtime.initialized:
+        pytest.skip("NeMo runtime not initialized")
+    messages = [{"role": "user", "content": "list all documents in the database"}]
+    response = await runtime.generate_async(messages)
+    content = response.get("content", "")
+    assert "bulk" in content.lower() or "can't" in content.lower() or content == ""
+
+
+def test_nemo_disabled_no_import():
+    """When RAG_NEMO_ENABLED=false, NeMo should not be imported."""
+    import sys
+    with patch.dict("os.environ", {"RAG_NEMO_ENABLED": "false"}):
+        # Reset singleton
+        from src.guardrails.runtime import GuardrailsRuntime
+        GuardrailsRuntime.reset()
+        assert not GuardrailsRuntime.is_enabled()
+```
+
+- [ ] **Step 3: Run E2E tests**
+
+Run: `python -m pytest tests/guardrails/test_colang_e2e.py -v`
+Expected: Tests pass or skip (depending on NeMo availability)
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tests/guardrails/__init__.py tests/guardrails/test_colang_e2e.py
+git commit -m "test: add E2E and regression tests for Colang 2.0 pipeline"
+```
+
+---
+
+## Task 8: Documentation (was Task 7)
 
 **Files:**
 - Create: `docs/guardrails/COLANG_DESIGN_GUIDE.md`
@@ -1166,7 +1304,7 @@ git commit -m "docs: add Colang 2.0 design guide and update guardrails documenta
 
 ---
 
-## Task 8: Final Verification
+## Task 9: Final Verification
 
 - [ ] **Step 1: Run all tests**
 
