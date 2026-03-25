@@ -323,6 +323,132 @@ async def get_knowledge_base_summary() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 2.1 — Lazy-init helpers for executor singletons
+# ═══════════════════════════════════════════════════════════════════════
+
+def _get_input_executor():
+    """Lazy-initialize InputRailExecutor with config from env vars."""
+    if "input_executor" not in _rail_instances:
+        from config.settings import (
+            RAG_NEMO_INJECTION_ENABLED,
+            RAG_NEMO_INJECTION_SENSITIVITY,
+            RAG_NEMO_INJECTION_PERPLEXITY_ENABLED,
+            RAG_NEMO_INJECTION_MODEL_ENABLED,
+            RAG_NEMO_INJECTION_LP_THRESHOLD,
+            RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
+            RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
+            RAG_NEMO_PII_ENABLED,
+            RAG_NEMO_PII_EXTENDED,
+            RAG_NEMO_PII_SCORE_THRESHOLD,
+            RAG_NEMO_TOXICITY_ENABLED,
+            RAG_NEMO_TOXICITY_THRESHOLD,
+            RAG_NEMO_TOPIC_SAFETY_ENABLED,
+            RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
+            RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+        )
+        from src.guardrails.executor import InputRailExecutor
+        from src.guardrails.intent import IntentClassifier
+        from src.guardrails.injection import InjectionDetector
+        from src.guardrails.pii import PIIDetector
+        from src.guardrails.toxicity import ToxicityFilter
+        from src.guardrails.topic_safety import TopicSafetyChecker
+
+        intent_classifier = IntentClassifier(
+            confidence_threshold=RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
+        )
+        injection_detector = (
+            InjectionDetector(
+                sensitivity=RAG_NEMO_INJECTION_SENSITIVITY,
+                enable_perplexity=RAG_NEMO_INJECTION_PERPLEXITY_ENABLED,
+                enable_model_classifier=RAG_NEMO_INJECTION_MODEL_ENABLED,
+                lp_threshold=RAG_NEMO_INJECTION_LP_THRESHOLD,
+                ps_ppl_threshold=RAG_NEMO_INJECTION_PS_PPL_THRESHOLD,
+            )
+            if RAG_NEMO_INJECTION_ENABLED
+            else None
+        )
+        from config.settings import RAG_NEMO_PII_GLINER_ENABLED
+        pii_detector = (
+            PIIDetector(
+                extended=RAG_NEMO_PII_EXTENDED,
+                score_threshold=RAG_NEMO_PII_SCORE_THRESHOLD,
+                use_gliner=RAG_NEMO_PII_GLINER_ENABLED,
+            )
+            if RAG_NEMO_PII_ENABLED
+            else None
+        )
+        toxicity_filter = (
+            ToxicityFilter(threshold=RAG_NEMO_TOXICITY_THRESHOLD)
+            if RAG_NEMO_TOXICITY_ENABLED
+            else None
+        )
+        topic_safety_checker = (
+            TopicSafetyChecker(
+                custom_instructions=RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
+            )
+            if RAG_NEMO_TOPIC_SAFETY_ENABLED
+            else None
+        )
+
+        _rail_instances["input_executor"] = InputRailExecutor(
+            intent_classifier=intent_classifier,
+            injection_detector=injection_detector,
+            pii_detector=pii_detector,
+            toxicity_filter=toxicity_filter,
+            topic_safety_checker=topic_safety_checker,
+            timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+        )
+        _rail_instances["merge_gate"] = __import__(
+            "src.guardrails.executor", fromlist=["RailMergeGate"]
+        ).RailMergeGate()
+        # Store shared instances for output executor
+        _rail_instances["_pii"] = pii_detector
+        _rail_instances["_toxicity"] = toxicity_filter
+
+    return _rail_instances["input_executor"]
+
+
+def _get_output_executor():
+    """Lazy-initialize OutputRailExecutor with config from env vars."""
+    if "output_executor" not in _rail_instances:
+        from config.settings import (
+            RAG_NEMO_FAITHFULNESS_ENABLED,
+            RAG_NEMO_FAITHFULNESS_THRESHOLD,
+            RAG_NEMO_FAITHFULNESS_ACTION,
+            RAG_NEMO_FAITHFULNESS_SELF_CHECK,
+            RAG_NEMO_OUTPUT_PII_ENABLED,
+            RAG_NEMO_OUTPUT_TOXICITY_ENABLED,
+            RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+        )
+        from src.guardrails.executor import OutputRailExecutor
+        from src.guardrails.faithfulness import FaithfulnessChecker
+
+        # Ensure input executor is initialized first (for shared instances)
+        _get_input_executor()
+
+        faithfulness_checker = (
+            FaithfulnessChecker(
+                threshold=RAG_NEMO_FAITHFULNESS_THRESHOLD,
+                action=RAG_NEMO_FAITHFULNESS_ACTION,
+                use_self_check=RAG_NEMO_FAITHFULNESS_SELF_CHECK,
+            )
+            if RAG_NEMO_FAITHFULNESS_ENABLED
+            else None
+        )
+        output_pii = _rail_instances.get("_pii") if RAG_NEMO_OUTPUT_PII_ENABLED else None
+        output_toxicity = _rail_instances.get("_toxicity") if RAG_NEMO_OUTPUT_TOXICITY_ENABLED else None
+
+        _rail_instances["output_executor"] = OutputRailExecutor(
+            faithfulness_checker=faithfulness_checker,
+            pii_detector=output_pii,
+            toxicity_filter=output_toxicity,
+            timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
+        )
+
+    return _rail_instances["output_executor"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 2.1 — Actions wrapping existing rail classes (stubs — Task 5 fills in)
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -362,17 +488,94 @@ async def check_faithfulness(answer: str, context_chunks: list = None) -> dict:
 
 
 @action()
-@_fail_open({"action": "pass", "intent": "rag_search", "redacted_query": "", "metadata": {}})
+@_fail_open({"action": "pass", "intent": "rag_search", "redacted_query": "", "reject_message": "", "metadata": {}})
 async def run_input_rails(query: str) -> dict:
-    """Wraps InputRailExecutor. Stub — filled in Task 5."""
-    return {"action": "pass", "intent": "rag_search", "redacted_query": query, "metadata": {}}
+    """Run all Python input rails via InputRailExecutor + RailMergeGate.
+
+    Returns dict with: action ('pass'|'reject'|'modify'), intent, redacted_query,
+    reject_message (if rejected), metadata.
+    """
+    import asyncio
+    executor = _get_input_executor()
+    merge_gate = _rail_instances.get("merge_gate")
+
+    # InputRailExecutor.execute() is synchronous — run in thread
+    loop = asyncio.get_event_loop()
+    rail_result = await loop.run_in_executor(None, executor.execute, query)
+
+    # Build a minimal query_result-like object for the merge gate
+    class _QueryResult:
+        def __init__(self, q):
+            self.processed_query = q
+
+    if merge_gate is not None:
+        merge_decision = merge_gate.merge(_QueryResult(query), rail_result)
+        action_str = merge_decision.get("action", "search")
+        if action_str in ("reject", "canned"):
+            return {
+                "action": "reject",
+                "intent": rail_result.intent or "unknown",
+                "redacted_query": query,
+                "reject_message": merge_decision.get("message", "Your query could not be processed."),
+                "metadata": {},
+            }
+        return {
+            "action": "modify" if rail_result.redacted_query else "pass",
+            "intent": rail_result.intent or "rag_search",
+            "redacted_query": merge_decision.get("query", query),
+            "reject_message": "",
+            "metadata": {},
+        }
+
+    # No merge gate — just pass through
+    return {
+        "action": "pass",
+        "intent": rail_result.intent or "rag_search",
+        "redacted_query": rail_result.redacted_query or query,
+        "reject_message": "",
+        "metadata": {},
+    }
 
 
 @action()
-@_fail_open({"action": "pass", "redacted_answer": "", "metadata": {}})
+@_fail_open({"action": "pass", "redacted_answer": "", "reject_message": "", "metadata": {}})
 async def run_output_rails(answer: str) -> dict:
-    """Wraps OutputRailExecutor. Stub — filled in Task 5."""
-    return {"action": "pass", "redacted_answer": answer, "metadata": {}}
+    """Run all Python output rails via OutputRailExecutor.
+
+    Returns dict with: action ('pass'|'reject'|'modify'), redacted_answer,
+    reject_message (if rejected), metadata.
+    """
+    import asyncio
+    executor = _get_output_executor()
+
+    # OutputRailExecutor.execute() is synchronous — run in thread
+    # Note: context_chunks would ideally come from NeMo context, but for now pass empty
+    loop = asyncio.get_event_loop()
+    rail_result = await loop.run_in_executor(None, executor.execute, answer, [])
+
+    if rail_result.final_answer != answer:
+        # Check if it was a rejection (faithfulness fail → fallback message)
+        from src.guardrails.common.schemas import RailVerdict
+        if rail_result.faithfulness_verdict == RailVerdict.REJECT:
+            return {
+                "action": "reject",
+                "redacted_answer": "",
+                "reject_message": rail_result.final_answer,
+                "metadata": {},
+            }
+        return {
+            "action": "modify",
+            "redacted_answer": rail_result.final_answer,
+            "reject_message": "",
+            "metadata": {},
+        }
+
+    return {
+        "action": "pass",
+        "redacted_answer": answer,
+        "reject_message": "",
+        "metadata": {},
+    }
 
 
 @action()
