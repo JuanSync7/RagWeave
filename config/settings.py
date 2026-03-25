@@ -394,6 +394,12 @@ RAG_INGESTION_PERSIST_REFACTOR_MIRROR = os.environ.get(
 ).lower() in ("true", "1", "yes")
 RAG_INGESTION_MIRROR_DIR = PROCESSED_DIR / "refactor_mirror"
 
+# --- Guardrails ---
+# GUARDRAIL_BACKEND selects the active guardrail implementation.
+# Valid values: "nemo" (default), "" or "none" (disabled).
+# RAG_NEMO_ENABLED is deprecated — use GUARDRAIL_BACKEND instead.
+GUARDRAIL_BACKEND: str = os.environ.get("GUARDRAIL_BACKEND", "nemo" if os.environ.get("RAG_NEMO_ENABLED", "false").lower() in ("true", "1", "yes") else "")
+
 # --- NeMo Guardrails ---
 RAG_NEMO_ENABLED = os.environ.get(
     "RAG_NEMO_ENABLED", "false"
