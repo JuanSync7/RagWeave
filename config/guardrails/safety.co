@@ -1,0 +1,28 @@
+# Safety and compliance flows — input rails for security enforcement
+# These complement the Python InjectionDetector (4-layer defense).
+
+flow input rails check sensitive topic
+  $result = await check_sensitive_topic(query=$user_message)
+  if $result.sensitive == True
+    $sensitive_disclaimer = $result.disclaimer
+
+flow input rails check exfiltration
+  $result = await check_exfiltration(query=$user_message)
+  if $result.attempt == True
+    await bot say "I can't fulfill bulk data extraction requests. Please ask specific questions about particular topics."
+    abort
+
+flow input rails check role boundary
+  $result = await check_role_boundary(query=$user_message)
+  if $result.violation == True
+    await bot say "I'm a knowledge base search assistant. I can't adopt other roles or ignore my guidelines."
+    abort
+
+flow input rails check jailbreak escalation
+  $result = await check_jailbreak_escalation(query=$user_message)
+  if $result.escalation_level == "warn"
+    await bot say "This query has been flagged as a potential policy violation. Please ask a legitimate question."
+    abort
+  else if $result.escalation_level == "block"
+    await bot say "Multiple policy violations detected. Further attempts may result in session restrictions."
+    abort

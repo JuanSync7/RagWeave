@@ -1,0 +1,51 @@
+# Conversation management flows — multi-turn RAG dialog
+# Standalone dialog flows (not rails) are auto-discovered by NeMo.
+# Only `input rails check off topic` is registered as a rail.
+
+flow user said greeting
+  user said "hello" or user said "hi there" or user said "hey"
+    or user said "good morning" or user said "greetings"
+
+flow user said farewell
+  user said "goodbye" or user said "bye" or user said "see you later"
+    or user said "thanks, bye" or user said "that's all"
+
+flow handle greeting
+  user said greeting
+  await bot say "Hello! I'm here to help you search the knowledge base. What would you like to know?"
+
+flow handle farewell
+  user said farewell
+  await bot say "Goodbye! Feel free to return if you have more questions."
+
+flow user said administrative
+  user said "help" or user said "what can you do"
+    or user said "how do I use this" or user said "what are your capabilities"
+
+flow handle administrative
+  user said administrative
+  await bot say "I can search the knowledge base to answer your questions. Just type your question in natural language and I'll find relevant information from the available documents."
+
+flow user said follow up
+  user said "tell me more" or user said "can you elaborate"
+    or user said "what else" or user said "go on"
+    or user said "more details" or user said "explain further"
+
+flow handle follow up
+  user said follow up
+  $result = await handle_follow_up(query=$user_message)
+  if $result.has_context == True
+    $user_message = $result.augmented_query
+  else
+    await bot say "Could you clarify what you'd like to know more about? Please restate your question."
+    abort
+
+flow user said off topic
+  user said "what's the weather" or user said "tell me a joke"
+    or user said "who won the game" or user said "play some music"
+    or user said "what's the stock price"
+
+flow input rails check off topic
+  user said off topic
+  await bot say "I'm designed to help you find information in the knowledge base. I can't help with that topic, but feel free to ask me a question about the documents I have access to."
+  abort

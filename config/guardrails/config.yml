@@ -1,5 +1,7 @@
 # NeMo Guardrails Configuration — AION RAG Pipeline
-# See docs/retrieval/NEMO_GUARDRAILS_SPEC.md for full requirements.
+# See docs/superpowers/specs/2026-03-24-colang-guardrails-design.md for spec.
+
+colang_version: "2.x"
 
 models:
   - type: main
@@ -12,37 +14,43 @@ models:
 rails:
   input:
     flows:
-      - check intent
-      - check jailbreak
-      - jailbreak detection heuristics
+      # Query validation (Colang policy)
+      - input rails check query length
+      - input rails check language
+      - input rails check query clarity
+      - input rails check abuse
+      # Safety (Colang policy)
+      - input rails check exfiltration
+      - input rails check role boundary
+      - input rails check jailbreak escalation
+      - input rails check sensitive topic
+      # Conversation (Colang policy)
+      - input rails check off topic
+      # Dialog (Colang policy)
+      - input rails check ambiguity
+      # Python executor (heavy compute — MUST be last)
+      - input rails run python executor
   output:
     flows:
-      - check faithfulness
-      - self check facts
-      - self check output
+      # Python executor (heavy compute — MUST be first)
+      - output rails run python executor
+      # Sensitive topic disclaimer (reads $sensitive_disclaimer context var)
+      - output rails prepend disclaimer
+      # Response quality (Colang policy)
+      - output rails check no results
+      - output rails check confidence
+      - output rails check citations
+      - output rails check length
+      - output rails check scope
 
   config:
-    # Jailbreak detection thresholds (perplexity-based)
     jailbreak_detection:
       length_per_perplexity_threshold: 89.79
       prefix_suffix_perplexity_threshold: 1845.65
-
-    # Sensitive data detection (Presidio-backed)
     sensitive_data_detection:
       input:
-        entities:
-          - EMAIL_ADDRESS
-          - PHONE_NUMBER
-          - US_SSN
-          - CREDIT_CARD
-          - PERSON
+        entities: [EMAIL_ADDRESS, PHONE_NUMBER, US_SSN, CREDIT_CARD, PERSON]
         score_threshold: 0.4
       output:
-        entities:
-          - EMAIL_ADDRESS
-          - PHONE_NUMBER
-          - US_SSN
-          - CREDIT_CARD
-          - PERSON
+        entities: [EMAIL_ADDRESS, PHONE_NUMBER, US_SSN, CREDIT_CARD, PERSON]
         score_threshold: 0.4
-      recognizers: []

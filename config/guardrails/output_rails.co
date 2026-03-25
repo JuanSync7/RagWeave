@@ -1,0 +1,52 @@
+# Output rail flows — response quality enforcement after generation
+# Run in registered order. Python executor runs first (heavy compute).
+
+flow output rails run python executor
+  $result = await run_output_rails(answer=$bot_message)
+  if $result.action == "reject"
+    await bot say $result.reject_message
+    abort
+  else if $result.action == "modify"
+    $bot_message = $result.redacted_answer
+
+flow output rails prepend disclaimer
+  if $sensitive_disclaimer
+    $result = await prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
+    $bot_message = $result.answer
+
+flow output rails check no results
+  $result = await check_retrieval_results(answer=$bot_message)
+  if $result.has_results == False
+    await bot say "I couldn't find relevant documents to answer your question. Try rephrasing with different keywords, or ask about a different aspect of the topic."
+    abort
+  else if $result.avg_confidence < 0.3
+    $mod = await prepend_low_confidence_note(answer=$bot_message)
+    $bot_message = $mod.answer
+    $low_confidence_noted = True
+
+flow output rails check citations
+  $result = await check_citations(answer=$bot_message)
+  if $result.has_citations == False
+    $mod = await add_citation_reminder(answer=$bot_message)
+    $bot_message = $mod.answer
+
+flow output rails check confidence
+  $result = await check_response_confidence(answer=$bot_message)
+  if $result.confidence == "none"
+    await bot say "I couldn't find relevant information in the knowledge base to answer that question."
+    abort
+  else if $result.confidence == "low" and not $low_confidence_noted
+    $mod = await prepend_hedge(answer=$bot_message)
+    $bot_message = $mod.answer
+
+flow output rails check length
+  $result = await check_answer_length(answer=$bot_message)
+  if $result.valid == False
+    $mod = await adjust_answer_length(answer=$bot_message, reason=$result.reason)
+    $bot_message = $mod.answer
+
+flow output rails check scope
+  $result = await check_source_scope(answer=$bot_message)
+  if $result.in_scope == False
+    await bot say "I can only provide answers based on the documents in the knowledge base. Your question may be outside the scope of available information."
+    abort

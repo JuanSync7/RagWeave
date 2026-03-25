@@ -1,0 +1,35 @@
+# Input rail flows — query validation before retrieval
+# These run in the order registered in config.yml.
+# `abort` stops the pipeline and returns the bot message.
+
+flow input rails check query length
+  $result = await check_query_length(query=$user_message)
+  if $result.valid == False
+    await bot say $result.reason
+    abort
+
+flow input rails check language
+  $result = await detect_language(query=$user_message)
+  if $result.supported == False
+    await bot say "I can only process queries in English. Please rephrase your question."
+    abort
+
+flow input rails check query clarity
+  $result = await check_query_clarity(query=$user_message)
+  if $result.clear == False
+    await bot say $result.suggestion
+    abort
+
+flow input rails check abuse
+  $result = await check_abuse_pattern(query=$user_message)
+  if $result.abusive == True
+    await bot say "Your query pattern has been flagged. Please ask specific questions one at a time."
+    abort
+
+flow input rails run python executor
+  $result = await run_input_rails(query=$user_message)
+  if $result.action == "reject"
+    await bot say $result.reject_message
+    abort
+  else if $result.action == "modify"
+    $user_message = $result.redacted_query

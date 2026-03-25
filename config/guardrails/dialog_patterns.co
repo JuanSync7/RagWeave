@@ -1,0 +1,34 @@
+# RAG-specific dialog patterns — disambiguation, scope, feedback
+# `input rails check ambiguity` is registered as a rail.
+# Scope and feedback flows are standalone dialog flows.
+
+flow input rails check ambiguity
+  $result = await check_query_ambiguity(query=$user_message)
+  if $result.ambiguous == True
+    await bot say $result.disambiguation_prompt
+    abort
+
+flow user asked about scope
+  user said "what documents do you have" or user said "what can I ask about"
+    or user said "what topics do you cover" or user said "what's in the knowledge base"
+
+flow handle scope question
+  user asked about scope
+  $result = await get_knowledge_base_summary()
+  await bot say $result.summary
+
+flow user gave positive feedback
+  user said "thanks" or user said "that's helpful" or user said "great answer"
+    or user said "perfect" or user said "exactly what I needed"
+
+flow user gave negative feedback
+  user said "that's wrong" or user said "not what I asked"
+    or user said "that doesn't help" or user said "incorrect"
+
+flow handle positive feedback
+  user gave positive feedback
+  await bot say "Glad that was helpful! Feel free to ask another question."
+
+flow handle negative feedback
+  user gave negative feedback
+  await bot say "I'm sorry that wasn't helpful. Could you rephrase your question or provide more context so I can search more effectively?"
