@@ -281,6 +281,14 @@ class RAGChain:
         self._guardrails_merge_gate = RailMergeGate()
         logger.info("NeMo Guardrails initialized successfully")
 
+        # Register custom Colang actions with the NeMo runtime
+        try:
+            from config.guardrails.actions import set_rag_chain
+            set_rag_chain(self)
+            logger.info("RAG chain reference set for Colang rag_retrieve_and_generate action")
+        except ImportError:
+            logger.warning("Could not register RAG chain reference — config.guardrails.actions not found")
+
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, wv_filter):
         """Run hybrid search against Weaviate (persistent or transient client)."""
         if self._weaviate_client is not None:

@@ -136,6 +136,22 @@ class GuardrailsRuntime:
             type(self)._auto_disabled = True
             return {"role": "assistant", "content": ""}
 
+    def register_actions(self, actions: dict[str, callable]) -> None:
+        """Register custom Python actions with the NeMo runtime.
+
+        Actions registered here are available to Colang flows via
+        ``await action_name(...)`` syntax.
+
+        Args:
+            actions: Dict mapping action names to async callables.
+        """
+        if self._rails is None:
+            logger.warning("Cannot register actions — runtime not initialized")
+            return
+        for name, fn in actions.items():
+            self._rails.register_action(fn, name=name)
+            logger.info("Registered custom action: %s", name)
+
     def shutdown(self) -> None:
         """Release runtime resources and mark the runtime uninitialized."""
         self._rails = None

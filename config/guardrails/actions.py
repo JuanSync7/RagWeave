@@ -578,8 +578,47 @@ async def run_output_rails(answer: str) -> dict:
     }
 
 
+# ── RAG chain reference (set by rag_chain.py during init) ──
+_rag_chain_ref = None
+
+
+def set_rag_chain(chain) -> None:
+    """Called by rag_chain.py during _init_guardrails to provide the chain reference.
+
+    This enables the rag_retrieve_and_generate action to call back into
+    the RAG pipeline for retrieval + generation.
+    """
+    global _rag_chain_ref
+    _rag_chain_ref = chain
+
+
 @action()
 @_fail_open({"answer": "", "sources": [], "confidence": 0.0})
 async def rag_retrieve_and_generate(query: str) -> dict:
-    """Wraps RAG retrieval pipeline. Stub — filled in Task 6."""
-    return {"answer": "", "sources": [], "confidence": 0.0}
+    """Execute the RAG retrieval+generation pipeline.
+
+    Calls RAGChain.run() in a thread executor since run() is synchronous.
+    The _nemo_bypass flag prevents infinite recursion (run() would otherwise
+    re-enter the NeMo path).
+    """
+    if _rag_chain_ref is None:
+        logger.warning("rag_retrieve_and_generate called but no RAG chain reference set")
+        return {"answer": "", "sources": [], "confidence": 0.0}
+
+    import asyncio
+
+    # RAGChain.run() is synchronous — run in thread to avoid blocking NeMo's event loop
+    loop = asyncio.get_event_loop()
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda: _rag_chain_ref.run(query=query),
+        )
+        return {
+            "answer": response.answer or "",
+            "sources": [s.get("source", "") for s in (response.sources or [])],
+            "confidence": response.confidence_score if hasattr(response, "confidence_score") else 0.0,
+        }
+    except Exception as e:
+        logger.warning("rag_retrieve_and_generate failed: %s", e)
+        return {"answer": "", "sources": [], "confidence": 0.0}
