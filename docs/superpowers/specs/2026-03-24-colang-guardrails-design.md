@@ -64,11 +64,11 @@ config/guardrails/
 | File | Purpose | Rail flows | Dialog flows |
 |------|---------|------------|--------------|
 | `input_rails.co` | Query validation + Python executor bridge | 5 | 0 |
-| `conversation.co` | Multi-turn: greetings, farewells, follow-ups, off-topic, topic drift | 1 | 8 |
-| `output_rails.co` | Response quality + Python executor bridge + no-results + disclaimer | 8 | 0 |
+| `conversation.co` | Multi-turn: greetings, farewells, follow-ups, off-topic, topic drift | 1 (`check off topic`) | 9 (intent matchers + handlers + `check topic drift`) |
+| `output_rails.co` | Response quality + Python executor bridge + no-results + disclaimer | 7 | 0 |
 | `safety.co` | Compliance: exfiltration, role boundary, jailbreak escalation, sensitive topic | 4 | 0 |
-| `dialog_patterns.co` | RAG dialog: disambiguation, scope explanation, feedback | 1 | 6 |
-| `actions.py` | Registered Python action wrappers | — | 25 actions |
+| `dialog_patterns.co` | RAG dialog: disambiguation, scope explanation, feedback | 1 (`check ambiguity`) | 6 (intent matchers + handlers) |
+| `actions.py` | Registered Python action wrappers | — | 26 actions |
 
 **Rail flows** follow the `input rails *` / `output rails *` naming convention and are registered in `config.yml`.
 **Dialog flows** are standalone flows auto-discovered by NeMo from `.co` files — they match by intent before the rail pipeline.
@@ -392,13 +392,13 @@ flow input rails check off topic
   abort
 ```
 
-**Design note:** Greeting, farewell, and administrative are standalone dialog flows (matched by intent before the rail pipeline). Off-topic and topic drift are input rails (they need to block retrieval).
+**Design note:** Greeting, farewell, administrative, follow-up, and topic drift are standalone dialog flows (matched by intent before the rail pipeline or setting context flags). Off-topic is the only input rail in this file — it needs to block retrieval via `abort`.
 
 ---
 
 ## Section 5: Output Rails (`output_rails.co`)
 
-Eight flows that run after generation, before returning the response. Includes the Python executor bridge (first), disclaimer prepending, no-results handling, and policy checks.
+Seven flows that run after generation, before returning the response. Includes the Python executor bridge (first), disclaimer prepending, no-results handling, and policy checks.
 
 ### 5.1 Python Output Executor Bridge (MUST be first)
 
@@ -421,7 +421,8 @@ Prepends disclaimer if `$sensitive_disclaimer` was set by the input rail in `saf
 ```colang
 flow output rails prepend disclaimer
   if $sensitive_disclaimer
-    $bot_message = execute prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
+    $result = execute prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
+    $bot_message = $result.answer
 ```
 
 ### 5.3 No-Results Handling
@@ -435,7 +436,9 @@ flow output rails check no results
     bot say "I couldn't find relevant documents to answer your question. Try rephrasing with different keywords, or ask about a different aspect of the topic."
     abort
   else if $result.avg_confidence < 0.3
-    $bot_message = execute prepend_low_confidence_note(answer=$bot_message)
+    $mod = execute prepend_low_confidence_note(answer=$bot_message)
+    $bot_message = $mod.answer
+    $low_confidence_noted = True
 ```
 
 ### 5.4 Citation Enforcement
@@ -446,12 +449,13 @@ Ensures responses reference source documents.
 flow output rails check citations
   $result = execute check_citations(answer=$bot_message)
   if $result.has_citations == False
-    $bot_message = execute add_citation_reminder(answer=$bot_message)
+    $mod = execute add_citation_reminder(answer=$bot_message)
+    $bot_message = $mod.answer
 ```
 
 ### 5.5 Confidence-Based Routing
 
-Hedges or refuses when retrieval confidence is low.
+Hedges or refuses when retrieval confidence is low. Skips hedging if `$low_confidence_noted` was already set by the no-results flow (5.3) to avoid double-hedging.
 
 ```colang
 flow output rails check confidence
@@ -459,8 +463,9 @@ flow output rails check confidence
   if $result.confidence == "none"
     bot say "I couldn't find relevant information in the knowledge base to answer that question."
     abort
-  else if $result.confidence == "low"
-    $bot_message = execute prepend_hedge(answer=$bot_message)
+  else if $result.confidence == "low" and not $low_confidence_noted
+    $mod = execute prepend_hedge(answer=$bot_message)
+    $bot_message = $mod.answer
 ```
 
 ### 5.6 Answer Length Governance
@@ -471,7 +476,8 @@ Prevents excessively verbose or terse responses.
 flow output rails check length
   $result = execute check_answer_length(answer=$bot_message)
   if $result.valid == False
-    $bot_message = execute adjust_answer_length(answer=$bot_message, reason=$result.reason)
+    $mod = execute adjust_answer_length(answer=$bot_message, reason=$result.reason)
+    $bot_message = $mod.answer
 ```
 
 ### 5.7 Source Scope Enforcement
@@ -515,7 +521,8 @@ The corresponding output rail (in `output_rails.co`) prepends the disclaimer:
 ```colang
 flow output rails prepend disclaimer
   if $sensitive_disclaimer
-    $bot_message = execute prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
+    $result = execute prepend_text(text=$sensitive_disclaimer, answer=$bot_message)
+    $bot_message = $result.answer
 ```
 
 Example disclaimers:
@@ -774,10 +781,11 @@ Both sets of capabilities are preserved through the `run_input_rails` and `run_o
 
 ### `$bot_message` Modification in Output Rails
 
-Output rail flows that modify `$bot_message` (e.g., `add_citation_reminder`, `prepend_hedge`, `adjust_answer_length`) use the NeMo-supported pattern of reassigning the context variable via action return. The action returns a dict with the modified answer, and the flow assigns it back:
+Output rail flows that modify `$bot_message` use a two-step pattern: call the action into a temporary variable, then extract the `answer` field. This is necessary because all actions return dicts (Section 2.3), not bare strings:
 
 ```colang
-$bot_message = execute prepend_hedge(answer=$bot_message)
+$mod = execute prepend_hedge(answer=$bot_message)
+$bot_message = $mod.answer
 ```
 
 NeMo uses the final value of `$bot_message` after all output rails complete as the response returned by `generate_async()`.
