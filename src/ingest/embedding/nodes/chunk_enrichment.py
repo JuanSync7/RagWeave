@@ -1,14 +1,14 @@
 # @summary
 # LangGraph node for chunk ID assignment and enriched content projection.
 # Exports: chunk_enrichment_node
-# Deps: embedding.state
+# Deps: src.vector_db, src.ingest.embedding.state, src.ingest.common.shared
 # @end-summary
 
 """Chunk-enrichment node implementation."""
 
 from __future__ import annotations
 
-from src.core.vector_store import build_chunk_id
+from src.vector_db import build_chunk_id
 from src.ingest.common.shared import append_processing_log, map_chunk_provenance
 from src.ingest.embedding.state import EmbeddingPipelineState
 
@@ -47,6 +47,7 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict:
         chunk.metadata["enriched_content"] = chunk.text
         chunk.metadata["retrieval_text_origin"] = origin_label
         chunk.metadata["citation_source_uri"] = state["source_uri"]
+        chunk.metadata["document_id"] = state.get("document_id", "")
         chunk.metadata.update(provenance)
     return {
         "chunks": state["chunks"],

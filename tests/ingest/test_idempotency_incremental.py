@@ -1,5 +1,5 @@
 from src.ingest.common.utils import load_manifest, save_manifest
-from src.core.vector_store import build_chunk_id
+from src.vector_db import build_chunk_id
 
 
 def test_manifest_roundtrip(tmp_path):

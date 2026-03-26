@@ -1,6 +1,6 @@
 # @summary
 # End-to-end RAG pipeline for query processing, KG expansion, hybrid search, reranking, and LLM generation.
-# Main classes: RAGChain, RAGResponse. Deps: src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.retrieval.query.schemas, src.core, src.platform.llm
+# Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
 
@@ -13,14 +13,14 @@ from src.core.embeddings import LocalBGEEmbeddings
 from src.retrieval.query.nodes.reranker import LocalBGEReranker
 from src.retrieval.query.nodes.query_processor import process_query
 from src.core.knowledge_graph import KnowledgeGraphBuilder, GraphQueryExpander
-from src.core.vector_store import (
+from src.vector_db import (
     create_persistent_client,
-    get_weaviate_client,
+    get_client,
+    close_client,
     ensure_collection,
-    hybrid_search,
+    search,
+    SearchFilter,
 )
-
-from weaviate.classes.query import Filter
 from src.retrieval.generation.nodes.generator import OllamaGenerator
 from src.platform.observability.providers import get_tracer
 from src.platform.reliability.providers import get_retry_provider
@@ -160,14 +160,14 @@ class RAGChain:
         logger.info("RAG chain ready.")
 
     def close(self) -> None:
-        """Release persistent resources (Weaviate connection)."""
+        """Release persistent resources (database connection)."""
         if self._weaviate_client is not None:
             try:
-                self._weaviate_client.close()
+                close_client(self._weaviate_client)
             except Exception as e:
-                logger.warning("Error closing Weaviate client: %s", e)
+                logger.warning("Error closing database client: %s", e)
             self._weaviate_client = None
-            logger.info("Weaviate connection closed.")
+            logger.info("Database connection closed.")
 
     def _init_guardrails(self) -> None:
         """Initialize the guardrail backend and merge gate."""
@@ -176,38 +176,34 @@ class RAGChain:
         register_rag_chain(self)
         logger.info("Guardrails backend initialized.")
 
-    def _do_search(self, bm25_query, query_embedding, alpha, search_limit, wv_filter):
-        """Run hybrid search against Weaviate (persistent or transient client)."""
+    def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
+        """Run hybrid search against the database layer (persistent or transient client)."""
         if self._weaviate_client is not None:
-            return hybrid_search(
+            return search(
                 client=self._weaviate_client,
                 query=bm25_query,
                 query_embedding=query_embedding,
                 alpha=alpha,
                 limit=search_limit,
-                filters=wv_filter,
+                filters=filters,
             )
-        with get_weaviate_client() as client:
+        with get_client() as client:
             ensure_collection(client)
-            return hybrid_search(
+            return search(
                 client=client,
                 query=bm25_query,
                 query_embedding=query_embedding,
                 alpha=alpha,
                 limit=search_limit,
-                filters=wv_filter,
+                filters=filters,
             )
 
     @staticmethod
-    def _ranked_from_search_results(search_results: List[dict], top_k: int) -> List[RankedResult]:
-        """Convert hybrid-search dict rows into RankedResult list."""
+    def _ranked_from_search_results(search_results, top_k: int) -> List[RankedResult]:
+        """Convert search results into a sorted RankedResult list."""
         ranked = [
-            RankedResult(
-                text=str(item.get("text", "")),
-                score=float(item.get("score", 0.0)),
-                metadata=dict(item.get("metadata", {})),
-            )
-            for item in search_results
+            RankedResult(text=r.text, score=r.score, metadata=r.metadata)
+            for r in search_results
         ]
         ranked.sort(key=lambda result: result.score, reverse=True)
         return ranked[:top_k]
@@ -501,22 +497,20 @@ class RAGChain:
 
             # Stage 4: Hybrid search
             t0 = time.perf_counter()
-            wv_filter = None
+            filters = []
             if source_filter:
-                wv_filter = Filter.by_property("source").equal(source_filter)
+                filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
             if heading_filter:
-                hf = Filter.by_property("heading").equal(heading_filter)
-                wv_filter = wv_filter & hf if wv_filter else hf
+                filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
             if tenant_id:
-                tf = Filter.by_property("tenant_id").equal(tenant_id)
-                wv_filter = wv_filter & tf if wv_filter else tf
+                filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
 
             search_span = self.tracer.start_span("rag_chain.hybrid_search", parent=root_span)
 
             search_results = self.retry_provider.execute(
                 operation_name="weaviate_hybrid_search",
                 fn=lambda: self._do_search(
-                    bm25_query, query_embedding, alpha, search_limit, wv_filter,
+                    bm25_query, query_embedding, alpha, search_limit, filters or None,
                 ),
                 policy=self.retry_policy,
                 idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",

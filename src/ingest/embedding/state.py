@@ -45,6 +45,8 @@ class EmbeddingPipelineState(TypedDict, total=False):
         Stored refactored text from Phase 1, if present in CleanDocumentStore meta.
     clean_hash : str
         SHA-256 of the clean text (for change detection on Phase 2 re-runs).
+    document_id : str
+        Stable document UUID set by document_storage_node (node X), links to MinIO.
     chunks : list[ProcessedChunk]
         Chunks produced by chunking_node (node 6).
     enriched_chunks : list[ProcessedChunk]
@@ -76,6 +78,7 @@ class EmbeddingPipelineState(TypedDict, total=False):
     cleaned_text: str
     refactored_text: Optional[str]
     clean_hash: str
+    document_id: str
     chunks: List[ProcessedChunk]
     enriched_chunks: List[ProcessedChunk]
     metadata_summary: str

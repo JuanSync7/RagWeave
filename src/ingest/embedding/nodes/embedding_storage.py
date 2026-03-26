@@ -1,17 +1,18 @@
 # @summary
-# LangGraph node for vector embedding generation and Weaviate persistence.
+# LangGraph node for embedding generation and vector store persistence.
 # Exports: embedding_storage_node
-# Deps: embedding.state
+# Deps: src.vector_db, src.ingest.embedding.state, src.ingest.common.shared
 # @end-summary
 
 """Embedding-storage node implementation."""
 
 from __future__ import annotations
 
-from src.core.vector_store import (
+from src.vector_db import (
     add_documents,
-    delete_documents_by_source_key,
+    delete_by_source_key,
     ensure_collection,
+    DocumentRecord,
 )
 from src.ingest.common.shared import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
@@ -37,7 +38,7 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict:
     runtime = state["runtime"]
     ensure_collection(runtime.weaviate_client)
     if runtime.config.update_mode:
-        delete_documents_by_source_key(
+        delete_by_source_key(
             runtime.weaviate_client,
             state["source_key"],
             legacy_source=state["source_name"],
@@ -45,11 +46,13 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict:
 
     texts = [chunk.metadata.get("enriched_content", chunk.text) for chunk in state["chunks"]]
     vectors = runtime.embedder.embed_documents(texts)
+    records = [
+        DocumentRecord(text=text, embedding=vector, metadata=chunk.metadata)
+        for text, vector, chunk in zip(texts, vectors, state["chunks"])
+    ]
     stored_count = add_documents(
-        runtime.weaviate_client,
-        texts,
-        vectors,
-        [chunk.metadata for chunk in state["chunks"]],
+        runtime.weaviate_client, records,
+        collection=runtime.config.target_collection or None,
     )
     return {
         "stored_count": stored_count,

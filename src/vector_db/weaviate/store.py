@@ -1,15 +1,24 @@
 # @summary
-# Weaviate vector store with hybrid search (BM25 + dense vector).
-# Key exports: get_weaviate_client, ensure_collection, add_documents, hybrid_search, delete_collection
-# Deps: weaviate, typing, contextlib, os, from config.settings import *
+# Weaviate embedded client helpers: connection, collection management, CRUD, and hybrid search.
+# All collection-scoped operations accept a collection parameter for multi-collection support.
+# Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
+#          add_documents, hybrid_search, delete_collection,
+#          delete_documents_by_source, delete_documents_by_source_key
+# Deps: weaviate, config.settings, src.platform.observability
 # @end-summary
-"""Weaviate vector store with hybrid search (BM25 + dense vector)."""
+"""Low-level Weaviate operations: connection, schema, CRUD, and search.
+
+All collection-scoped functions accept an optional ``collection`` parameter
+that defaults to ``WEAVIATE_COLLECTION_NAME``. This module is imported only
+by ``WeaviateBackend`` — pipeline code accesses these capabilities through
+``src.vector_db`` instead.
+"""
 
 import hashlib
 import logging
 import uuid
-from typing import List, Optional
 from contextlib import contextmanager
+from typing import List, Optional
 
 import weaviate
 from weaviate.classes.config import Configure, Property, DataType
@@ -23,35 +32,23 @@ from config.settings import (
 )
 from src.platform.observability.providers import get_tracer
 
-logger = logging.getLogger("rag.vector_store")
+logger = logging.getLogger("rag.vector_db.weaviate.store")
 tracer = get_tracer()
 
 
 def create_persistent_client() -> weaviate.WeaviateClient:
-    """Create a long-lived Weaviate embedded client.
-
-    Caller is responsible for calling client.close() on shutdown.
-    Preferred for server/worker processes that serve many queries.
-    """
+    """Create a long-lived Weaviate embedded client."""
     span = tracer.start_span("vector_store.create_persistent_client")
-    client = weaviate.connect_to_embedded(
-        persistence_data_path=WEAVIATE_DATA_DIR,
-    )
+    client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
     span.end(status="ok")
     return client
 
 
 @contextmanager
 def get_weaviate_client():
-    """Context manager for Weaviate embedded client.
-
-    Opens and closes the embedded instance per use — suitable for CLI
-    and batch scripts. For server use, prefer create_persistent_client().
-    """
+    """Context manager for a short-lived Weaviate embedded client."""
     span = tracer.start_span("vector_store.get_weaviate_client")
-    client = weaviate.connect_to_embedded(
-        persistence_data_path=WEAVIATE_DATA_DIR,
-    )
+    client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
     try:
         yield client
     finally:
@@ -59,15 +56,18 @@ def get_weaviate_client():
         span.end(status="ok")
 
 
-def ensure_collection(client: weaviate.WeaviateClient) -> None:
-    """Create the document collection if it doesn't exist."""
-    span = tracer.start_span("vector_store.ensure_collection")
-    if client.collections.exists(WEAVIATE_COLLECTION_NAME):
+def ensure_collection(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> None:
+    """Create the named collection if it does not exist (idempotent)."""
+    span = tracer.start_span("vector_store.ensure_collection", {"collection": collection})
+    if client.collections.exists(collection):
         span.end(status="ok")
         return
 
     client.collections.create(
-        name=WEAVIATE_COLLECTION_NAME,
+        name=collection,
         vectorizer_config=Configure.Vectorizer.none(),
         properties=[
             Property(name="text", data_type=DataType.TEXT),
@@ -95,6 +95,7 @@ def ensure_collection(client: weaviate.WeaviateClient) -> None:
             Property(name="heading", data_type=DataType.TEXT),
             Property(name="heading_level", data_type=DataType.INT),
             Property(name="tenant_id", data_type=DataType.TEXT),
+            Property(name="document_id", data_type=DataType.TEXT),
         ],
     )
     span.end(status="ok")
@@ -107,15 +108,13 @@ def build_chunk_id(source: str, chunk_index: int, text: str) -> str:
 
 
 def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text: str) -> str:
-    """Return a valid UUID string for Weaviate object insertion."""
     if candidate is not None:
-        raw_value = str(candidate).strip()
-        if raw_value:
+        raw = str(candidate).strip()
+        if raw:
             try:
-                return str(uuid.UUID(raw_value))
+                return str(uuid.UUID(raw))
             except ValueError:
-                # Preserve deterministic behavior for legacy non-UUID IDs.
-                return str(uuid.uuid5(uuid.NAMESPACE_URL, raw_value))
+                return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
     return build_chunk_id(source, chunk_index, text)
 
 
@@ -124,21 +123,19 @@ def add_documents(
     texts: List[str],
     embeddings: List[List[float]],
     metadatas: Optional[List[dict]] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
-    """Add documents with pre-computed embeddings to Weaviate.
-
-    Returns:
-        Number of documents added.
-    """
-    span = tracer.start_span("vector_store.add_documents", {"count": len(texts)})
-    collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
+    """Add documents with pre-computed embeddings to the named collection."""
+    span = tracer.start_span(
+        "vector_store.add_documents",
+        {"count": len(texts), "collection": collection},
+    )
+    col = client.collections.get(collection)
     try:
-        config = collection.config.get()
+        config = col.config.get()
         raw_props = getattr(config, "properties", []) or []
         collection_props = {
-            getattr(prop, "name", "")
-            for prop in raw_props
-            if getattr(prop, "name", "")
+            getattr(p, "name", "") for p in raw_props if getattr(p, "name", "")
         }
     except Exception:
         collection_props = set()
@@ -146,16 +143,13 @@ def add_documents(
     if metadatas is None:
         metadatas = [{}] * len(texts)
 
-    with collection.batch.dynamic() as batch:
+    with col.batch.dynamic() as batch:
         for text, embedding, metadata in zip(texts, embeddings, metadatas):
             source = str(metadata.get("source") or "").strip() or "unknown"
             source_identity = str(metadata.get("source_key") or "").strip() or source
             chunk_index = metadata.get("chunk_index", 0)
             chunk_id = _normalize_chunk_uuid(
-                metadata.get("chunk_id"),
-                source_identity,
-                chunk_index,
-                text,
+                metadata.get("chunk_id"), source_identity, chunk_index, text
             )
             properties = {
                 "text": text,
@@ -171,32 +165,25 @@ def add_documents(
                 "heading_level": metadata.get("heading_level", 0),
                 "tenant_id": metadata.get("tenant_id", "default"),
             }
-            if "source_uri" in collection_props:
-                properties["source_uri"] = metadata.get("source_uri", "")
-            if "source_key" in collection_props:
-                properties["source_key"] = metadata.get("source_key", "")
-            if "source_id" in collection_props:
-                properties["source_id"] = metadata.get("source_id", "")
-            if "connector" in collection_props:
-                properties["connector"] = metadata.get("connector", "local_fs")
-            if "source_version" in collection_props:
-                properties["source_version"] = metadata.get("source_version", "")
-            if "retrieval_text_origin" in collection_props:
-                properties["retrieval_text_origin"] = metadata.get("retrieval_text_origin", "original")
-            if "citation_source_uri" in collection_props:
-                properties["citation_source_uri"] = metadata.get("citation_source_uri", "")
-            if "provenance_method" in collection_props:
-                properties["provenance_method"] = metadata.get("provenance_method", "")
-            if "provenance_confidence" in collection_props:
-                properties["provenance_confidence"] = float(metadata.get("provenance_confidence", 0.0))
-            if "original_char_start" in collection_props:
-                properties["original_char_start"] = int(metadata.get("original_char_start", -1))
-            if "original_char_end" in collection_props:
-                properties["original_char_end"] = int(metadata.get("original_char_end", -1))
-            if "refactored_char_start" in collection_props:
-                properties["refactored_char_start"] = int(metadata.get("refactored_char_start", -1))
-            if "refactored_char_end" in collection_props:
-                properties["refactored_char_end"] = int(metadata.get("refactored_char_end", -1))
+            optional = {
+                "source_uri": metadata.get("source_uri", ""),
+                "source_key": metadata.get("source_key", ""),
+                "source_id": metadata.get("source_id", ""),
+                "connector": metadata.get("connector", "local_fs"),
+                "source_version": metadata.get("source_version", ""),
+                "retrieval_text_origin": metadata.get("retrieval_text_origin", "original"),
+                "citation_source_uri": metadata.get("citation_source_uri", ""),
+                "provenance_method": metadata.get("provenance_method", ""),
+                "provenance_confidence": float(metadata.get("provenance_confidence", 0.0)),
+                "original_char_start": int(metadata.get("original_char_start", -1)),
+                "original_char_end": int(metadata.get("original_char_end", -1)),
+                "refactored_char_start": int(metadata.get("refactored_char_start", -1)),
+                "refactored_char_end": int(metadata.get("refactored_char_end", -1)),
+                "document_id": metadata.get("document_id", ""),
+            }
+            for key, val in optional.items():
+                if key in collection_props:
+                    properties[key] = val
             batch.add_object(properties=properties, vector=embedding, uuid=chunk_id)
 
     span.end(status="ok")
@@ -210,27 +197,19 @@ def hybrid_search(
     alpha: float = HYBRID_SEARCH_ALPHA,
     limit: int = SEARCH_LIMIT,
     filters: Optional[Filter] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> List[dict]:
-    """Perform hybrid search (BM25 + vector) on the collection.
-
-    Args:
-        client: Weaviate client.
-        query: Text query for BM25 component.
-        query_embedding: Dense vector for the vector component.
-        alpha: Balance between BM25 (0.0) and vector (1.0).
-        limit: Max results to return.
-        filters: Optional Weaviate Filter for metadata pre-filtering.
+    """Perform hybrid search (BM25 + vector) on the named collection.
 
     Returns:
-        List of dicts with 'text', 'metadata', and 'score' keys.
+        List of dicts with ``text``, ``metadata``, and ``score`` keys.
     """
     span = tracer.start_span(
         "vector_store.hybrid_search",
-        {"alpha": alpha, "limit": limit, "has_filters": filters is not None},
+        {"alpha": alpha, "limit": limit, "collection": collection, "has_filters": filters is not None},
     )
-    collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
-
-    results = collection.query.hybrid(
+    col = client.collections.get(collection)
+    results = col.query.hybrid(
         query=query,
         vector=query_embedding,
         alpha=alpha,
@@ -277,20 +256,30 @@ def hybrid_search(
     return documents
 
 
-def delete_collection(client: weaviate.WeaviateClient) -> None:
-    """Delete the document collection (useful for re-ingestion)."""
-    span = tracer.start_span("vector_store.delete_collection")
-    if client.collections.exists(WEAVIATE_COLLECTION_NAME):
-        client.collections.delete(WEAVIATE_COLLECTION_NAME)
+def delete_collection(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> None:
+    """Drop the named collection."""
+    span = tracer.start_span("vector_store.delete_collection", {"collection": collection})
+    if client.collections.exists(collection):
+        client.collections.delete(collection)
     span.end(status="ok")
 
 
-def delete_documents_by_source(client: weaviate.WeaviateClient, source: str) -> int:
-    """Delete chunks by source metadata value."""
-    span = tracer.start_span("vector_store.delete_documents_by_source", {"source": source})
-    collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
+def delete_documents_by_source(
+    client: weaviate.WeaviateClient,
+    source: str,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> int:
+    """Delete chunks by source metadata value from the named collection."""
+    span = tracer.start_span(
+        "vector_store.delete_documents_by_source",
+        {"source": source, "collection": collection},
+    )
+    col = client.collections.get(collection)
     where = Filter.by_property("source").equal(source)
-    result = collection.data.delete_many(where=where)
+    result = col.data.delete_many(where=where)
     deleted = getattr(result, "matches", 0) or 0
     span.set_attribute("deleted_count", deleted)
     span.end(status="ok")
@@ -301,23 +290,23 @@ def delete_documents_by_source_key(
     client: weaviate.WeaviateClient,
     source_key: str,
     legacy_source: Optional[str] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
-    """Delete chunks by stable source_key metadata value."""
+    """Delete chunks by stable source_key from the named collection."""
     span = tracer.start_span(
         "vector_store.delete_documents_by_source_key",
-        {"source_key": source_key},
+        {"source_key": source_key, "collection": collection},
     )
-    collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
+    col = client.collections.get(collection)
     try:
         where = Filter.by_property("source_key").equal(source_key)
-        result = collection.data.delete_many(where=where)
+        result = col.data.delete_many(where=where)
     except Exception:
-        # Backward-compat fallback for collections created before source_key existed.
         if not legacy_source:
             span.end(status="ok")
             return 0
         where = Filter.by_property("source").equal(legacy_source)
-        result = collection.data.delete_many(where=where)
+        result = col.data.delete_many(where=where)
     deleted = getattr(result, "matches", 0) or 0
     span.set_attribute("deleted_count", deleted)
     span.end(status="ok")

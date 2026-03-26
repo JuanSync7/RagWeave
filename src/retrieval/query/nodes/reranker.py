@@ -1,7 +1,7 @@
 # @summary
 # Local BAAI bge-reranker-v2-m3 wrapper for reranking search results.
 # Key exports: LocalBGEReranker, RankedResult
-# Deps: transformers, dataclasses, torch, AutoModelForSequenceClassification, AutoTokenizer, config.settings, src.retrieval.common.schemas
+# Deps: transformers, torch, config.settings, src.vector_db.common.schemas, src.retrieval.common.schemas
 # @end-summary
 """Local BAAI bge-reranker-v2-m3 wrapper for reranking search results.
 
@@ -16,6 +16,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config.settings import RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH
 from src.platform.observability.providers import get_tracer
+from src.vector_db.common.schemas import SearchResult
 from src.retrieval.common.schemas import RankedResult
 
 
@@ -35,14 +36,14 @@ class LocalBGEReranker:
     def rerank(
         self,
         query: str,
-        documents: List[dict],
+        documents: List[SearchResult],
         top_k: int = RERANK_TOP_K,
     ) -> List[RankedResult]:
         """Rerank documents against a query.
 
         Args:
             query: The search query.
-            documents: List of dicts with 'text' and 'metadata' keys.
+            documents: List of SearchResult objects from the database layer.
             top_k: Number of top results to return.
 
         Returns:
@@ -56,7 +57,7 @@ class LocalBGEReranker:
             span.end(status="ok")
             return []
 
-        pairs = [[query, doc["text"]] for doc in documents]
+        pairs = [[query, doc.text] for doc in documents]
 
         inputs = self.tokenizer(
             pairs,
@@ -77,9 +78,9 @@ class LocalBGEReranker:
 
         results = [
             RankedResult(
-                text=doc["text"],
+                text=doc.text,
                 score=score,
-                metadata=doc.get("metadata", {}),
+                metadata=doc.metadata,
             )
             for doc, score in zip(documents, scores)
         ]

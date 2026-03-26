@@ -1,4 +1,4 @@
-from src.core.vector_store import build_chunk_id
+from src.vector_db import build_chunk_id
 
 
 def test_chunk_id_is_deterministic():

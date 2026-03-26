@@ -12,6 +12,7 @@ from langgraph.graph import END, StateGraph
 
 from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
 from src.ingest.embedding.nodes.chunking import chunking_node
+from src.ingest.embedding.nodes.document_storage_node import document_storage_node
 from src.ingest.embedding.nodes.cross_reference_extraction import (
     cross_reference_extraction_node,
 )
@@ -39,6 +40,7 @@ def build_embedding_graph():
         Compiled LangGraph graph accepting ``EmbeddingPipelineState``.
     """
     graph = StateGraph(EmbeddingPipelineState)
+    graph.add_node("document_storage", document_storage_node)
     graph.add_node("chunking", chunking_node)
     graph.add_node("chunk_enrichment", chunk_enrichment_node)
     graph.add_node("metadata_generation", metadata_generation_node)
@@ -48,7 +50,8 @@ def build_embedding_graph():
     graph.add_node("embedding_storage", embedding_storage_node)
     graph.add_node("knowledge_graph_storage", knowledge_graph_storage_node)
 
-    graph.set_entry_point("chunking")
+    graph.set_entry_point("document_storage")
+    graph.add_edge("document_storage", "chunking")
     graph.add_edge("chunking", "chunk_enrichment")
     graph.add_edge("chunk_enrichment", "metadata_generation")
     graph.add_conditional_edges(

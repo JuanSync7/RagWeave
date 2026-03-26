@@ -13,7 +13,7 @@ controlled by the ``GUARDRAIL_BACKEND`` config key — changing the key is all
 that is needed to swap guardrail implementations.
 
 Dispatcher pattern:
-  ``_get_backend()`` is a lazy singleton that constructs the configured backend
+  ``_get_guardrail_backend()`` is a lazy singleton that constructs the configured backend
   on first call. The ``_NoOpBackend`` is used when
   ``GUARDRAIL_BACKEND`` is empty or ``"none"``.
 """
@@ -35,7 +35,7 @@ from src.guardrails.common.schemas import (
 
 logger = logging.getLogger("rag.guardrails")
 
-_backend: GuardrailBackend | None = None
+_guardrail_backend: GuardrailBackend | None = None
 
 
 class _NoOpBackend(GuardrailBackend):
@@ -55,7 +55,7 @@ class _NoOpBackend(GuardrailBackend):
         return text, []
 
 
-def _get_backend() -> GuardrailBackend:
+def _get_guardrail_backend() -> GuardrailBackend:
     """Return the process-wide guardrail backend singleton.
 
     Constructs the backend on first call based on ``GUARDRAIL_BACKEND``.
@@ -66,20 +66,20 @@ def _get_backend() -> GuardrailBackend:
     Raises:
         ValueError: If ``GUARDRAIL_BACKEND`` is set to an unknown value.
     """
-    global _backend
-    if _backend is None:
+    global _guardrail_backend
+    if _guardrail_backend is None:
         from config.settings import GUARDRAIL_BACKEND
         if GUARDRAIL_BACKEND == "nemo":
             from src.guardrails.nemo_guardrails.backend import NemoBackend
-            _backend = NemoBackend()
+            _guardrail_backend = NemoBackend()
         elif GUARDRAIL_BACKEND in ("", "none"):
-            _backend = _NoOpBackend()
+            _guardrail_backend = _NoOpBackend()
         else:
             raise ValueError(
                 f"Unknown GUARDRAIL_BACKEND: {GUARDRAIL_BACKEND!r}. "
                 "Valid values: 'nemo', '' (empty), 'none'."
             )
-    return _backend
+    return _guardrail_backend
 
 
 def run_input_rails(query: str, tenant_id: str = "") -> InputRailResult:
@@ -92,7 +92,7 @@ def run_input_rails(query: str, tenant_id: str = "") -> InputRailResult:
     Returns:
         Aggregated ``InputRailResult``.
     """
-    return _get_backend().run_input_rails(query, tenant_id)
+    return _get_guardrail_backend().run_input_rails(query, tenant_id)
 
 
 def run_output_rails(answer: str, context_chunks: List[str]) -> OutputRailResult:
@@ -105,7 +105,7 @@ def run_output_rails(answer: str, context_chunks: List[str]) -> OutputRailResult
     Returns:
         Aggregated ``OutputRailResult``.
     """
-    return _get_backend().run_output_rails(answer, context_chunks)
+    return _get_guardrail_backend().run_output_rails(answer, context_chunks)
 
 
 def redact_pii(text: str) -> Tuple[str, list]:
@@ -118,7 +118,7 @@ def redact_pii(text: str) -> Tuple[str, list]:
         ``(redacted_text, detections)`` tuple. ``detections`` is empty when PII
         detection is disabled or no PII was found.
     """
-    return _get_backend().redact_pii(text)
+    return _get_guardrail_backend().redact_pii(text)
 
 
 def register_rag_chain(rag_chain: object) -> None:
@@ -131,7 +131,7 @@ def register_rag_chain(rag_chain: object) -> None:
     Args:
         rag_chain: The ``RAGChain`` instance.
     """
-    _get_backend().register_rag_chain(rag_chain)
+    _get_guardrail_backend().register_rag_chain(rag_chain)
 
 
 __all__ = [

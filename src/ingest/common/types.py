@@ -20,6 +20,7 @@ from config.settings import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     OLLAMA_BASE_URL,
+    VECTOR_COLLECTION_DEFAULT,
     RAG_INGESTION_ENABLE_CROSS_REFERENCE_EXTRACTION,
     RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
     RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
@@ -136,6 +137,10 @@ class IngestionConfig:
     persist_refactor_mirror: bool = RAG_INGESTION_PERSIST_REFACTOR_MIRROR
     mirror_output_dir: str = str(RAG_INGESTION_MIRROR_DIR)
     clean_store_dir: str = "data/clean_store"  # Directory for CleanDocumentStore. Empty string disables persistent store.
+    # Target vector store collection for embedding storage. Defaults to VECTOR_COLLECTION_DEFAULT.
+    target_collection: str = VECTOR_COLLECTION_DEFAULT
+    store_documents: bool = True  # Whether to persist clean markdown to the document store (MinIO).
+    target_bucket: str = ""  # MinIO bucket for document storage. Empty string uses MINIO_BUCKET default.
     # Retained for backward compat; routing handled by LiteLLM Router.
     ollama_url: str = OLLAMA_BASE_URL
 
@@ -190,6 +195,7 @@ class Runtime:
     embedder: LocalBGEEmbeddings
     weaviate_client: Any
     kg_builder: Optional[KnowledgeGraphBuilder]
+    db_client: Optional[Any] = None
 
 
 class IngestState(TypedDict):

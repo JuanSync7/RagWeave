@@ -1,5 +1,7 @@
 # @summary
-# 13-node LangGraph ingestion implementation with configurable optional stages.
+# LangGraph ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
+# Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
+# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding, src.ingest.doc_processing
 # @end-summary
 
 """Ingestion pipeline runtime orchestration and public implementation API.
@@ -31,11 +33,11 @@ from config.settings import (
 )
 from src.core.embeddings import LocalBGEEmbeddings
 from src.core.knowledge_graph import KnowledgeGraphBuilder, export_obsidian
-from src.core.vector_store import (
+from src.vector_db import (
     delete_collection,
-    delete_documents_by_source_key,
+    delete_by_source_key,
     ensure_collection,
-    get_weaviate_client,
+    get_client,
 )
 from src.ingest.support.docling import ensure_docling_ready
 from src.ingest.support.vision import ensure_vision_ready
@@ -449,19 +451,25 @@ def ingest_directory(
         else []
     )
 
-    with get_weaviate_client() as client:
+    with get_client() as client:
         if fresh:
             delete_collection(client)
             manifest = {}
         ensure_collection(client)
 
         for source in removed_sources:
-            delete_documents_by_source_key(
+            delete_by_source_key(
                 client,
                 source,
                 legacy_source=str(manifest.get(source, {}).get("source", "")),
             )
             manifest.pop(source, None)
+
+        _db_client = None
+        if config.store_documents:
+            from src.db import create_persistent_client as _db_create_client, ensure_bucket as _db_ensure_bucket
+            _db_client = _db_create_client()
+            _db_ensure_bucket(_db_client, config.target_bucket or None)
 
         runtime = Runtime(
             config=config,
@@ -470,6 +478,7 @@ def ingest_directory(
             kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
             if config.build_kg
             else None,
+            db_client=_db_client,
         )
 
         if config.export_processed:
@@ -586,6 +595,10 @@ def ingest_directory(
             runtime.kg_builder.save(KG_PATH)
             if obsidian_export:
                 export_obsidian(runtime.kg_builder.graph, KG_OBSIDIAN_EXPORT_DIR)
+
+        if _db_client is not None:
+            from src.db import close_client as _db_close_client
+            _db_close_client(_db_client)
 
     save_manifest(manifest)
     return IngestionRunSummary(
