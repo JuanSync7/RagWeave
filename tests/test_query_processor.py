@@ -1,4 +1,4 @@
-from src.retrieval.query_processor import _detect_injection, _heuristic_confidence
+from src.retrieval.query.nodes.query_processor import _detect_injection, _heuristic_confidence
 
 
 def test_detect_injection_flags_prompt_override():

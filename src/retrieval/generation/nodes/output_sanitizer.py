@@ -111,21 +111,36 @@ def _is_prompt_fragment(
 ) -> bool:
     """Check if a line is a leaked fragment of the system prompt.
 
-    Uses substring matching against the actual prompt text. Only flags
-    lines that are substantial fragments (>= min_fragment_length chars)
-    to avoid false positives on common phrases.
+    Uses word-level contiguous sequence matching: the line must be an
+    exact run of consecutive words from the prompt to be flagged. This
+    avoids the false-positive risk of character-level substring matching,
+    where a legitimate answer containing any 40-character span that happens
+    to appear in a long system prompt would be incorrectly stripped.
 
     Args:
         line: A single line from the answer.
         system_prompt: The full system prompt text.
-        min_fragment_length: Minimum length to consider a match.
+        min_fragment_length: Minimum character length of ``line`` to test.
+            Lines shorter than this are never flagged.
 
     Returns:
-        True if the line appears to be a leaked prompt fragment.
+        True if the line's words form a verbatim contiguous run within
+        the prompt's word sequence.
     """
     if len(line) < min_fragment_length:
         return False
-    # Normalize whitespace for comparison
-    normalized_line = " ".join(line.lower().split())
-    normalized_prompt = " ".join(system_prompt.lower().split())
-    return normalized_line in normalized_prompt
+
+    line_words = line.lower().split()
+    if not line_words:
+        return False
+
+    prompt_words = system_prompt.lower().split()
+    line_len = len(line_words)
+
+    # Slide a window of len(line_words) across prompt_words looking for
+    # an exact contiguous match. O(n * m) but prompt and line are both
+    # short in practice (< 500 words / < 30 words respectively).
+    for i in range(len(prompt_words) - line_len + 1):
+        if prompt_words[i : i + line_len] == line_words:
+            return True
+    return False

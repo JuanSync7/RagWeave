@@ -19,6 +19,7 @@ import orjson
 import logging
 import os
 import re
+import time
 from collections import defaultdict
 from typing import Dict, List, Optional
 
@@ -45,16 +46,43 @@ from src.retrieval.common.utils import parse_json_object
 
 logger = logging.getLogger("rag.query_processor")
 
-if not logger.handlers:
-    logger.setLevel(logging.INFO)
-    os.makedirs(QUERY_LOG_DIR, exist_ok=True)
-    _file_handler = logging.FileHandler(QUERY_LOG_DIR / "query_processor.log")
-    _file_handler.setFormatter(
-        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-    )
-    logger.addHandler(_file_handler)
+# File logging is set up lazily on first use so that importing this module
+# (e.g., during test collection) does not create directories or file handles.
+_file_logging_ready = False
 
-_tracer = get_tracer()
+
+def _ensure_file_logging() -> None:
+    """Attach a rotating file handler the first time it is needed."""
+    global _file_logging_ready
+    if _file_logging_ready or logger.handlers:
+        return
+    _file_logging_ready = True
+    try:
+        os.makedirs(QUERY_LOG_DIR, exist_ok=True)
+        handler = logging.FileHandler(QUERY_LOG_DIR / "query_processor.log")
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+        )
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+    except OSError as exc:
+        logger.warning(
+            "Could not attach file logger to %s: %s — continuing with console only",
+            QUERY_LOG_DIR,
+            exc,
+        )
+
+
+# Tracer is resolved lazily so imports during tests do not trigger provider
+# initialisation before the observability stack is ready.
+_tracer_instance = None
+
+
+def _get_tracer():
+    global _tracer_instance
+    if _tracer_instance is None:
+        _tracer_instance = get_tracer()
+    return _tracer_instance
 
 
 # ---------------------------------------------------------------------------
@@ -172,15 +200,31 @@ def _load_injection_patterns() -> List[re.Pattern]:
     try:
         import yaml
         patterns_path = PROMPTS_DIR.parent / "config" / "injection_patterns.yaml"
-        if patterns_path.exists():
+        if not patterns_path.exists():
+            # File absent — expected in minimal environments; use fallback silently.
+            pass
+        else:
             with open(patterns_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             raw_patterns = data.get("patterns", [])
             _INJECTION_PATTERNS = [re.compile(p, re.I) for p in raw_patterns]
-            logger.info("Loaded %d injection patterns from %s", len(_INJECTION_PATTERNS), patterns_path)
+            logger.info(
+                "Loaded %d injection patterns from %s",
+                len(_INJECTION_PATTERNS),
+                patterns_path,
+            )
             return _INJECTION_PATTERNS
     except Exception as e:
-        logger.warning("Failed to load injection patterns file: %s — using fallback", e)
+        # The file exists but could not be parsed — this is an operator error.
+        # Log at ERROR so it surfaces in production alerting. Degraded injection
+        # detection (3 fallback patterns) is active until the file is fixed.
+        logger.error(
+            "Injection patterns file could not be loaded (%s) — "
+            "falling back to minimal pattern set. Injection detection is degraded. "
+            "Fix %s to restore full coverage.",
+            e,
+            PROMPTS_DIR.parent / "config" / "injection_patterns.yaml",
+        )
 
     # Minimal fallback if file is missing
     _INJECTION_PATTERNS = [
@@ -209,15 +253,16 @@ def _detect_injection(query: str) -> bool:
 
 def _call_llm(prompt: str, system: str = "") -> Optional[str]:
     """Call LLM via LLMProvider. Returns response text or None on failure."""
-    span = _tracer.start_span(
+    span = _get_tracer().start_span(
         "query_processor.call_llm",
         {"model_alias": "query"},
     )
-    messages: list[dict] = []
+    messages: List[Dict[str, str]] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
+    _span_status = "ok"
     try:
         provider = get_llm_provider()
         response = provider.generate(
@@ -226,12 +271,13 @@ def _call_llm(prompt: str, system: str = "") -> Optional[str]:
             temperature=QUERY_PROCESSING_TEMPERATURE,
             max_tokens=256,
         )
-        span.end(status="ok")
         return response.content or None
     except Exception as e:
         logger.warning("LLM call failed: %s", e)
-        span.end(status="error", error=e)
+        _span_status = "error"
         return None
+    finally:
+        span.end(status=_span_status)
 
 
 # Backward-compatible alias
@@ -240,15 +286,16 @@ _call_ollama = _call_llm
 
 def _check_llm_available() -> bool:
     """Check if the LLM provider is reachable."""
-    span = _tracer.start_span("query_processor.llm_healthcheck")
+    span = _get_tracer().start_span("query_processor.llm_healthcheck")
+    _span_status = "ok"
     try:
         provider = get_llm_provider()
-        result = provider.is_available(model_alias="query")
-        span.end(status="ok")
-        return result
+        return provider.is_available(model_alias="query")
     except Exception:
-        span.end(status="error")
+        _span_status = "error"
         return False
+    finally:
+        span.end(status=_span_status)
 
 
 # Backward-compatible alias
@@ -380,9 +427,19 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
 
     previous_feedback = ""
     if state["reasoning"]:
-        previous_feedback = (
-            f"Previous evaluator feedback: {state['reasoning']}"
-        )
+        # state["reasoning"] originates from the previous LLM response and
+        # could contain adversarially crafted content if the user's original
+        # query was designed to elicit it. Truncate to a safe length and run
+        # the injection check before re-inserting into the next prompt.
+        safe_reasoning = state["reasoning"][:200]
+        if _detect_injection(safe_reasoning):
+            logger.warning(
+                "Injection-like content detected in LLM reasoning field — "
+                "omitting from next prompt iteration"
+            )
+            safe_reasoning = ""
+        if safe_reasoning:
+            previous_feedback = f"Previous evaluator feedback: {safe_reasoning}"
 
     kg_terms = _match_kg_terms(state["original_query"])
 
@@ -491,7 +548,7 @@ def _route_after_combined(state: QueryState) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Graph assembly (compiled once at module level)
+# Graph assembly (compiled lazily on first invocation)
 # ---------------------------------------------------------------------------
 
 
@@ -519,7 +576,18 @@ def _build_graph():
     return graph.compile()
 
 
-_COMPILED_GRAPH = _build_graph()
+# Compiled graph is initialised on first call to process_query() rather than
+# at import time. This avoids LangGraph compilation overhead during test
+# collection and prevents StateGraph errors if langgraph is not fully
+# initialised when the module is first imported.
+_compiled_graph_instance = None
+
+
+def _get_compiled_graph():
+    global _compiled_graph_instance
+    if _compiled_graph_instance is None:
+        _compiled_graph_instance = _build_graph()
+    return _compiled_graph_instance
 
 
 # ---------------------------------------------------------------------------
@@ -533,12 +601,12 @@ def warm_up_ollama() -> None:
     Call this at worker startup so the first real query doesn't pay the
     cold-start cost (~5-10s model load).
     """
+    _ensure_file_logging()
     if not _check_llm_available():
         logger.warning("LLM not reachable — skipping warm-up")
         return
 
     logger.info("Warming up query LLM model...")
-    import time
     t0 = time.perf_counter()
     _call_llm("ping", system="Reply with 'ok' only.")
     elapsed = (time.perf_counter() - t0) * 1000
@@ -567,7 +635,8 @@ def process_query(
     Returns:
         QueryResult with the processed query and recommended action.
     """
-    root_span = _tracer.start_span("query_processor.process_query", {"raw_query_len": len(raw_query)})
+    _ensure_file_logging()
+    root_span = _get_tracer().start_span("query_processor.process_query", {"raw_query_len": len(raw_query)})
     span_status = "ok"
     span_error = None
     try:
@@ -590,7 +659,7 @@ def process_query(
         }
 
         logger.info("Processing query: '%s'", raw_query[:100])
-        final_state = _COMPILED_GRAPH.invoke(initial_state)
+        final_state = _get_compiled_graph().invoke(initial_state)
 
         action = (
             QueryAction.ASK_USER

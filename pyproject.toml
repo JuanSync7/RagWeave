@@ -32,6 +32,8 @@ dependencies = [
   "litellm",
   "pyyaml",
   "orjson",
+  "minio",
+  "langdetect",
 ]
 
 [project.optional-dependencies]

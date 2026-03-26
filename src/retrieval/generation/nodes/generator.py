@@ -1,6 +1,6 @@
 # @summary
 # LLM generator for RAG answer synthesis, backed by LiteLLM Router.
-# Main exports: OllamaGenerator. Deps: typing, config.settings, src.platform.llm
+# Main exports: OllamaGenerator, _get_system_prompt. Deps: typing, config.settings, src.platform.llm
 # @end-summary
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
 
@@ -35,7 +35,16 @@ def _load_system_prompt() -> str:
     )
 
 
-_SYSTEM_PROMPT = _load_system_prompt()
+_SYSTEM_PROMPT: Optional[str] = None
+
+
+def _get_system_prompt() -> str:
+    """Return the system prompt, loading it from disk on first call."""
+    global _SYSTEM_PROMPT
+    if _SYSTEM_PROMPT is None:
+        _SYSTEM_PROMPT = _load_system_prompt()
+    return _SYSTEM_PROMPT
+
 
 # Regex to extract the CONFIDENCE line from LLM responses
 _CONFIDENCE_RE = re.compile(
@@ -97,7 +106,7 @@ class OllamaGenerator:
                 f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
             )
         user_message = _build_user_prompt(context, query)
-        messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages: list[dict] = [{"role": "system", "content": _get_system_prompt()}]
         if memory_context:
             messages.append(
                 {

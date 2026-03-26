@@ -1,5 +1,5 @@
-from src.retrieval.query_processor import QueryAction, QueryResult
-from src.retrieval.rag_chain import RAGChain
+from src.retrieval.query.schemas import QueryAction, QueryResult
+from src.retrieval.pipeline.rag_chain import RAGChain
 
 
 class _DummySpan:
@@ -41,7 +41,7 @@ def _build_chain_without_model_init() -> RAGChain:
 
 def test_rag_chain_returns_ask_user(monkeypatch):
     monkeypatch.setattr(
-        "src.retrieval.rag_chain.process_query",
+        "src.retrieval.pipeline.rag_chain.process_query",
         lambda *args, **kwargs: QueryResult(
             processed_query="x",
             confidence=0.1,

@@ -24,3 +24,5 @@ nemoguardrails>=0.21.0
 litellm
 pyyaml
 orjson
+minio
+langdetect

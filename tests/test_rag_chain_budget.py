@@ -1,5 +1,7 @@
-from src.retrieval.query_processor import QueryAction, QueryResult
-from src.retrieval.rag_chain import RAGChain
+import types
+
+from src.retrieval.query.schemas import QueryAction, QueryResult
+from src.retrieval.pipeline.rag_chain import RAGChain
 
 
 class _DummySpan:
@@ -46,9 +48,9 @@ def _build_chain_for_budget_tests() -> RAGChain:
 
 def test_ranked_from_search_results_orders_and_limits():
     rows = [
-        {"text": "b", "score": 0.1, "metadata": {"source": "b"}},
-        {"text": "a", "score": 0.9, "metadata": {"source": "a"}},
-        {"text": "c", "score": 0.5, "metadata": {"source": "c"}},
+        types.SimpleNamespace(text="b", score=0.1, metadata={"source": "b"}),
+        types.SimpleNamespace(text="a", score=0.9, metadata={"source": "a"}),
+        types.SimpleNamespace(text="c", score=0.5, metadata={"source": "c"}),
     ]
     ranked = RAGChain._ranked_from_search_results(rows, top_k=2)
     assert len(ranked) == 2
@@ -60,7 +62,7 @@ def test_run_short_circuits_on_budget_after_query_processing(monkeypatch):
     chain = _build_chain_for_budget_tests()
 
     monkeypatch.setattr(
-        "src.retrieval.rag_chain.process_query",
+        "src.retrieval.pipeline.rag_chain.process_query",
         lambda *args, **kwargs: QueryResult(
             processed_query="processed",
             confidence=0.8,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.retrieval.confidence.scoring import (
+from src.retrieval.generation.confidence.scoring import (
     compute_citation_coverage,
     compute_composite_confidence,
     compute_retrieval_confidence,
@@ -10,7 +10,7 @@ from src.retrieval.confidence.scoring import (
     _split_sentences,
     _has_substantial_overlap,
 )
-from src.retrieval.confidence.schemas import ConfidenceBreakdown
+from src.retrieval.generation.confidence.schemas import ConfidenceBreakdown
 
 
 class TestComputeRetrievalConfidence:

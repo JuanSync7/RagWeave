@@ -1,7 +1,7 @@
 # @summary
 # Temporal workflow definitions for per-document and per-directory ingestion.
 # Exports: IngestDocumentWorkflow, IngestDirectoryWorkflow
-# Deps: temporalio, src.ingest.pipeline.activities
+# Deps: temporalio, src.ingest.temporal.activities
 # @end-summary
 """Temporal workflows for the two-phase ingestion pipeline.
 
@@ -23,7 +23,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from src.ingest.pipeline.activities import (
+    from src.ingest.temporal.activities import (
         ActivityArgs,
         DocProcessingResult,
         EmbeddingResult,

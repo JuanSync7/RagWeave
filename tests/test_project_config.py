@@ -94,6 +94,8 @@ _PYPROJECT_IMPORT_MAP: dict[str, set[str]] = {
     "litellm": {"litellm"},
     "pyyaml": {"yaml"},
     "orjson": {"orjson"},
+    "minio": {"minio"},
+    "langdetect": {"langdetect"},
     # Dev deps
     "pytest": {"pytest"},
     "pytest-mock": {"pytest_mock"},

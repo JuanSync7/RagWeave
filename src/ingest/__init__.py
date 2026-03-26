@@ -1,7 +1,7 @@
 # @summary
-# Ingestion package exports for document processing and LangGraph pipeline entrypoints.
-# Exports: ingest_directory, ingest_file, IngestionConfig, IngestionRunSummary
-# Deps: src.ingest.pipeline.impl, src.ingest.common.types
+# Ingestion package public API: entrypoints and typed contracts for file and directory ingestion.
+# Exports: ingest_file, ingest_directory, IngestionConfig, IngestFileResult, IngestionRunSummary
+# Deps: src.ingest.impl, src.ingest.common.types
 # @end-summary
 
 """Public API for the ingestion subsystem.
@@ -12,11 +12,12 @@ artifacts). The package exports a small, stable surface so callers do not depend
 on internal node implementations.
 """
 
-from src.ingest.common.types import IngestionConfig, IngestionRunSummary
-from src.ingest.pipeline.impl import ingest_directory, ingest_file
+from src.ingest.common.types import IngestionConfig, IngestFileResult, IngestionRunSummary
+from src.ingest.impl import ingest_directory, ingest_file
 
 __all__ = [
     "IngestionConfig",
+    "IngestFileResult",
     "IngestionRunSummary",
     "ingest_directory",
     "ingest_file",

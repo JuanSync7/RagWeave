@@ -1,5 +1,5 @@
 # @summary
-# LangGraph ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
+# Ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
 # Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
 # Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding, src.ingest.doc_processing
 # @end-summary
@@ -47,6 +47,7 @@ from src.ingest.common.shared import _extract_keywords_fallback
 from src.ingest.common.types import (
     IngestionConfig,
     IngestionDesignCheck,
+    IngestFileResult,
     IngestionRunSummary,
     PIPELINE_NODE_NAMES,
     Runtime,
@@ -55,7 +56,7 @@ from src.ingest.clean_store import CleanDocumentStore
 from src.ingest.doc_processing.impl import run_document_processing
 from src.ingest.embedding.impl import run_embedding_pipeline
 
-logger = logging.getLogger("rag.ingest.pipeline")
+logger = logging.getLogger("rag.ingest")
 _LOCAL_CONNECTOR = "local_fs"
 
 
@@ -288,9 +289,8 @@ def ingest_file(
         existing_source_uri: Previously stored URI (for incremental updates).
 
     Returns:
-        Dict with keys: ``errors`` (list), ``stored_count`` (int),
-        ``metadata_summary`` (str), ``metadata_keywords`` (list),
-        ``processing_log`` (list), ``source_hash`` (str), ``clean_hash`` (str).
+        ``IngestFileResult`` describing errors, stored chunk count, metadata,
+        processing log, and content hashes for both the source and clean text.
     """
     config = runtime.config
     clean_store_dir = config.clean_store_dir
@@ -309,15 +309,15 @@ def ingest_file(
     )
 
     if phase1.get("errors"):
-        return {
-            "errors": phase1["errors"],
-            "stored_count": 0,
-            "metadata_summary": "",
-            "metadata_keywords": [],
-            "processing_log": phase1.get("processing_log", []),
-            "source_hash": phase1.get("source_hash", ""),
-            "clean_hash": "",
-        }
+        return IngestFileResult(
+            errors=phase1["errors"],
+            stored_count=0,
+            metadata_summary="",
+            metadata_keywords=[],
+            processing_log=phase1.get("processing_log", []),
+            source_hash=phase1.get("source_hash", ""),
+            clean_hash="",
+        )
 
     # Determine final clean text
     clean_text: str = phase1.get("refactored_text") or phase1.get("cleaned_text", "")
@@ -366,15 +366,15 @@ def ingest_file(
         refactored_text=phase1.get("refactored_text"),
     )
 
-    return {
-        "errors": phase2.get("errors", []),
-        "stored_count": phase2.get("stored_count", 0),
-        "metadata_summary": phase2.get("metadata_summary", ""),
-        "metadata_keywords": phase2.get("metadata_keywords", []),
-        "processing_log": phase1.get("processing_log", []) + phase2.get("processing_log", []),
-        "source_hash": phase1.get("source_hash", ""),
-        "clean_hash": clean_hash,
-    }
+    return IngestFileResult(
+        errors=phase2.get("errors", []),
+        stored_count=phase2.get("stored_count", 0),
+        metadata_summary=phase2.get("metadata_summary", ""),
+        metadata_keywords=phase2.get("metadata_keywords", []),
+        processing_log=phase1.get("processing_log", []) + phase2.get("processing_log", []),
+        source_hash=phase1.get("source_hash", ""),
+        clean_hash=clean_hash,
+    )
 
 
 def ingest_directory(
@@ -534,26 +534,26 @@ def ingest_directory(
                     existing_hash=previous_hash if update else "",
                     existing_source_uri=previous_uri if update else "",
                 )
-                if result["errors"]:
+                if result.errors:
                     failed += 1
-                    errors.extend(result["errors"])
+                    errors.extend(result.errors)
                     logger.error(
                         "ingestion_failed source=%s source_key=%s errors=%s",
                         source["source_name"],
                         source["source_key"],
-                        "; ".join(result["errors"]),
+                        "; ".join(result.errors),
                     )
                     continue
 
                 processed += 1
-                stored_chunks += int(result["stored_count"])
+                stored_chunks += result.stored_count
                 logger.info(
                     "ingestion_done source=%s source_key=%s chunks=%d stored=%d stages=%s",
                     source["source_name"],
                     source["source_key"],
-                    result.get("stored_count", 0),
-                    int(result["stored_count"]),
-                    " > ".join(result["processing_log"]),
+                    result.stored_count,
+                    result.stored_count,
+                    " > ".join(result.processing_log),
                 )
                 if matched_key and matched_key != source["source_key"]:
                     manifest.pop(matched_key, None)
@@ -565,11 +565,11 @@ def ingest_directory(
                     "source_key": source["source_key"],
                     "connector": source["connector"],
                     "source_version": source["source_version"],
-                    "content_hash": result.get("source_hash", ""),
-                    "chunk_count": result.get("stored_count", 0),
-                    "summary": result["metadata_summary"],
-                    "keywords": result["metadata_keywords"],
-                    "processing_log": result["processing_log"][-12:],
+                    "content_hash": result.source_hash,
+                    "chunk_count": result.stored_count,
+                    "summary": result.metadata_summary,
+                    "keywords": result.metadata_keywords,
+                    "processing_log": result.processing_log[-12:],
                     "mirror_stem": stem,
                 }
                 save_manifest(manifest)

@@ -1,10 +1,17 @@
 # @summary
-# Retrieval common package: pipeline boundary contracts and cross-cutting wire types.
-# Exports: RAGRequest, RAGResponse, RankedResult
-# Deps: src.retrieval.common.schemas
+# Retrieval common package: pipeline boundary contracts, wire types, and shared exceptions.
+# Exports: RAGRequest, RAGResponse, RankedResult, RetrievalError, ModelLoadError
+# Deps: src.retrieval.common.schemas, src.retrieval.common.exceptions
 # @end-summary
-"""Pipeline boundary contracts and shared wire types."""
+"""Pipeline boundary contracts, shared wire types, and exception hierarchy."""
 
 from src.retrieval.common.schemas import RAGRequest, RAGResponse, RankedResult
+from src.retrieval.common.exceptions import RetrievalError, ModelLoadError
 
-__all__ = ["RAGRequest", "RAGResponse", "RankedResult"]
+__all__ = [
+    "RAGRequest",
+    "RAGResponse",
+    "RankedResult",
+    "RetrievalError",
+    "ModelLoadError",
+]

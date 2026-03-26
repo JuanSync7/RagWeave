@@ -1,20 +1,26 @@
 # @summary
 # Post-generation confidence routing logic implementing REQ-706.
 # Exports: route_by_confidence
-# Deps: src.retrieval.generation.confidence.schemas
+# Deps: src.retrieval.generation.confidence.schemas, logging, math
 # @end-summary
 """Post-generation confidence routing.
 
 Implements the routing decision table from REQ-706:
 
-  composite >= high   -> RETURN
-  low <= c < high     -> RE_RETRIEVE (if retries left), else FLAG
-  c < low             -> RE_RETRIEVE (if retries left), else BLOCK
+  composite >= high               -> RETURN
+  composite < high, retries left  -> RE_RETRIEVE
+  retries exhausted, c >= low     -> FLAG
+  retries exhausted, c < low      -> BLOCK
 """
 
 from __future__ import annotations
 
+import logging
+import math
+
 from src.retrieval.generation.confidence.schemas import PostGuardrailAction
+
+logger = logging.getLogger("rag.confidence_routing")
 
 
 def route_by_confidence(
@@ -28,12 +34,12 @@ def route_by_confidence(
 
     The routing table balances answer quality against latency:
     - High confidence answers are returned immediately.
-    - Medium confidence triggers one re-retrieval attempt with broader
-      search parameters before falling back to FLAG.
-    - Low confidence triggers one re-retrieval attempt before BLOCK.
+    - Medium or low confidence triggers one re-retrieval attempt with
+      broader search parameters before falling back to FLAG or BLOCK.
 
     Args:
-        composite: Composite confidence score in [0.0, 1.0].
+        composite: Composite confidence score in [0.0, 1.0]. Must be a
+            finite float; NaN is treated as a safe-fail BLOCK.
         retry_count: Number of re-retrieval attempts already made.
         high_threshold: Score at or above which answers are returned.
             Default 0.70.
@@ -44,24 +50,26 @@ def route_by_confidence(
     Returns:
         PostGuardrailAction indicating what to do with the answer.
     """
-    # Hard safety guard: never allow unbounded retries
-    if retry_count >= max(max_retries, 1):
-        if composite < low_threshold:
-            return PostGuardrailAction.BLOCK
-        if composite < high_threshold:
-            return PostGuardrailAction.FLAG
-        return PostGuardrailAction.RETURN
+    # Safe-fail guard: NaN from upstream scoring errors must never
+    # silently produce a permissive action.
+    if math.isnan(composite):
+        logger.error(
+            "route_by_confidence received NaN composite score — "
+            "blocking as safe-fail. Check upstream scoring pipeline."
+        )
+        return PostGuardrailAction.BLOCK
 
+    # Single-pass routing table (REQ-706).
+    # No duplicate logic: high confidence always returns, retries available
+    # always re-retrieve, and only when retries are exhausted do we fall
+    # through to the FLAG/BLOCK tier decision.
     if composite >= high_threshold:
         return PostGuardrailAction.RETURN
 
-    if composite >= low_threshold:
-        # Medium confidence: try re-retrieval, then flag
-        if retry_count < max_retries:
-            return PostGuardrailAction.RE_RETRIEVE
-        return PostGuardrailAction.FLAG
-
-    # Low confidence: try re-retrieval, then block
     if retry_count < max_retries:
         return PostGuardrailAction.RE_RETRIEVE
+
+    # Retries exhausted — route by confidence tier.
+    if composite >= low_threshold:
+        return PostGuardrailAction.FLAG
     return PostGuardrailAction.BLOCK

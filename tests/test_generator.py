@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 from src.platform.llm.schemas import LLMResponse
-from src.retrieval.generator import OllamaGenerator
+from src.retrieval.generation.nodes.generator import OllamaGenerator
 
 
 def test_generate_returns_text(monkeypatch):
@@ -10,7 +10,7 @@ def test_generate_returns_text(monkeypatch):
     mock_provider.config = MagicMock(model="test-model")
 
     monkeypatch.setattr(
-        "src.retrieval.generator.get_llm_provider", lambda: mock_provider
+        "src.retrieval.generation.nodes.generator.get_llm_provider", lambda: mock_provider
     )
     generator = OllamaGenerator()
     out = generator.generate("q", ["ctx"])
@@ -22,7 +22,7 @@ def test_generate_returns_none_on_empty_chunks(monkeypatch):
     mock_provider = MagicMock()
     mock_provider.config = MagicMock(model="test-model")
     monkeypatch.setattr(
-        "src.retrieval.generator.get_llm_provider", lambda: mock_provider
+        "src.retrieval.generation.nodes.generator.get_llm_provider", lambda: mock_provider
     )
     generator = OllamaGenerator()
     out = generator.generate("q", [])
@@ -35,7 +35,7 @@ def test_generate_returns_none_on_failure(monkeypatch):
     mock_provider.generate.side_effect = RuntimeError("connection refused")
     mock_provider.config = MagicMock(model="test-model")
     monkeypatch.setattr(
-        "src.retrieval.generator.get_llm_provider", lambda: mock_provider
+        "src.retrieval.generation.nodes.generator.get_llm_provider", lambda: mock_provider
     )
     generator = OllamaGenerator()
     out = generator.generate("q", ["ctx"])

@@ -1,6 +1,6 @@
 # @summary
 # Shared ingestion pipeline dataclasses, typed state schema, runtime container, and node-name registry.
-# Exports: IngestionConfig, IngestionDesignCheck, IngestionRunSummary, Runtime, IngestState, PIPELINE_NODE_NAMES
+# Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, IngestState, PIPELINE_NODE_NAMES
 # Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
 # @end-summary
 
@@ -157,6 +157,28 @@ class IngestionDesignCheck:
     ok: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class IngestFileResult:
+    """Result of a single-file ingestion run.
+
+    Attributes:
+        errors: Human-readable error messages from either phase.
+        stored_count: Number of chunks successfully stored in the vector store.
+        metadata_summary: LLM-generated summary of the document (if enabled).
+        metadata_keywords: LLM-extracted keywords from the document (if enabled).
+        processing_log: Ordered list of completed pipeline stage names.
+        source_hash: SHA-256 of the original source file.
+        clean_hash: SHA-256 of the cleaned/refactored text written to CleanDocumentStore.
+    """
+    errors: list[str]
+    stored_count: int
+    metadata_summary: str
+    metadata_keywords: list[str]
+    processing_log: list[str]
+    source_hash: str
+    clean_hash: str
 
 
 @dataclass

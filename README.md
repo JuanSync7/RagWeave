@@ -101,7 +101,7 @@ ollama pull qwen2.5:3b
 source .venv/bin/activate
 
 # Ingest documents
-python ingest.py --dir ./documents
+python -m src.ingest.cli --dir ./documents
 
 # Query locally (no server needed)
 python query.py "What is RAG?"

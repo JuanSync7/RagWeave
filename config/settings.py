@@ -524,8 +524,24 @@ RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES = int(
     os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES", "1")
 )
 
+# --- Retrieval quality classification thresholds ---
+# Reranker best-score thresholds that map to the four retrieval_quality
+# labels ("strong", "moderate", "weak", "insufficient").
+RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD = float(
+    os.environ.get("RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD", "0.75")
+)
+RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD = float(
+    os.environ.get("RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD", "0.50")
+)
+RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD = float(
+    os.environ.get("RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD", "0.30")
+)
+
 # --- Reranker ---
 RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))
+# Maximum number of (query, document) pairs per tokenizer/model forward pass.
+# Reduce to lower peak VRAM usage when SEARCH_LIMIT is large.
+RERANKER_BATCH_SIZE = int(os.environ.get("RAG_RERANKER_BATCH_SIZE", "32"))
 
 # --- Document Formatting ---
 RAG_DOCUMENT_FORMATTING_ENABLED = os.environ.get(

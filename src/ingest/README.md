@@ -13,7 +13,8 @@ This package powers embedding ingestion for the RAG system. The pipeline is orga
 - `embedding/`: Phase 2 pipeline — chunking through vector and KG storage (8 LangGraph nodes)
 - `clean_store.py`: `CleanDocumentStore` — the Phase 1→2 boundary (atomic read/write)
 - `support/`: node support libraries (document parsing, vision/VLM, LLM helpers, text processing)
-- `pipeline/`: orchestration layer (public API facade, two-phase runtime lifecycle)
+- `impl.py`: pipeline orchestrator — source discovery, idempotency, Phase 1 → Phase 2 coordination
+- `temporal/`: Temporal execution layer — wraps phases as distributed activities for parallel GPU workers
 
 Stage 2 (`structure_detection`) is the parser front-end: Docling converts source files
 into markdown-first text suitable for downstream LLM and chunking stages, and emits
@@ -30,11 +31,13 @@ figure images (caption + OCR + tags), and appends those notes into cleaned text.
 | `embedding/` | Phase 2 — chunking through vector and KG storage (8 nodes) |
 | `clean_store.py` | `CleanDocumentStore` — atomic read/write boundary between Phase 1 and Phase 2 |
 | `support/` | Node support libraries: Docling parsing, vision/VLM, LLM helpers, text processing |
-| `pipeline/` | Public API facade and two-phase runtime orchestration |
+| `impl.py` | Pipeline orchestrator: source discovery, idempotency checks, Phase 1 → Phase 2 coordination, KG export |
+| `temporal/` | Temporal execution subsystem: activities, workflows, and worker entry point for distributed parallel ingestion |
 
 ## Internal Dependencies
 
-- `pipeline/impl.py` calls `run_document_processing` (from `doc_processing/`) and `run_embedding_pipeline` (from `embedding/`), and reads `common/types.py` for schema/runtime types.
+- `impl.py` calls `run_document_processing` (from `doc_processing/`) and `run_embedding_pipeline` (from `embedding/`), and reads `common/types.py` for schema/runtime types.
+- `temporal/activities.py` calls the same phase functions (`run_document_processing`, `run_embedding_pipeline`) — Temporal wraps them, it does not replace them.
 - `doc_processing/workflow.py` wires nodes 1–5 with conditional graph transitions for multimodal and refactoring stages.
 - `embedding/workflow.py` wires nodes 6–13 with conditional graph transitions for optional extraction and storage stages.
 - Node modules in both sub-packages consume shared helpers from `common/shared.py`, deterministic helpers from `common/utils.py`, and specialized processing from `support/`.

@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.retrieval.confidence.routing import route_by_confidence
-from src.retrieval.confidence.schemas import PostGuardrailAction
+from src.retrieval.generation.confidence.routing import route_by_confidence
+from src.retrieval.generation.confidence.schemas import PostGuardrailAction
 
 
 class TestRouteByConfidence:

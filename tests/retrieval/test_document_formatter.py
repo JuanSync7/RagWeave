@@ -3,7 +3,7 @@
 import pytest
 from dataclasses import dataclass
 
-from src.retrieval.document_formatter import (
+from src.retrieval.generation.nodes.document_formatter import (
     format_context,
     _detect_version_conflicts,
     _extract_metadata_header,

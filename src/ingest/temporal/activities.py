@@ -34,7 +34,7 @@ from src.ingest.embedding.impl import run_embedding_pipeline
 import src.db as db
 import src.vector_db as vector_db
 
-logger = logging.getLogger("rag.ingest.pipeline.activities")
+logger = logging.getLogger("rag.ingest.temporal.activities")
 
 # ---------------------------------------------------------------------------
 # Worker-level singletons (initialised once per worker process)
