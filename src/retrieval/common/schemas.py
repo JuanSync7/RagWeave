@@ -1,61 +1,54 @@
 # @summary
-# Shared retrieval schema contracts and dataclasses used across query processor, reranker, and rag chain.
-# Exports: QueryAction, QueryResult, QueryState, RankedResult, RAGResponse
-# Deps: dataclasses, enum, typing
+# Pipeline boundary contracts: input/output schemas and the cross-cutting wire type.
+# Exports: RAGRequest, RAGResponse, RankedResult
+# Deps: dataclasses, typing
 # @end-summary
-"""Shared retrieval schema contracts."""
+"""Pipeline-level schema contracts — what enters and exits the RAG pipeline."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.platform.token_budget.schemas import TokenBudgetSnapshot
 
 
-class QueryAction(Enum):
-    """Action to take after query processing."""
-
-    SEARCH = "search"
-    ASK_USER = "ask_user"
-
-
-@dataclass
-class QueryResult:
-    """Result of the query processing pipeline."""
-
-    processed_query: str
-    confidence: float
-    action: QueryAction
-    clarification_message: Optional[str] = None
-    iterations: int = 0
-
-
-class QueryState(TypedDict):
-    """LangGraph state schema for query processing."""
-
-    original_query: str
-    current_query: str
-    confidence: float
-    reasoning: str
-    iteration: int
-    max_iterations: int
-    confidence_threshold: float
-    action: str
-    clarification_message: str
-    ollama_available: bool
-    fast_path: bool
-
-
 @dataclass
 class RankedResult:
-    """A search result with its reranking score."""
+    """A search result with its reranking score.
+
+    Wire type that flows from query (reranker output) through to generation.
+    """
 
     text: str
     score: float
     metadata: dict
+
+
+@dataclass
+class RAGRequest:
+    """Input contract for the RAG pipeline.
+
+    Optional numeric fields default to None — the pipeline fills in
+    config defaults when None, keeping this schema config-free.
+    """
+
+    query: str
+    alpha: Optional[float] = None
+    search_limit: Optional[int] = None
+    rerank_top_k: Optional[int] = None
+    source_filter: Optional[str] = None
+    heading_filter: Optional[str] = None
+    tenant_id: Optional[str] = None
+    skip_generation: bool = False
+    fast_path: Optional[bool] = None
+    memory_context: Optional[str] = None
+    memory_recent_turns: Optional[List[Dict[str, str]]] = None
+    conversation_id: Optional[str] = None
+    overall_timeout_ms: Optional[int] = None
+    stage_budget_overrides: Optional[Dict[str, int]] = None
+    max_query_iterations: Optional[int] = None
 
 
 @dataclass
@@ -77,17 +70,13 @@ class RAGResponse:
     conversation_id: Optional[str] = None
     guardrails: Optional[Dict[str, Any]] = None
     token_budget: Optional["TokenBudgetSnapshot"] = None
-    # Composite confidence scoring (populated when confidence routing is enabled)
     composite_confidence: Optional[float] = None
     confidence_breakdown: Optional[Dict[str, Any]] = None
     post_guardrail_action: Optional[str] = None
     version_conflicts: Optional[List[Dict[str, Any]]] = None
     retry_count: int = 0
     verification_warning: Optional[str] = None
-    # Retrieval quality indicator based on reranker scores
     retrieval_quality: Optional[str] = None  # "strong" | "moderate" | "weak" | "insufficient"
-    retrieval_quality_note: Optional[str] = None  # User-facing explanation
-    # Non-blocking re-retrieval: first response returned immediately,
-    # caller can request a second attempt with broader params
+    retrieval_quality_note: Optional[str] = None
     re_retrieval_suggested: bool = False
     re_retrieval_params: Optional[Dict[str, Any]] = None

@@ -1,25 +1,30 @@
 <!-- @summary
-Retrieval pipeline documentation: query/ranking spec, generation/safety spec, design docs, implementation guide, engineering guide, and onboarding checklist.
+Retrieval pipeline documentation: spec summary and onboarding checklist at the top level; full sub-pipeline docs (spec, design, implementation, engineering guide, tests) split into query/ and generation/.
 @end-summary -->
 
 # docs/retrieval
 
 ## Overview
 
-Engineering documentation for the retrieval and query-serving pipeline.
+Engineering documentation for the AION RAG retrieval pipeline. The pipeline is split into two sub-pipelines, each with its own spec, design, implementation plan, engineering guide, and module tests.
 
-## Files
+## Subdirectories
+
+| Directory | Covers |
+| --- | --- |
+| [`query/`](query/README.md) | Query processing, conversation memory, pre-retrieval guardrails, hybrid search, reranking |
+| [`generation/`](generation/README.md) | Document formatting, LLM generation, post-generation guardrails, observability, NFR |
+
+## Cross-Cutting Files
 
 | File | Purpose |
 | --- | --- |
-| `RETRIEVAL_QUERY_SPEC.md` | Query processing and ranking specification |
-| `RETRIEVAL_GENERATION_SPEC.md` | Generation and safety specification |
-| `RETRIEVAL_SPEC_SUMMARY.md` | Concise retrieval spec summary |
-| `RETRIEVAL_ENGINEERING_GUIDE.md` | Implementation-oriented walkthrough: architecture, flow, decisions, troubleshooting |
+| `RETRIEVAL_SPEC_SUMMARY.md` | Concise summary spanning both query and generation specs |
 | `RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md` | One-page onboarding checklist for new engineers |
 
 ## Key Starting Points
 
-- **New to the codebase?** Start with `RETRIEVAL_ENGINEERING_GUIDE.md`
-- **Understanding requirements?** Read `RETRIEVAL_QUERY_SPEC.md` + `RETRIEVAL_GENERATION_SPEC.md`
+- **New to the codebase?** Start with `RETRIEVAL_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`
+- **Understanding requirements?** Read `RETRIEVAL_SPEC_SUMMARY.md`, then drill into `query/RETRIEVAL_QUERY_SPEC.md` or `generation/RETRIEVAL_GENERATION_SPEC.md`
+- **Implementation details?** See `query/RETRIEVAL_QUERY_ENGINEERING_GUIDE.md` or `generation/RETRIEVAL_GENERATION_ENGINEERING_GUIDE.md`
 - **Guardrails setup?** See `docs/guardrails/nemo_guardrails/`
