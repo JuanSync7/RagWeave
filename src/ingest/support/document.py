@@ -17,7 +17,6 @@ attached metadata for downstream embedding and storage.
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import List, Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -37,16 +36,16 @@ class DocumentMetadata:
         tags: Optional list of tags extracted from a header block.
     """
     source: str = "unknown"
-    title: Optional[str] = None
-    author: Optional[str] = None
-    date: Optional[str] = None
-    tags: Optional[List[str]] = None
+    title: str | None = None
+    author: str | None = None
+    date: str | None = None
+    tags: list[str] | None = None
 
 
 # --- Stage 1: Header/Footer/Boilerplate Removal ---
 
 # Patterns for common boilerplate blocks to strip entirely
-_BOILERPLATE_PATTERNS = [
+_BOILERPLATE_PATTERNS: list[re.Pattern[str]] = [
     # Delimited header blocks: lines of ====... or ----... with content between
     # them (e.g., banner blocks). Only matches consecutive non-blank lines
     # sandwiched between delimiter lines.
@@ -307,7 +306,7 @@ def chunk_text(
     text: str,
     chunk_size: int = CHUNK_SIZE,
     chunk_overlap: int = CHUNK_OVERLAP,
-) -> List[str]:
+) -> list[str]:
     """Split text into overlapping chunks using recursive character splitting.
 
     Args:
@@ -329,7 +328,7 @@ def chunk_text(
 
 # --- Full Pipeline ---
 
-def process_document(raw_text: str, source: str = "unknown") -> List[ProcessedChunk]:
+def process_document(raw_text: str, source: str = "unknown") -> list[ProcessedChunk]:
     """Full document processing pipeline.
 
     Stages:

@@ -16,9 +16,7 @@ from src.ingest.common.types import Runtime
 class DocumentProcessingState(TypedDict, total=False):
     """Shared state flowing through the 5-node Document Processing DAG.
 
-    Populated progressively as nodes complete. The orchestrator is responsible
-    for the idempotency check (should_skip) BEFORE invoking this pipeline —
-    these fields are not present in this state.
+    Populated progressively as nodes complete.
 
     Fields
     ------
@@ -53,6 +51,8 @@ class DocumentProcessingState(TypedDict, total=False):
         LLM-rewritten text (self-contained paragraphs). None if refactoring disabled.
     errors : list[str]
         Error messages from any node. Non-empty triggers orchestrator failure path.
+    should_skip : bool
+        True if a strict-mode failure requires skipping downstream nodes.
     processing_log : list[str]
         Stage completion log entries for observability.
     """
@@ -72,4 +72,5 @@ class DocumentProcessingState(TypedDict, total=False):
     cleaned_text: str
     refactored_text: Optional[str]
     errors: List[str]
+    should_skip: bool
     processing_log: List[str]

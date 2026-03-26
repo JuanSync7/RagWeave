@@ -1,7 +1,7 @@
 """Tests for CleanDocumentStore atomic read/write."""
 import pytest
 from pathlib import Path
-from src.ingest.clean_store import CleanDocumentStore
+from src.ingest.common.clean_store import CleanDocumentStore
 
 
 def test_write_and_read(tmp_path):

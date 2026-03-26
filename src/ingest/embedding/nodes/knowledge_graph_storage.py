@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.ingest.common.shared import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
-def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict:
+def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Store processed chunks into the runtime knowledge graph builder.
 
     Args:
@@ -32,8 +34,15 @@ def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict:
             )
         }
 
-    for chunk in state["chunks"]:
-        kg_builder.add_chunk(chunk.text, source=state["source_name"])
+    try:
+        for chunk in state["chunks"]:
+            kg_builder.add_chunk(chunk.text, source=state["source_name"])
+    except Exception as exc:
+        return {
+            **state,
+            "errors": state.get("errors", []) + [f"kg_storage:{exc}"],
+            "processing_log": append_processing_log(state, "knowledge_graph_storage:error"),
+        }
     return {
         "processing_log": append_processing_log(state, "knowledge_graph_storage:ok")
     }

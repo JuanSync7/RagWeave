@@ -8,12 +8,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.ingest.support.markdown import clean_document
 from src.ingest.common.shared import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 
+_FIGURE_NOTES_HEADER = "\n\n## Figure Notes\n"
 
-def text_cleaning_node(state: DocumentProcessingState) -> dict:
+
+def text_cleaning_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Normalize source text and append generated multimodal notes.
 
     Args:
@@ -25,7 +29,7 @@ def text_cleaning_node(state: DocumentProcessingState) -> dict:
     """
     cleaned = clean_document(state["raw_text"])
     if state["multimodal_notes"]:
-        cleaned += "\n\n## Figure Notes\n" + "\n".join(
+        cleaned += _FIGURE_NOTES_HEADER + "\n".join(
             f"- {note}" for note in state["multimodal_notes"]
         )
     return {

@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
-from src.ingest.common.shared import _cross_refs, append_processing_log
+from typing import Any
+
+from src.ingest.common.shared import cross_refs, append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
-def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict:
+def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Extract document cross-reference patterns when this stage is enabled.
 
     Args:
@@ -31,7 +33,7 @@ def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict:
         }
     text = state.get("refactored_text") or state.get("cleaned_text", "")
     return {
-        "cross_references": _cross_refs(text),
+        "cross_references": cross_refs(text),
         "processing_log": append_processing_log(
             state, "cross_reference_extraction:ok"
         ),

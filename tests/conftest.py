@@ -171,6 +171,46 @@ def _install_stub_modules() -> None:
         transformers.AutoTokenizer = _Tokenizer
         sys.modules["transformers"] = transformers
 
+    if "minio" not in sys.modules:
+        minio_mod = types.ModuleType("minio")
+
+        class Minio:
+            """Lightweight stub for the Minio client used in document storage tests."""
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def put_object(self, *args, **kwargs):
+                pass
+
+            def fput_object(self, *args, **kwargs):
+                pass
+
+            def bucket_exists(self, *args, **kwargs):
+                return True
+
+            def make_bucket(self, *args, **kwargs):
+                pass
+
+        minio_mod.Minio = Minio
+        sys.modules["minio"] = minio_mod
+
+        # minio.error sub-module — needed by src/db/minio/store.py
+        minio_error_mod = types.ModuleType("minio.error")
+
+        class S3Error(Exception):
+            """Stub for minio.error.S3Error."""
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args)
+
+        minio_error_mod.S3Error = S3Error
+        minio_mod.error = minio_error_mod
+        sys.modules["minio.error"] = minio_error_mod
+
+        # minio.commonconfig — sometimes imported for ObjectWriteResult etc.
+        minio_commonconfig = types.ModuleType("minio.commonconfig")
+        sys.modules["minio.commonconfig"] = minio_commonconfig
+
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")
 

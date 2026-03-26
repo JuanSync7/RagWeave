@@ -14,7 +14,7 @@ pipeline nodes.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 from config.settings import (
     CHUNK_OVERLAP,
@@ -237,17 +237,17 @@ class IngestState(TypedDict):
     existing_hash: str
     existing_source_uri: str
     should_skip: bool
-    errors: List[str]
-    processing_log: List[str]
+    errors: list[str]
+    processing_log: list[str]
     raw_text: str
-    structure: Dict[str, Any]
-    multimodal_notes: List[str]
+    structure: dict[str, Any]
+    multimodal_notes: list[str]
     cleaned_text: str
     refactored_text: str
-    chunks: List[ProcessedChunk]
+    chunks: list[ProcessedChunk]
     metadata_summary: str
-    metadata_keywords: List[str]
-    cross_references: List[Dict[str, str]]
-    kg_triples: List[Dict[str, Any]]
+    metadata_keywords: list[str]
+    cross_references: list[dict[str, str]]
+    kg_triples: list[dict[str, Any]]
     stored_count: int
     runtime: Runtime

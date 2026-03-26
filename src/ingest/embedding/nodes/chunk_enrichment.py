@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.vector_db import build_chunk_id
 from src.ingest.common.shared import append_processing_log, map_chunk_provenance
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
-def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict:
+def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Attach stable chunk IDs and enriched content fields to chunk metadata.
 
     This node assigns a deterministic chunk ID, adds retrieval/citation fields,

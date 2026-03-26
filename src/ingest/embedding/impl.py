@@ -68,4 +68,8 @@ def run_embedding_pipeline(
         "errors": [],
         "processing_log": [],
     }
-    return _GRAPH.invoke(initial_state)
+    try:
+        final_state = _GRAPH.invoke(initial_state)
+    except Exception as exc:
+        final_state = {**initial_state, "errors": [f"embedding_graph:{exc}"], "stored_count": 0}
+    return final_state

@@ -11,6 +11,7 @@ Uses transformers directly instead of FlagEmbedding to avoid compatibility
 issues with transformers >= 5.x.
 """
 
+import math
 from typing import List
 
 import torch
@@ -93,14 +94,13 @@ class LocalBGEReranker:
                     return_tensors="pt",
                 ).to(self.device)
                 logits = self.model(**inputs).logits.squeeze(-1).float()
-                # Apply sigmoid via manual computation to avoid API differences
-                # across transformers/torch versions: newer transformers wraps
-                # logits in a _Logits object that lacks .sigmoid(), and
-                # torch.sigmoid() was removed in torch 2.x.
-                batch_scores: List[float] = (1.0 / (1.0 + (-logits).exp())).cpu().tolist()
-                # If batch contains exactly one document, tolist() returns a scalar.
-                if isinstance(batch_scores, float):
-                    batch_scores = [batch_scores]
+                # Materialize to Python floats before sigmoid to avoid _Logits
+                # proxy limitations in transformers >= 4.50 (no __neg__, no
+                # .sigmoid()) and torch.sigmoid removal in torch 2.x.
+                scores_raw = logits.cpu().tolist()
+                if isinstance(scores_raw, float):
+                    scores_raw = [scores_raw]
+                batch_scores: List[float] = [1.0 / (1.0 + math.exp(-x)) for x in scores_raw]
                 scores.extend(batch_scores)
 
             results = [

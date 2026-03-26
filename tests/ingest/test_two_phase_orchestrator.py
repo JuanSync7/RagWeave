@@ -3,7 +3,7 @@ import hashlib
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from src.ingest.pipeline.impl import ingest_file
+from src.ingest.impl import ingest_file
 
 
 def _make_runtime(tmp_path, store_subdir="store"):
@@ -61,9 +61,9 @@ def test_ingest_file_returns_source_hash(tmp_path):
     doc.write_text("Hello world document content.")
     runtime = _make_runtime(tmp_path)
 
-    with patch("src.ingest.pipeline.impl.run_document_processing",
+    with patch("src.ingest.impl.run_document_processing",
                return_value=_phase1_result(doc)), \
-         patch("src.ingest.pipeline.impl.run_embedding_pipeline",
+         patch("src.ingest.impl.run_embedding_pipeline",
                return_value=_phase2_result()):
         result = ingest_file(
             source_path=doc, runtime=runtime,
@@ -72,10 +72,9 @@ def test_ingest_file_returns_source_hash(tmp_path):
             connector="local_fs", source_version="12345",
         )
 
-    assert "source_hash" in result
-    assert result["source_hash"] == hashlib.sha256(doc.read_bytes()).hexdigest()
-    assert result["stored_count"] == 3
-    assert result["errors"] == []
+    assert result.source_hash == hashlib.sha256(doc.read_bytes()).hexdigest()
+    assert result.stored_count == 3
+    assert result.errors == []
 
 
 def test_ingest_file_writes_clean_store(tmp_path):
@@ -85,9 +84,9 @@ def test_ingest_file_writes_clean_store(tmp_path):
     store_dir = tmp_path / "store"
     runtime = _make_runtime(tmp_path, store_subdir="store")
 
-    with patch("src.ingest.pipeline.impl.run_document_processing",
+    with patch("src.ingest.impl.run_document_processing",
                return_value=_phase1_result(doc, cleaned="Clean document text.")), \
-         patch("src.ingest.pipeline.impl.run_embedding_pipeline",
+         patch("src.ingest.impl.run_embedding_pipeline",
                return_value=_phase2_result()):
         ingest_file(
             source_path=doc, runtime=runtime,
@@ -96,7 +95,7 @@ def test_ingest_file_writes_clean_store(tmp_path):
             connector="local_fs", source_version="99999",
         )
 
-    from src.ingest.clean_store import CleanDocumentStore
+    from src.ingest.common.clean_store import CleanDocumentStore
     store = CleanDocumentStore(store_dir)
     assert store.exists("local_fs:test:2")
     text, meta = store.read("local_fs:test:2")
@@ -117,9 +116,9 @@ def test_phase1_errors_skip_phase2(tmp_path):
         "processing_log": ["document_ingestion:failed"],
     }
 
-    with patch("src.ingest.pipeline.impl.run_document_processing",
+    with patch("src.ingest.impl.run_document_processing",
                return_value=phase1_with_error), \
-         patch("src.ingest.pipeline.impl.run_embedding_pipeline") as mock_p2:
+         patch("src.ingest.impl.run_embedding_pipeline") as mock_p2:
         result = ingest_file(
             source_path=doc, runtime=runtime,
             source_name="doc.txt", source_uri=doc.as_uri(),
@@ -127,8 +126,8 @@ def test_phase1_errors_skip_phase2(tmp_path):
             connector="local_fs", source_version="0",
         )
 
-    assert result["errors"] == ["read_failed:doc.txt:some error"]
-    assert result["stored_count"] == 0
+    assert result.errors == ["read_failed:doc.txt:some error"]
+    assert result.stored_count == 0
     mock_p2.assert_not_called()
 
 
@@ -140,9 +139,9 @@ def test_phase2_errors_propagate(tmp_path):
 
     phase2_with_error = {**_phase2_result(), "errors": ["embed_failed:weaviate_down"]}
 
-    with patch("src.ingest.pipeline.impl.run_document_processing",
+    with patch("src.ingest.impl.run_document_processing",
                return_value=_phase1_result(doc)), \
-         patch("src.ingest.pipeline.impl.run_embedding_pipeline",
+         patch("src.ingest.impl.run_embedding_pipeline",
                return_value=phase2_with_error):
         result = ingest_file(
             source_path=doc, runtime=runtime,
@@ -151,4 +150,4 @@ def test_phase2_errors_propagate(tmp_path):
             connector="local_fs", source_version="1",
         )
 
-    assert "embed_failed:weaviate_down" in result["errors"]
+    assert "embed_failed:weaviate_down" in result.errors

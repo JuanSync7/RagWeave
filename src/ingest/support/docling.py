@@ -188,7 +188,12 @@ def parse_with_docling(
         converter_kwargs["artifacts_path"] = artifacts_path
 
     converter = DocumentConverter(**converter_kwargs)
-    result = converter.convert(str(source_path))
+    try:
+        result = converter.convert(str(source_path))
+    except Exception as exc:
+        raise RuntimeError(
+            f"Docling conversion failed for {source_path}: {exc}"
+        ) from exc
     document = getattr(result, "document", None)
     if document is None:
         raise RuntimeError("Docling conversion did not return a document object")

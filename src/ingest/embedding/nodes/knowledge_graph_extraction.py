@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.core.knowledge_graph import EntityExtractor
 from src.ingest.common.shared import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
-def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict:
+def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Extract entity relations and stage triples for downstream KG storage.
 
     Args:
@@ -31,20 +33,27 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict:
             )
         }
 
-    extractor = EntityExtractor()
-    triples = []
-    for chunk in state["chunks"]:
-        entities = extractor.extract_entities(chunk.text)
-        relations = extractor.extract_relations(chunk.text, entities)
-        triples.extend(
-            {
-                "subject": subject,
-                "predicate": predicate,
-                "object": obj,
-                "source": state["source_name"],
-            }
-            for subject, predicate, obj in relations
-        )
+    try:
+        extractor = EntityExtractor()
+        triples = []
+        for chunk in state["chunks"]:
+            entities = extractor.extract_entities(chunk.text)
+            relations = extractor.extract_relations(chunk.text, entities)
+            triples.extend(
+                {
+                    "subject": subject,
+                    "predicate": predicate,
+                    "object": obj,
+                    "source": state["source_name"],
+                }
+                for subject, predicate, obj in relations
+            )
+    except Exception as exc:
+        return {
+            **state,
+            "errors": state.get("errors", []) + [f"kg_extraction:{exc}"],
+            "processing_log": append_processing_log(state, "knowledge_graph_extraction:error"),
+        }
 
     return {
         "kg_triples": triples,

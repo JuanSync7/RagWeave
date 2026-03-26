@@ -11,7 +11,6 @@ chunks using MarkdownHeaderTextSplitter to preserve document structure.
 """
 
 import re
-from typing import List, Optional
 
 import numpy as np
 from langchain_text_splitters import (
@@ -36,6 +35,17 @@ from src.ingest.support.document import (
 )
 
 
+# Module-level pre-compiled regex patterns
+_WIKI_HEADING_RE = re.compile(
+    r"^\s*(\={2,})\s*(.*?)\s*\={2,}\s*$",
+    re.MULTILINE,
+)
+_NUMBERED_HEADING_RE = re.compile(
+    r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Za-z &/()\-]+(?:\s+[A-Za-z][A-Za-z &/()\-]*)*)$",
+    re.MULTILINE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+|\n\n+')
+
 # Headers the markdown splitter will split on
 _HEADERS_TO_SPLIT = [
     ("#", "h1"),
@@ -59,12 +69,7 @@ def normalize_headings_to_markdown(text: str) -> str:
         heading = m.group(2).strip()
         return "#" * min(level, 6) + " " + heading
 
-    text = re.sub(
-        r"^\s*(\={2,})\s*(.*?)\s*\={2,}\s*$",
-        _wiki_to_md,
-        text,
-        flags=re.MULTILINE,
-    )
+    text = _WIKI_HEADING_RE.sub(_wiki_to_md, text)
 
     # Numbered ALL-CAPS sections: "1. INTRODUCTION" -> "## Introduction"
     # "2.1 Supervised Learning" -> "### Supervised Learning"
@@ -77,17 +82,12 @@ def normalize_headings_to_markdown(text: str) -> str:
             heading_text = heading_text.title()
         return "#" * min(depth, 6) + " " + heading_text
 
-    text = re.sub(
-        r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Za-z &/()\-]+(?:\s+[A-Za-z][A-Za-z &/()\-]*)*)$",
-        _numbered_to_md,
-        text,
-        flags=re.MULTILINE,
-    )
+    text = _NUMBERED_HEADING_RE.sub(_numbered_to_md, text)
 
     return text
 
 
-def _split_sentences(text: str) -> List[str]:
+def _split_sentences(text: str) -> list[str]:
     """Split text into sentences using a regex heuristic.
 
     Args:
@@ -96,7 +96,7 @@ def _split_sentences(text: str) -> List[str]:
     Returns:
         List of non-empty sentence-like segments.
     """
-    raw = re.split(r'(?<=[.!?])\s+|\n\n+', text)
+    raw = _SENTENCE_SPLIT_RE.split(text)
     return [s.strip() for s in raw if s.strip()]
 
 
@@ -104,18 +104,24 @@ def _semantic_split(
     text: str,
     embedder,
     threshold: float = SEMANTIC_SIMILARITY_THRESHOLD,
-) -> List[str]:
+) -> list[str]:
     """Split text into semantically coherent chunks.
 
     Embeds each sentence, computes cosine similarity between consecutive
     sentences, and splits where similarity drops below threshold.
     """
+    if embedder is None:
+        return [text]
+
     sentences = _split_sentences(text)
     if len(sentences) <= 1:
         return [text]
 
     # Batch encode all sentences (returns L2-normalized numpy array)
-    embeddings = embedder.encode_sentences(sentences)
+    try:
+        embeddings = embedder.encode_sentences(sentences)
+    except Exception:
+        return sentences
 
     # Cosine similarity between consecutive sentences (dot product on normalized vectors)
     similarities = np.array([
@@ -145,7 +151,7 @@ def chunk_markdown(
     chunk_size: int = CHUNK_SIZE,
     chunk_overlap: int = CHUNK_OVERLAP,
     embedder=None,
-) -> List[dict]:
+) -> list[dict]:
     """Split text using markdown headers, then semantic or character splitting.
 
     If embedder is provided and SEMANTIC_CHUNKING_ENABLED, uses semantic
@@ -264,7 +270,7 @@ def clean_document(raw_text: str) -> str:
 
 def process_document_markdown(
     raw_text: str, source: str = "unknown", embedder=None
-) -> List[ProcessedChunk]:
+) -> list[ProcessedChunk]:
     """Full markdown-preserving document processing pipeline.
 
     Stages:

@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from src.ingest.common.utils import read_text_with_fallbacks, sha256_path
 from src.ingest.common.shared import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 
 
-def document_ingestion_node(state: DocumentProcessingState) -> dict:
+def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Read source content and compute SHA-256 hash.
 
     The idempotency skip check is handled by the orchestrator before this

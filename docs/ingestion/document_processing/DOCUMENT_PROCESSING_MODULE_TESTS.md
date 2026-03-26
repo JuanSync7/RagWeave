@@ -54,9 +54,9 @@ boundary conditions, and test gaps not covered by Phase A spec tests.
 **Boundary condition tests** (derived from engineering guide Test guide section):
 - [ ] `test_document_ingestion_node_handles_empty_file` — FR-103: Given a zero-byte source file, the node returns `raw_text` as an empty string and computes a valid SHA-256 hash (the hash of empty bytes: `e3b0c44...`)
 - [ ] `test_document_ingestion_node_handles_very_large_file` — FR-103: Given a file exceeding typical memory assumptions (e.g., 50 MB text), the node still returns `raw_text` and `source_hash` without error
-- [ ] `test_document_ingestion_node_handles_binary_content_with_replacement` — FR-108: Given a file containing invalid byte sequences in all encodings, the encoding fallback chain reaches UTF-8 with replacement characters and returns text with U+FFFD markers
-- [ ] `test_document_ingestion_node_handles_latin1_encoded_file` — FR-108: Given a Latin-1 encoded file containing `\xb5` (micro sign), the fallback chain decodes it correctly to `µ`
-- [ ] `test_document_ingestion_node_handles_cp1252_encoded_file` — FR-108: Given a CP1252 encoded file containing curly quotes (`\x93`, `\x94`), the fallback chain decodes them correctly
+- [ ] `test_document_ingestion_node_handles_binary_content_with_replacement` — FR-108: Given `read_text_with_fallbacks` returning text with U+FFFD replacement characters (mocked), the node returns that text as `raw_text` without error
+- [ ] `test_document_ingestion_node_handles_latin1_encoded_file` — FR-108: Given a file containing byte `\xb5` (invalid in UTF-8 alone), `read_text_with_fallbacks` decodes it via the latin-1 fallback to `µ`; the node returns the decoded text as `raw_text`
+- [ ] `test_document_ingestion_node_handles_cp1252_bytes_via_latin1` — FR-108: Given a file containing bytes `\x93\x94` (CP1252 curly quotes), `read_text_with_fallbacks` decodes them via latin-1 without error (these bytes are valid latin-1 control chars); the node returns `raw_text` without raising
 
 **Error scenario tests:**
 - [ ] `test_document_ingestion_node_error_format_includes_filename_and_exception` — FR-112: The `errors` entry format is `read_failed:{filename}:{exception}`, verified by parsing the returned error string
@@ -460,13 +460,13 @@ Expected: FAIL (new coverage gaps)
 ```python
 """
 Phase D white-box tests for CleanDocumentStore.
-Derived from: DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md — Section: `src/ingest/clean_store.py`
+Derived from: DOCUMENT_PROCESSING_ENGINEERING_GUIDE.md — Section: `src/ingest/common/clean_store.py`
 FR coverage: FR-581, FR-582, FR-583, FR-584, FR-586, FR-587
 """
 import pytest
 import hashlib
 from pathlib import Path
-from src.ingest.clean_store import CleanDocumentStore
+from src.ingest.common.clean_store import CleanDocumentStore
 ```
 
 ### Verification

@@ -20,8 +20,11 @@ from __future__ import annotations
 import hashlib
 import orjson
 import logging
+import re
 from pathlib import Path
 from typing import Any, Optional
+
+_UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|]')
 
 from config.settings import (
     GLINER_ENABLED,
@@ -43,7 +46,7 @@ from src.ingest.support.docling import ensure_docling_ready
 from src.ingest.support.vision import ensure_vision_ready
 from src.ingest.common.schemas import ManifestEntry, SourceIdentity
 from src.ingest.common.utils import load_manifest, save_manifest, sha256_path
-from src.ingest.common.shared import _extract_keywords_fallback
+from src.ingest.common.shared import extract_keywords_fallback
 from src.ingest.common.types import (
     IngestionConfig,
     IngestionDesignCheck,
@@ -52,7 +55,7 @@ from src.ingest.common.types import (
     PIPELINE_NODE_NAMES,
     Runtime,
 )
-from src.ingest.clean_store import CleanDocumentStore
+from src.ingest.common.clean_store import CleanDocumentStore
 from src.ingest.doc_processing.impl import run_document_processing
 from src.ingest.embedding.impl import run_embedding_pipeline
 
@@ -113,7 +116,7 @@ def _mirror_file_stem(source_name: str, source_key: str) -> str:
     Returns:
         A filesystem-safe stem value.
     """
-    safe_name = source_name.replace("/", "__").replace("\\", "__")
+    safe_name = _UNSAFE_CHARS.sub("_", source_name)
     suffix = hashlib.sha1(source_key.encode("utf-8")).hexdigest()[:8]
     return f"{safe_name}.{suffix}"
 
@@ -269,7 +272,7 @@ def ingest_file(
     source_version: str,
     existing_hash: str = "",
     existing_source_uri: str = "",
-) -> dict:
+) -> IngestFileResult:
     """Run the two-phase ingestion pipeline for a single source file.
 
     Phase 1 (Document Processing) extracts and cleans the document.
@@ -308,6 +311,7 @@ def ingest_file(
         source_version=source_version,
     )
 
+    # run_document_processing always returns a DocumentProcessingState TypedDict (never None).
     if phase1.get("errors"):
         return IngestFileResult(
             errors=phase1["errors"],
@@ -581,7 +585,7 @@ def ingest_directory(
                         export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
                         PROCESSED_DIR.mkdir(exist_ok=True)
                         (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(_clean_text, encoding="utf-8")
-            except Exception as exc:
+            except (OSError, ValueError, RuntimeError) as exc:
                 failed += 1
                 logger.exception(
                     "ingestion_unhandled_error source=%s error=%s",

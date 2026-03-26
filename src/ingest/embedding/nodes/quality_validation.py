@@ -9,12 +9,15 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from src.ingest.common.shared import _quality_score, append_processing_log
+from src.ingest.common.shared import quality_score, append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
+_WHITESPACE_RE = re.compile(r"\s+")
 
-def quality_validation_node(state: EmbeddingPipelineState) -> dict:
+
+def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Filter chunks by heuristic quality thresholds and deduplicate text.
 
     Args:
@@ -34,12 +37,16 @@ def quality_validation_node(state: EmbeddingPipelineState) -> dict:
     seen_normalized = set()
     for chunk in state["chunks"]:
         text = chunk.text.strip()
-        normalized = re.sub(r"\s+", " ", text).lower()
+        normalized = _WHITESPACE_RE.sub(" ", text).lower()
         if len(text) < config.min_chunk_chars:
             continue
         if normalized in seen_normalized:
             continue
-        if _quality_score(text) < config.min_quality_score:
+        try:
+            score = quality_score(text)
+        except Exception:
+            score = 0.0  # fail safe: low quality
+        if score < config.min_quality_score:
             continue
         seen_normalized.add(normalized)
         filtered_chunks.append(chunk)

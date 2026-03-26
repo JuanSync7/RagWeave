@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.vector_db import (
     add_documents,
     delete_by_source_key,
@@ -18,7 +20,7 @@ from src.ingest.common.shared import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
-def embedding_storage_node(state: EmbeddingPipelineState) -> dict:
+def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Persist chunk embeddings and metadata into the configured vector store.
 
     Args:
@@ -36,24 +38,31 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict:
         }
 
     runtime = state["runtime"]
-    ensure_collection(runtime.weaviate_client)
-    if runtime.config.update_mode:
-        delete_by_source_key(
-            runtime.weaviate_client,
-            state["source_key"],
-            legacy_source=state["source_name"],
-        )
+    try:
+        ensure_collection(runtime.weaviate_client)
+        if runtime.config.update_mode:
+            delete_by_source_key(
+                runtime.weaviate_client,
+                state["source_key"],
+                legacy_source=state["source_name"],
+            )
 
-    texts = [chunk.metadata.get("enriched_content", chunk.text) for chunk in state["chunks"]]
-    vectors = runtime.embedder.embed_documents(texts)
-    records = [
-        DocumentRecord(text=text, embedding=vector, metadata=chunk.metadata)
-        for text, vector, chunk in zip(texts, vectors, state["chunks"])
-    ]
-    stored_count = add_documents(
-        runtime.weaviate_client, records,
-        collection=runtime.config.target_collection or None,
-    )
+        texts = [chunk.metadata.get("enriched_content", chunk.text) for chunk in state["chunks"]]
+        vectors = runtime.embedder.embed_documents(texts)
+        records = [
+            DocumentRecord(text=text, embedding=vector, metadata=chunk.metadata)
+            for text, vector, chunk in zip(texts, vectors, state["chunks"])
+        ]
+        stored_count = add_documents(
+            runtime.weaviate_client, records,
+            collection=runtime.config.target_collection or None,
+        )
+    except Exception as exc:
+        return {
+            **state,
+            "errors": state.get("errors", []) + [f"embedding_storage:{exc}"],
+            "processing_log": append_processing_log(state, "embedding_storage:error"),
+        }
     return {
         "stored_count": stored_count,
         "processing_log": append_processing_log(state, "embedding_storage:ok"),

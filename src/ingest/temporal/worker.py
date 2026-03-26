@@ -67,7 +67,7 @@ async def run_worker(
 
 def main() -> None:
     import os
-    concurrency = int(os.environ.get("RAG_INGEST_WORKER_CONCURRENCY", "2"))
+    concurrency = int(os.environ.get("RAG_INGEST_WORKER_CONCURRENCY", "4"))
     queue = os.environ.get("RAG_INGEST_TASK_QUEUE", TEMPORAL_TASK_QUEUE)
     logging.basicConfig(level=logging.INFO)
     asyncio.run(run_worker(task_queue=queue, max_concurrent_activities=concurrency))

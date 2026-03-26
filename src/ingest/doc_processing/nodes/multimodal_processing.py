@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from src.ingest.common.shared import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.support.vision import generate_vision_notes
 
 
-def multimodal_processing_node(state: DocumentProcessingState) -> dict:
+def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Generate multimodal notes when figure references are detected and enabled.
 
     This node adds lightweight figure notes when a document references figures,
@@ -49,6 +50,8 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict:
                 config=config,
             )
             if vision_notes:
+                # Prepend vision notes before the plain-text figure notes,
+                # keeping any overflow plain notes that vision did not cover.
                 notes = vision_notes + notes[len(vision_notes) :]
         except Exception as exc:
             if config.vision_strict:

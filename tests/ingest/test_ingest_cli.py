@@ -1,4 +1,4 @@
-from ingest import _build_parser
+from src.ingest.cli import _build_parser
 
 
 def test_verbose_stages_defaults_to_none():

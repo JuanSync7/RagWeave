@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from src.ingest.support.docling import parse_with_docling
 from src.ingest.common.shared import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 
+_FIGURE_PATTERN = re.compile(r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", re.IGNORECASE)
+_HEADING_PATTERN = re.compile(
+    r"^\s*(?:#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+[A-Z].+)$", re.MULTILINE
+)
+_MAX_FIGURES = 32
 
-def structure_detection_node(state: DocumentProcessingState) -> dict:
+
+def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Extract lightweight structural signals from raw document text.
 
     When Docling parsing is enabled, this node attempts to parse the source file
@@ -62,29 +69,17 @@ def structure_detection_node(state: DocumentProcessingState) -> dict:
                         "structure_detection:failed",
                     ),
                 }
-            figures = re.findall(
-                r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", raw_text, flags=re.IGNORECASE
-            )
-            headings = re.findall(
-                r"^\s*(?:#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+[A-Z].+)$",
-                raw_text,
-                flags=re.MULTILINE,
-            )
+            figures = _FIGURE_PATTERN.findall(raw_text)
+            headings = _HEADING_PATTERN.findall(raw_text)
     else:
-        figures = re.findall(
-            r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", raw_text, flags=re.IGNORECASE
-        )
-        headings = re.findall(
-            r"^\s*(?:#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+[A-Z].+)$",
-            raw_text,
-            flags=re.MULTILINE,
-        )
+        figures = _FIGURE_PATTERN.findall(raw_text)
+        headings = _HEADING_PATTERN.findall(raw_text)
 
     return {
         "raw_text": parsed_text,
         "structure": {
             "has_figures": bool(figures),
-            "figures": figures[:32],
+            "figures": figures[:_MAX_FIGURES],
             "heading_count": len(headings),
             "docling_enabled": bool(config.enable_docling_parser),
             "docling_model": str(config.docling_model),

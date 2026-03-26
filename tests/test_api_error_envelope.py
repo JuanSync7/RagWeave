@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from server import api
 from src.platform.security import auth
-from src.platform.security.auth import Principal
+from src.platform.security.auth import authenticate_request, Principal
 
 
 class _DummyWorkflowService:
@@ -95,7 +95,7 @@ def test_403_role_error_uses_standard_envelope(monkeypatch):
         )
 
     monkeypatch.setattr(api.Client, "connect", _fake_connect)
-    api.app.dependency_overrides[api.authenticate_request] = _viewer_principal
+    api.app.dependency_overrides[authenticate_request] = _viewer_principal
     try:
         with TestClient(api.app, raise_server_exceptions=False) as client:
             response = client.post("/query", json={"query": "hello"})

@@ -1,6 +1,6 @@
 # @summary
 # Ingestion pipeline shared helpers for keyword fallback, stage logging, and provenance mapping.
-# Exports: _extract_keywords_fallback, append_processing_log, map_chunk_provenance
+# Exports: extract_keywords_fallback, cross_refs, quality_score, append_processing_log, map_chunk_provenance
 # Deps: difflib, logging, re, src.ingest.common.types
 # @end-summary
 
@@ -20,7 +20,30 @@ from src.ingest.common.types import IngestState
 
 logger = logging.getLogger("rag.ingest.pipeline.stage")
 
-def _extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
+# -- Pre-compiled regex patterns -----------------------------------------------
+
+_KEYWORD_PATTERN = re.compile(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", re.UNICODE)
+
+_CROSS_REF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bDOC-\d{2,}\b", re.IGNORECASE), "document_id"),
+    (re.compile(r"\bSection\s+\d+(?:\.\d+){0,3}\b", re.IGNORECASE), "section"),
+    (re.compile(r"\bRFC\s+\d{3,5}\b", re.IGNORECASE), "standard"),
+]
+
+# -- Named constants for magic numbers -----------------------------------------
+
+_QUALITY_BASE = 0.4
+_QUALITY_BONUS = 0.2
+_MIN_BONUS_LEN = 120
+_QUALITY_PER_CHAR = 0.01
+_QUALITY_MAX = 1.0
+
+_ANCHOR_PREVIEW = 220
+_PARA_PREVIEW = 600
+_MIN_PARA_SIM = 0.45
+
+
+def extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
     """Extract frequent keyword candidates when LLM metadata is unavailable.
 
     Args:
@@ -30,7 +53,7 @@ def _extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
     Returns:
         A list of lowercase keyword candidates sorted by descending frequency.
     """
-    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", text.lower())
+    words = _KEYWORD_PATTERN.findall(text.lower())
     freq: dict[str, int] = {}
     for word in words:
         freq[word] = freq.get(word, 0) + 1
@@ -38,7 +61,7 @@ def _extract_keywords_fallback(text: str, max_keywords: int) -> list[str]:
     return [word for word, _ in ranked[:max_keywords]]
 
 
-def _cross_refs(text: str) -> list[dict[str, str]]:
+def cross_refs(text: str) -> list[dict[str, str]]:
     """Extract simple cross-reference patterns from source text.
 
     Args:
@@ -48,18 +71,13 @@ def _cross_refs(text: str) -> list[dict[str, str]]:
         A list of reference dictionaries with ``type`` and ``value`` keys.
     """
     refs: list[dict[str, str]] = []
-    patterns = [
-        (r"\bDOC-\d{2,}\b", "document_id"),
-        (r"\bSection\s+\d+(?:\.\d+){0,3}\b", "section"),
-        (r"\bRFC\s+\d{3,5}\b", "standard"),
-    ]
-    for pattern, ref_type in patterns:
-        for match in re.findall(pattern, text, flags=re.IGNORECASE):
+    for pattern, ref_type in _CROSS_REF_PATTERNS:
+        for match in pattern.findall(text):
             refs.append({"type": ref_type, "value": match})
     return refs
 
 
-def _quality_score(text: str) -> float:
+def quality_score(text: str) -> float:
     """Compute heuristic quality score for a chunk.
 
     Args:
@@ -68,9 +86,9 @@ def _quality_score(text: str) -> float:
     Returns:
         A score in ``(0.0, 1.0]`` where higher implies "more complete" content.
     """
-    score = 0.4 + (0.2 if len(text) >= 120 else 0)
-    score += min(0.2, len(re.findall(r"\d", text)) * 0.01)
-    return min(1.0, score)
+    score = _QUALITY_BASE + (_QUALITY_BONUS if len(text) >= _MIN_BONUS_LEN else 0)
+    score += min(_QUALITY_BONUS, len(re.findall(r"\d", text)) * _QUALITY_PER_CHAR)
+    return min(_QUALITY_MAX, score)
 
 
 def append_processing_log(state: IngestState, message: str) -> list[str]:
@@ -139,8 +157,8 @@ def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
             continue
         ratio = difflib.SequenceMatcher(
             None,
-            anchor[:220].lower(),
-            para[:600].lower(),
+            anchor[:_ANCHOR_PREVIEW].lower(),
+            para[:_PARA_PREVIEW].lower(),
         ).ratio()
         if ratio > best_ratio:
             idx = text.find(paragraph, offset)
@@ -193,7 +211,7 @@ def map_chunk_provenance(
 
     if orig_start < 0:
         para_start, para_end, ratio = _best_paragraph_span(original_text, chunk_text)
-        if para_start >= 0 and ratio >= 0.45:
+        if para_start >= 0 and ratio >= _MIN_PARA_SIM:
             orig_start, orig_end = para_start, para_end
             orig_method = "paragraph_fuzzy"
             confidence = round(min(0.79, ratio), 3)
@@ -213,9 +231,9 @@ def map_chunk_provenance(
 
 
 __all__ = [
-    "_extract_keywords_fallback",
-    "_cross_refs",
-    "_quality_score",
+    "extract_keywords_fallback",
+    "cross_refs",
+    "quality_score",
     "append_processing_log",
     "map_chunk_provenance",
 ]

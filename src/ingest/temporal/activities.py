@@ -92,26 +92,26 @@ class SourceArgs:
 class ActivityArgs:
     """Full input for either ingestion activity."""
     source: SourceArgs
-    config: dict  # IngestionConfig serialised via dataclasses.asdict()
+    config: dict[str, Any]  # IngestionConfig serialised via dataclasses.asdict()
 
 
 @dataclass
 class DocProcessingResult:
     """Output of document_processing_activity."""
-    errors: list
+    errors: list[str]
     source_hash: str
     clean_hash: str
-    processing_log: list
+    processing_log: list[str]
 
 
 @dataclass
 class EmbeddingResult:
     """Output of embedding_pipeline_activity."""
-    errors: list
+    errors: list[str]
     stored_count: int
     metadata_summary: str
-    metadata_keywords: list
-    processing_log: list
+    metadata_keywords: list[str]
+    processing_log: list[str]
 
 
 # ---------------------------------------------------------------------------

@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.db import build_document_id, ensure_bucket, put_document
 from src.ingest.common.shared import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
-def document_storage_node(state: EmbeddingPipelineState) -> dict:
+def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Compute a stable document_id and persist the clean markdown to MinIO.
 
     Runs before chunking so that ``document_id`` is available to all downstream
@@ -49,8 +51,15 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict:
         "connector": state["connector"],
     }
 
-    ensure_bucket(runtime.db_client, runtime.config.target_bucket or None)
-    put_document(runtime.db_client, document_id, content, metadata, runtime.config.target_bucket or None)
+    try:
+        ensure_bucket(runtime.db_client, runtime.config.target_bucket or None)
+        put_document(runtime.db_client, document_id, content, metadata, runtime.config.target_bucket or None)
+    except Exception as exc:
+        return {
+            **state,
+            "errors": state.get("errors", []) + [f"document_storage:{exc}"],
+            "processing_log": append_processing_log(state, "document_storage:error"),
+        }
 
     return {
         "document_id": document_id,

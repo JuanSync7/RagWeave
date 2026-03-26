@@ -205,7 +205,7 @@ _VISION_PROMPT = (
 def _describe_image(
     candidate: VisionImageCandidate,
     config: IngestionConfig,
-) -> VisionDescription:
+) -> VisionDescription | None:
     """Call a VLM via LiteLLM and normalize the result.
 
     Args:
@@ -216,16 +216,24 @@ def _describe_image(
         A normalized `VisionDescription`.
     """
     provider = get_llm_provider()
-    response = provider.vision_completion(
-        prompt=_VISION_PROMPT,
-        image_b64=candidate.image_b64,
-        mime_type=candidate.mime_type,
-        model_alias="vision",
-        temperature=config.vision_temperature,
-        max_tokens=config.vision_max_tokens,
-        timeout=config.vision_timeout_seconds,
-    )
-    parsed = parse_json_object(response.content)
+    try:
+        response = provider.vision_completion(
+            prompt=_VISION_PROMPT,
+            image_b64=candidate.image_b64,
+            mime_type=candidate.mime_type,
+            model_alias="vision",
+            temperature=config.vision_temperature,
+            max_tokens=config.vision_max_tokens,
+            timeout=config.vision_timeout_seconds,
+        )
+        parsed = parse_json_object(response.content)
+    except Exception as exc:
+        logger.warning(
+            "Vision completion failed for %s: %s",
+            candidate.source_ref,
+            exc,
+        )
+        return None
     caption = str(parsed.get("caption", "")).strip() or "No caption generated."
     visible_text = str(parsed.get("visible_text", "")).strip()
     tags_raw = parsed.get("tags")
@@ -296,6 +304,8 @@ def generate_vision_notes(
     described_count = 0
     for candidate in candidates:
         description = _describe_image(candidate, config)
+        if description is None:
+            continue
         notes.append(description.as_note())
         described_count += 1
     return notes, described_count

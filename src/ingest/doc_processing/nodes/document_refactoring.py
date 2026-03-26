@@ -8,12 +8,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.ingest.support.llm import _llm_json
 from src.ingest.common.shared import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 
+_MAX_REFACTOR_INPUT = 10000
+_REFACTOR_MAX_TOKENS = 900
+_REFACTOR_PROMPT = 'Return {"refactored_text":"..."} for:\n'
 
-def document_refactoring_node(state: DocumentProcessingState) -> dict:
+
+def document_refactoring_node(state: DocumentProcessingState) -> dict[str, Any]:
     """Optionally rewrite cleaned text through an LLM-based refactoring pass.
 
     Args:
@@ -32,8 +38,8 @@ def document_refactoring_node(state: DocumentProcessingState) -> dict:
                 state, "document_refactoring:skipped"
             ),
         }
-    prompt = 'Return {"refactored_text":"..."} for:\n' + state["cleaned_text"][:10000]
-    response = _llm_json(prompt, config, 900)
+    prompt = _REFACTOR_PROMPT + state["cleaned_text"][:_MAX_REFACTOR_INPUT]
+    response = _llm_json(prompt, config, _REFACTOR_MAX_TOKENS)
     refactored_text = str(response.get("refactored_text", "")).strip()
     return {
         "refactored_text": refactored_text or state["cleaned_text"],

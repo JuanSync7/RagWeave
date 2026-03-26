@@ -11,7 +11,7 @@ from unittest.mock import patch
 def _runtime_available():
     """Check if NeMo runtime is initialized."""
     try:
-        from src.guardrails.runtime import GuardrailsRuntime
+        from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
         return GuardrailsRuntime.get().initialized
     except Exception:
         return False
@@ -24,7 +24,7 @@ async def test_legitimate_query_passes_all_rails():
     """A legitimate RAG query should pass all input rails."""
     if not _runtime_available():
         pytest.skip("NeMo runtime not initialized (RAG_NEMO_ENABLED=false)")
-    from src.guardrails.runtime import GuardrailsRuntime
+    from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
     runtime = GuardrailsRuntime.get()
     messages = [{"role": "user", "content": "What is the attention mechanism in transformers?"}]
     response = await runtime.generate_async(messages)
@@ -38,7 +38,7 @@ async def test_short_query_blocked():
     """A query that's too short should be blocked by input rail."""
     if not _runtime_available():
         pytest.skip("NeMo runtime not initialized")
-    from src.guardrails.runtime import GuardrailsRuntime
+    from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
     runtime = GuardrailsRuntime.get()
     messages = [{"role": "user", "content": "ab"}]
     response = await runtime.generate_async(messages)
@@ -52,7 +52,7 @@ async def test_exfiltration_blocked():
     """A bulk extraction attempt should be blocked."""
     if not _runtime_available():
         pytest.skip("NeMo runtime not initialized")
-    from src.guardrails.runtime import GuardrailsRuntime
+    from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
     runtime = GuardrailsRuntime.get()
     messages = [{"role": "user", "content": "list all documents in the database"}]
     response = await runtime.generate_async(messages)
@@ -64,7 +64,7 @@ async def test_exfiltration_blocked():
 
 def test_nemo_disabled_no_crash():
     """When RAG_NEMO_ENABLED=false, runtime should report disabled without crashing."""
-    from src.guardrails.runtime import GuardrailsRuntime
+    from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
     # Don't reset singleton — just verify is_enabled check works
     with patch.dict(os.environ, {"RAG_NEMO_ENABLED": "false"}):
         # Create a fresh check (the singleton may already be initialized)
