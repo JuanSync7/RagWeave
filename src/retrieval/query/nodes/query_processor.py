@@ -36,7 +36,7 @@ from config.settings import (
     QUERY_PROCESSING_TEMPERATURE,
 )
 from src.platform.llm import get_llm_provider
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 from src.retrieval.query.schemas import QueryAction, QueryResult, QueryState
 from src.retrieval.common.utils import parse_json_object
 
@@ -71,18 +71,6 @@ def _ensure_file_logging() -> None:
             QUERY_LOG_DIR,
             exc,
         )
-
-
-# Tracer is resolved lazily so imports during tests do not trigger provider
-# initialisation before the observability stack is ready.
-_tracer_instance = None
-
-
-def _get_tracer():
-    global _tracer_instance
-    if _tracer_instance is None:
-        _tracer_instance = get_tracer()
-    return _tracer_instance
 
 
 # ---------------------------------------------------------------------------
@@ -253,31 +241,24 @@ def _detect_injection(query: str) -> bool:
 
 def _call_llm(prompt: str, system: str = "") -> Optional[str]:
     """Call LLM via LLMProvider. Returns response text or None on failure."""
-    span = _get_tracer().start_span(
-        "query_processor.call_llm",
-        {"model_alias": "query"},
-    )
     messages: List[Dict[str, str]] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    _span_status = "ok"
-    try:
-        provider = get_llm_provider()
-        response = provider.generate(
-            messages,
-            model_alias="query",
-            temperature=QUERY_PROCESSING_TEMPERATURE,
-            max_tokens=256,
-        )
-        return response.content or None
-    except Exception as e:
-        logger.warning("LLM call failed: %s", e)
-        _span_status = "error"
-        return None
-    finally:
-        span.end(status=_span_status)
+    with get_tracer().span("query_processor.call_llm", {"model_alias": "query"}):
+        try:
+            provider = get_llm_provider()
+            response = provider.generate(
+                messages,
+                model_alias="query",
+                temperature=QUERY_PROCESSING_TEMPERATURE,
+                max_tokens=256,
+            )
+            return response.content or None
+        except Exception as e:
+            logger.warning("LLM call failed: %s", e)
+            return None
 
 
 # Backward-compatible alias
@@ -286,16 +267,12 @@ _call_ollama = _call_llm
 
 def _check_llm_available() -> bool:
     """Check if the LLM provider is reachable."""
-    span = _get_tracer().start_span("query_processor.llm_healthcheck")
-    _span_status = "ok"
-    try:
-        provider = get_llm_provider()
-        return provider.is_available(model_alias="query")
-    except Exception:
-        _span_status = "error"
-        return False
-    finally:
-        span.end(status=_span_status)
+    with get_tracer().span("query_processor.llm_healthcheck"):
+        try:
+            provider = get_llm_provider()
+            return provider.is_available(model_alias="query")
+        except Exception:
+            return False
 
 
 # Backward-compatible alias
@@ -636,10 +613,7 @@ def process_query(
         QueryResult with the processed query and recommended action.
     """
     _ensure_file_logging()
-    root_span = _get_tracer().start_span("query_processor.process_query", {"raw_query_len": len(raw_query)})
-    span_status = "ok"
-    span_error = None
-    try:
+    with get_tracer().span("query_processor.process_query", {"raw_query_len": len(raw_query)}) as root_span:
         ollama_available = _check_llm_available()
         if not ollama_available:
             logger.warning("LLM unavailable; falling back to heuristic mode")
@@ -686,12 +660,6 @@ def process_query(
         root_span.set_attribute("action", result.action.value)
         root_span.set_attribute("confidence", result.confidence)
         return result
-    except Exception as exc:
-        span_status = "error"
-        span_error = exc
-        raise
-    finally:
-        root_span.end(status=span_status, error=span_error)
 
 
 __all__ = [

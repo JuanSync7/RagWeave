@@ -18,7 +18,7 @@ import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config.settings import RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH, RERANKER_BATCH_SIZE
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 from src.vector_db.common.schemas import SearchResult
 from src.retrieval.common.schemas import RankedResult
 from src.retrieval.common.exceptions import ModelLoadError
@@ -31,7 +31,6 @@ class LocalBGEReranker:
         device: Compute device string ("cuda" or "cpu").
         tokenizer: Loaded AutoTokenizer for the reranker model.
         model: Loaded AutoModelForSequenceClassification.
-        tracer: Observability tracer for span instrumentation.
     """
 
     def __init__(self, model_path: str = RERANKER_MODEL_PATH) -> None:
@@ -47,7 +46,6 @@ class LocalBGEReranker:
                 model_path=model_path,
             ) from exc
         self.model.eval()
-        self.tracer = get_tracer()
 
     @torch.no_grad()
     def rerank(
@@ -70,12 +68,10 @@ class LocalBGEReranker:
             RuntimeError: If the model inference step fails (e.g., CUDA OOM,
                 tokenizer version mismatch, unexpected output shape).
         """
-        span = self.tracer.start_span(
+        with get_tracer().span(
             "reranker.rerank",
             {"input_count": len(documents), "top_k": top_k},
-        )
-        _span_status = "ok"
-        try:
+        ) as span:
             if not documents:
                 return []
 
@@ -120,12 +116,6 @@ class LocalBGEReranker:
                 span.set_attribute("score_max", max(values))
                 span.set_attribute("output_count", len(top_results))
             return top_results
-
-        except Exception as exc:
-            _span_status = "error"
-            raise
-        finally:
-            span.end(status=_span_status)
 
 
 __all__ = ["LocalBGEReranker", "RankedResult"]

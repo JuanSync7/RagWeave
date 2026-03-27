@@ -1,33 +1,23 @@
 # @summary
-# Observability provider factory for selecting a Tracer implementation.
-# Exports: get_tracer
-# Deps: config.settings, logging, src.platform.observability.noop_tracer
+# Deprecated backward-compat shim for the old providers import path.
+# Use: from src.platform.observability import get_tracer
+# Deps: src.platform.observability
 # @end-summary
-"""Factory for observability providers."""
+"""Deprecated: import get_tracer from src.platform.observability instead.
 
-import logging
+This module exists only for backward compatibility during migration from
+the old ``from src.platform.observability.providers import get_tracer`` pattern.
+It will be removed in a future release.
+"""
+import warnings
 
-from config.settings import OBSERVABILITY_PROVIDER
-from src.platform.observability.contracts import Tracer
-from src.platform.observability.noop_tracer import NoopTracer
+warnings.warn(
+    "Importing from src.platform.observability.providers is deprecated. "
+    "Use 'from src.platform.observability import get_tracer' instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-logger = logging.getLogger("rag.observability")
+from src.platform.observability import get_tracer  # noqa: F401, E402
 
-
-def get_tracer() -> Tracer:
-    """Get the configured tracer.
-
-    Returns:
-        A `Tracer` implementation selected via settings. Falls back to `NoopTracer`
-        on any initialization failure.
-    """
-    provider = OBSERVABILITY_PROVIDER.strip().lower()
-    if provider == "langfuse":
-        try:
-            from src.platform.observability.langfuse_tracer import LangfuseTracer
-
-            return LangfuseTracer()
-        except Exception as exc:
-            logger.warning("Failed to initialize Langfuse tracer; using noop: %s", exc)
-    return NoopTracer()
-
+__all__ = ["get_tracer"]

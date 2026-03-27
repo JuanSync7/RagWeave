@@ -14,7 +14,7 @@ from config.settings import (
     PROMPTS_DIR,
 )
 from src.platform.llm import get_llm_provider
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 
 
 def _load_system_prompt() -> str:
@@ -79,7 +79,6 @@ class OllamaGenerator:
     ):
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.tracer = get_tracer()
         self._provider = get_llm_provider()
         # Expose model name for logging (matches old interface)
         self.model = self._provider.config.model
@@ -148,13 +147,6 @@ class OllamaGenerator:
         """
         if not context_chunks:
             return None
-        span = self.tracer.start_span(
-            "generator.generate",
-            {
-                "model": self.model,
-                "context_chunk_count": len(context_chunks),
-            },
-        )
 
         messages = self._build_messages(
             query,
@@ -164,27 +156,31 @@ class OllamaGenerator:
             recent_turns=recent_turns,
         )
 
-        try:
-            response = self._provider.generate(
-                messages,
-                model_alias="default",
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            self._last_response = response
-            raw_content = response.content or None
-            if raw_content:
-                answer, confidence = self._extract_confidence(raw_content)
-                self._last_llm_confidence = confidence
-                span.set_attribute("llm_confidence", confidence)
-                span.end(status="ok")
-                return answer
-            span.end(status="ok")
-            return None
-        except Exception as e:
-            logger.warning("LLM generation failed: %s", e)
-            span.end(status="error", error=e)
-            return None
+        with get_tracer().span(
+            "generator.generate",
+            {
+                "model": self.model,
+                "context_chunk_count": len(context_chunks),
+            },
+        ) as span:
+            try:
+                response = self._provider.generate(
+                    messages,
+                    model_alias="default",
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                self._last_response = response
+                raw_content = response.content or None
+                if raw_content:
+                    answer, confidence = self._extract_confidence(raw_content)
+                    self._last_llm_confidence = confidence
+                    span.set_attribute("llm_confidence", confidence)
+                    return answer
+                return None
+            except Exception as e:
+                logger.warning("LLM generation failed: %s", e)
+                return None
 
     @staticmethod
     def _extract_confidence(response_text: str) -> Tuple[str, str]:
@@ -246,14 +242,8 @@ class OllamaGenerator:
 
     def is_available(self) -> bool:
         """Check if the LLM provider is reachable."""
-        span = self.tracer.start_span(
-            "generator.is_available",
-            {"model": self.model},
-        )
-        try:
-            available = self._provider.is_available(model_alias="default")
-            span.end(status="ok")
-            return available
-        except Exception:
-            span.end(status="error")
-            return False
+        with get_tracer().span("generator.is_available", {"model": self.model}):
+            try:
+                return self._provider.is_available(model_alias="default")
+            except Exception:
+                return False

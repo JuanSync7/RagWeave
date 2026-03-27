@@ -24,3 +24,10 @@ class SpanRecord:
     end_ts: Optional[float] = None
     status: str = "ok"
     error_message: Optional[str] = None
+
+
+# Backward-compatible re-exports from the canonical location
+from src.platform.observability.schemas import (  # noqa: F401, E402
+    TraceRecord as TraceRecord,
+    GenerationRecord as GenerationRecord,
+)

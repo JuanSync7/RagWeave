@@ -22,7 +22,7 @@ from src.vector_db import (
     SearchFilter,
 )
 from src.retrieval.generation.nodes.generator import OllamaGenerator
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 from src.platform.reliability.providers import get_retry_provider
 from src.platform.schemas.reliability import RetryPolicy
 from src.platform.validation import (
@@ -273,9 +273,6 @@ class RAGChain:
             stage_budgets={k: float(v) for k, v in stage_budgets.items()},
         )
         pipeline_start = tp.pipeline_start  # for final span attribute
-        root_span = self.tracer.start_span("rag_chain.run", {"query_length": len(query)})
-        span_status = "ok"
-        span_error: Optional[Exception] = None
 
         def _budget_clarification(stage: str) -> str:
             return (
@@ -283,7 +280,7 @@ class RAGChain:
                 f"{stage}. Please narrow the query or try again."
             )
 
-        try:
+        with self.tracer.span("rag_chain.run", {"query_length": len(query)}) as root_span:
             alpha = validate_alpha(alpha)
             search_limit = validate_positive_int("search_limit", search_limit)
             rerank_top_k = validate_positive_int("rerank_top_k", rerank_top_k)
@@ -292,9 +289,7 @@ class RAGChain:
 
             # Stage 1: Query processing (+ input rails in parallel if NeMo enabled)
             t0 = time.perf_counter()
-            query_span = self.tracer.start_span("rag_chain.process_query", parent=root_span)
-            _span_status = "ok"
-            try:
+            with self.tracer.span("rag_chain.process_query", parent=root_span):
                 processing_query = query
                 if memory_context:
                     processing_query = (
@@ -317,30 +312,26 @@ class RAGChain:
                     from concurrent.futures import ThreadPoolExecutor as _TP, Future as _Fut
 
                     # PII gate: run PII detection synchronously before parallel stage
-                    pii_span = self.tracer.start_span("rag_chain.pii_gate", parent=root_span)
-                    _pii_status = "ok"
-                    try:
-                        redacted_text, pii_detections = redact_pii(query)
-                        if pii_detections:
-                            # Use redacted query for LLM processing
-                            pii_gated_query = redacted_text
-                            if memory_context:
-                                pii_gated_query = (
-                                    "Conversation context:\n"
-                                    f"{memory_context}\n\n"
-                                    "Current user question:\n"
-                                    f"{redacted_text}"
+                    with self.tracer.span("rag_chain.pii_gate", parent=root_span):
+                        try:
+                            redacted_text, pii_detections = redact_pii(query)
+                            if pii_detections:
+                                # Use redacted query for LLM processing
+                                pii_gated_query = redacted_text
+                                if memory_context:
+                                    pii_gated_query = (
+                                        "Conversation context:\n"
+                                        f"{memory_context}\n\n"
+                                        "Current user question:\n"
+                                        f"{redacted_text}"
+                                    )
+                                logger.info(
+                                    "PII gate: %d detections redacted before LLM processing",
+                                    len(pii_detections),
                                 )
-                            logger.info(
-                                "PII gate: %d detections redacted before LLM processing",
-                                len(pii_detections),
-                            )
-                    except Exception as e:
-                        _pii_status = "error"
-                        logger.warning("PII gate failed: %s — continuing with original query", e)
-                        pii_gated_query = processing_query
-                    finally:
-                        pii_span.end(status=_pii_status)
+                        except Exception as e:
+                            logger.warning("PII gate failed: %s — continuing with original query", e)
+                            pii_gated_query = processing_query
 
                     with _TP(max_workers=2, thread_name_prefix="stage1") as stage1_pool:
                         qp_future: _Fut = stage1_pool.submit(
@@ -364,11 +355,6 @@ class RAGChain:
                         max_iterations=max_query_iterations,
                         fast_path=RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
                     )
-            except Exception:
-                _span_status = "error"
-                raise
-            finally:
-                query_span.end(status=_span_status)
             tp.record("query_processing", "retrieval", started_at=t0)
             if tp.check_stage_budget("query_processing"):
                 tp.mark_budget_exhausted("query_processing")
@@ -456,18 +442,11 @@ class RAGChain:
 
             # Stage 2: KG expansion
             t0 = time.perf_counter()
-            kg_span = self.tracer.start_span("rag_chain.kg_expand", parent=root_span)
-            _span_status = "ok"
-            try:
+            with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
                 kg_expanded_terms = []
                 if self._kg_expander:
                     kg_expanded_terms = self._kg_expander.expand(processed_query, depth=1)
                 kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
-            except Exception:
-                _span_status = "error"
-                raise
-            finally:
-                kg_span.end(status=_span_status)
             tp.record("kg_expansion", "retrieval", started_at=t0)
             if tp.check_stage_budget("kg_expansion"):
                 tp.mark_budget_exhausted("kg_expansion")
@@ -494,9 +473,7 @@ class RAGChain:
 
             # Stage 3: Query embedding (with LRU cache for exact repeats)
             t0 = time.perf_counter()
-            embed_span = self.tracer.start_span("rag_chain.embed_query", parent=root_span)
-            _span_status = "ok"
-            try:
+            with self.tracer.span("rag_chain.embed_query", parent=root_span) as embed_span:
                 cache_hit = processed_query in self._embedding_cache
                 if cache_hit:
                     query_embedding = self._embedding_cache[processed_query]
@@ -508,11 +485,6 @@ class RAGChain:
                     if len(self._embedding_cache) > self._embedding_cache_max:
                         self._embedding_cache.popitem(last=False)
                     embed_span.set_attribute("cache_hit", False)
-            except Exception:
-                _span_status = "error"
-                raise
-            finally:
-                embed_span.end(status=_span_status)
             tp.record("embedding", "retrieval", started_at=t0)
             if tp.check_stage_budget("embedding"):
                 tp.mark_budget_exhausted("embedding")
@@ -542,9 +514,7 @@ class RAGChain:
             if tenant_id:
                 filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
 
-            search_span = self.tracer.start_span("rag_chain.hybrid_search", parent=root_span)
-            _span_status = "ok"
-            try:
+            with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
                 search_results = self.retry_provider.execute(
                     operation_name="weaviate_hybrid_search",
                     fn=lambda: self._do_search(
@@ -554,11 +524,6 @@ class RAGChain:
                     idempotency_key=f"search:{processed_query}:{source_filter}:{heading_filter}:{search_limit}",
                 )
                 search_span.set_attribute("search_result_count", len(search_results))
-            except Exception:
-                _span_status = "error"
-                raise
-            finally:
-                search_span.end(status=_span_status)
             tp.record("hybrid_search", "retrieval", started_at=t0)
             if tp.check_stage_budget("hybrid_search"):
                 tp.mark_budget_exhausted("hybrid_search")
@@ -596,9 +561,7 @@ class RAGChain:
 
             # Stage 5: Reranking
             t0 = time.perf_counter()
-            rerank_span = self.tracer.start_span("rag_chain.rerank", parent=root_span)
-            _span_status = "ok"
-            try:
+            with self.tracer.span("rag_chain.rerank", parent=root_span) as rerank_span:
                 reranked = self.reranker.rerank(
                     query=processed_query,
                     documents=search_results,
@@ -609,11 +572,6 @@ class RAGChain:
                     rerank_span.set_attribute("rerank_score_min", min(scores))
                     rerank_span.set_attribute("rerank_score_max", max(scores))
                     rerank_span.set_attribute("rerank_score_mean", statistics.mean(scores))
-            except Exception:
-                _span_status = "error"
-                raise
-            finally:
-                rerank_span.end(status=_span_status)
             tp.record("reranking", "retrieval", started_at=t0)
             if tp.check_stage_budget("reranking"):
                 tp.mark_budget_exhausted("reranking")
@@ -661,28 +619,19 @@ class RAGChain:
             if RAG_DOCUMENT_FORMATTING_ENABLED and reranked:
                 t0 = time.perf_counter()
                 from src.retrieval.generation.nodes.document_formatter import format_context
-                fmt_span = self.tracer.start_span("rag_chain.format_context", parent=root_span)
-                _span_status = "ok"
-                try:
+                with self.tracer.span("rag_chain.format_context", parent=root_span) as fmt_span:
                     formatted = format_context(reranked)
                     formatted_context_str = formatted.context_string
                     version_conflicts = formatted.version_conflicts
                     fmt_span.set_attribute("chunk_count", formatted.chunk_count)
                     fmt_span.set_attribute("version_conflicts", len(version_conflicts))
-                except Exception:
-                    _span_status = "error"
-                    raise
-                finally:
-                    fmt_span.end(status=_span_status)
                 tp.record("document_formatting", "retrieval", started_at=t0)
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
             if not skip_generation and self._generator and reranked and not tp.budget_exhausted:
                 t0 = time.perf_counter()
-                generate_span = self.tracer.start_span("rag_chain.generate", parent=root_span)
-                _span_status = "ok"
-                try:
+                with self.tracer.span("rag_chain.generate", parent=root_span) as generate_span:
                     context_chunks = [r.text for r in reranked]
                     scores = [r.score for r in reranked]
 
@@ -704,11 +653,6 @@ class RAGChain:
                             recent_turns=memory_recent_turns,
                         )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
-                except Exception:
-                    _span_status = "error"
-                    raise
-                finally:
-                    generate_span.end(status=_span_status)
                 tp.record("generation", "generation", started_at=t0)
                 if tp.check_stage_budget("generation"):
                     tp.mark_budget_exhausted("generation")
@@ -750,21 +694,12 @@ class RAGChain:
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
-                output_rail_span = self.tracer.start_span(
-                    "rag_chain.output_rails", parent=root_span
-                )
-                _span_status = "ok"
-                try:
+                with self.tracer.span("rag_chain.output_rails", parent=root_span):
                     context_chunks = [r.text for r in reranked]
                     output_rail_result = run_output_rails(
                         answer=generated_answer,
                         context_chunks=context_chunks,
                     )
-                except Exception:
-                    _span_status = "error"
-                    raise
-                finally:
-                    output_rail_span.end(status=_span_status)
                 tp.record("output_rails", "guardrails", started_at=t0)
 
                 # Record per-rail timings into the timing pool
@@ -817,9 +752,7 @@ class RAGChain:
                 and not tp.budget_exhausted
             ):
                 t0 = time.perf_counter()
-                conf_span = self.tracer.start_span("rag_chain.confidence_routing", parent=root_span)
-                _span_status = "ok"
-                try:
+                with self.tracer.span("rag_chain.confidence_routing", parent=root_span) as conf_span:
                     from src.retrieval.generation.confidence.scoring import compute_composite_confidence
                     from src.retrieval.generation.confidence.routing import route_by_confidence
                     from src.retrieval.generation.confidence.schemas import PostGuardrailAction
@@ -864,11 +797,6 @@ class RAGChain:
                     conf_span.set_attribute("composite_confidence", breakdown.composite)
                     conf_span.set_attribute("routing_action", action.value)
                     conf_span.set_attribute("retry_count", retry_count)
-                except Exception:
-                    _span_status = "error"
-                    raise
-                finally:
-                    conf_span.end(status=_span_status)
                 tp.record("confidence_routing", "retrieval", started_at=t0)
 
                 logger.info(
@@ -914,6 +842,7 @@ class RAGChain:
                     )
 
             tp.log_summary()
+            root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
 
             return RAGResponse(
                 query=query,
@@ -945,13 +874,6 @@ class RAGChain:
                 re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
                 re_retrieval_params=re_retrieval_params,
             )
-        except Exception as exc:
-            span_status = "error"
-            span_error = exc
-            raise
-        finally:
-            root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
-            root_span.end(status=span_status, error=span_error)
 
 
 
