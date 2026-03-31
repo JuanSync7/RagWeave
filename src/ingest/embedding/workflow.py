@@ -1,7 +1,10 @@
 # @summary
-# LangGraph StateGraph for the 8-node Embedding Pipeline (Phase 2).
+# LangGraph StateGraph for the 9-node Embedding Pipeline (Phase 2).
 # Exports: build_embedding_graph
 # Deps: langgraph.graph, src.ingest.embedding.nodes.*, src.ingest.embedding.state
+# Node order: document_storage → chunking → vlm_enrichment → chunk_enrichment → ...
+# vlm_enrichment_node is always present; it short-circuits internally for
+# vlm_mode != "external".
 # @end-summary
 
 """Phase 2 LangGraph workflow for embedding and storage."""
@@ -12,6 +15,7 @@ from langgraph.graph import END, StateGraph
 
 from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
 from src.ingest.embedding.nodes.chunking import chunking_node
+from src.ingest.embedding.nodes.vlm_enrichment import vlm_enrichment_node
 from src.ingest.embedding.nodes.document_storage_node import document_storage_node
 from src.ingest.embedding.nodes.cross_reference_extraction import (
     cross_reference_extraction_node,
@@ -31,7 +35,15 @@ from src.ingest.embedding.state import EmbeddingPipelineState
 def build_embedding_graph():
     """Compile the Phase 2 Embedding Pipeline StateGraph.
 
+    Node order:
+        document_storage → chunking → vlm_enrichment → chunk_enrichment
+        → metadata_generation → [cross_reference_extraction →]
+        knowledge_graph_extraction → quality_validation → embedding_storage
+        → [knowledge_graph_storage]
+
     Routing:
+    - vlm_enrichment: always in graph; short-circuits internally when
+      ``config.vlm_mode != "external"`` (logs ``vlm_enrichment:skipped``).
     - cross_reference_extraction: only if config.enable_cross_reference_extraction.
     - knowledge_graph_extraction: always runs (handles disabled state internally).
     - knowledge_graph_storage: only if config.enable_knowledge_graph_storage.
@@ -42,6 +54,7 @@ def build_embedding_graph():
     graph = StateGraph(EmbeddingPipelineState)
     graph.add_node("document_storage", document_storage_node)
     graph.add_node("chunking", chunking_node)
+    graph.add_node("vlm_enrichment", vlm_enrichment_node)
     graph.add_node("chunk_enrichment", chunk_enrichment_node)
     graph.add_node("metadata_generation", metadata_generation_node)
     graph.add_node("cross_reference_extraction", cross_reference_extraction_node)
@@ -52,7 +65,8 @@ def build_embedding_graph():
 
     graph.set_entry_point("document_storage")
     graph.add_edge("document_storage", "chunking")
-    graph.add_edge("chunking", "chunk_enrichment")
+    graph.add_edge("chunking", "vlm_enrichment")
+    graph.add_edge("vlm_enrichment", "chunk_enrichment")
     graph.add_edge("chunk_enrichment", "metadata_generation")
     graph.add_conditional_edges(
         "metadata_generation",

@@ -1,13 +1,14 @@
 # Retrieval Pipeline — Generation and Safety Specification
 
 **AION Knowledge Management Platform**
-Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Generation
+Version: 1.3 | Status: Draft | Domain: Retrieval Pipeline — Generation
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-03-11 | AI Assistant | Initial draft — 8-stage pipeline with 39 requirements |
 | 1.1 | 2026-03-13 | AI Assistant | Performance budget cross-reference |
 | 1.2 | 2026-03-17 | AI Assistant | Split from monolithic RETRIEVAL_SPEC.md. This file covers document formatting, generation, post-generation guardrails, observability, and NFR (sections 7-11, REQ-501 through REQ-903). For query processing and retrieval, see RETRIEVAL_QUERY_SPEC.md. |
+| 1.3 | 2026-03-27 | AI Assistant | Added memory-aware generation routing section (REQ-1201–1207): fallback retrieval, memory-generation path, BLOCK/FLAG memory filtering, generation source tracking |
 
 > **Document intent:** This is a normative requirements/specification document for the **generation, safety, and observability** stages of the retrieval pipeline.
 > For query processing, retrieval, and reranking, see `RETRIEVAL_QUERY_SPEC.md`.
@@ -87,6 +88,44 @@ Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Generation
 > **Rationale:** A single network hiccup or LLM provider timeout should not kill the entire query. Retry logic with backoff handles transient failures without overwhelming the service.
 > **Acceptance Criteria:** A transient timeout on the first attempt is retried automatically. Backoff intervals increase between retries. After all retries are exhausted, the system returns a graceful error (not a crash). Retry count and intervals are configurable.
 
+> **Implementation note (memory echo suppression):** When `retrieval_quality` is `"weak"` or `"insufficient"`, the `recent_turns` (verbatim conversation history turns) MUST be suppressed (set to `None`) before being passed to the generator. The `memory_context` (rolling summary) is still passed regardless of retrieval quality. This prevents the LLM from echoing prior answers when retrieved context is poor. See conversation memory requirements REQ-1001–REQ-1008 in `RETRIEVAL_QUERY_SPEC.md`.
+
+---
+
+## 8a. Memory-Aware Generation & Retrieval Routing
+
+*Note: IDs in this section increment by 2 (odd-numbered). Even-numbered IDs REQ-1202, REQ-1206, REQ-1208 are reserved for future requirements within this section. REQ-1204 is assigned.*
+
+> **REQ-1201** | Priority: MUST
+> **Description:** When the primary retrieval (using `processed_query`) returns weak or insufficient results (retrieval quality below the "moderate" threshold) AND `suppress_memory` is False, the system MUST execute a fallback retrieval using the `standalone_query`. The system MUST use whichever retrieval produces higher-quality results (as measured by the best reranker score from each retrieval pass).
+> **Rationale:** Memory-enriched query reformulation can over-narrow the search query by injecting irrelevant prior context. The standalone query, reformulated without memory, serves as a hedge. Running fallback retrieval only when the primary fails keeps the cost marginal (~20-30% of conversational queries).
+> **Acceptance Criteria:** Given a memory-enriched query "component X SPI clock frequency timing" that returns weak retrieval, the system automatically retries with the standalone query "clock frequency specification". If the standalone retrieval returns moderate or strong results, those results are used for generation. Fallback retrieval does NOT run when primary retrieval is strong/moderate. Fallback retrieval does NOT run when `suppress_memory` is True (standalone_query was already the primary).
+
+> **REQ-1203** | Priority: MUST
+> **Description:** When ALL retrieval passes (primary and fallback) return weak or insufficient results AND the query has `has_backward_reference = True`, the system MUST generate from conversation memory context (`memory_context` + `recent_turns`) without document context. When `has_backward_reference` is True but both `memory_context` and `recent_turns` are empty (fresh conversation with no prior turns), the memory-generation path MUST NOT be taken; the system MUST fall through to the standard weak-retrieval behavior (BLOCK per REQ-706). When confidence routing is applied to a memory-generated answer, the re-retrieval step from REQ-706 is skipped — there are no documents to re-retrieve in a memory-only context; routing proceeds directly to BLOCK if composite confidence is below 0.50, or FLAG if between 0.50 and 0.70. This memory-generation path MUST still apply confidence routing (REQ-706) to the output — the confidence routing safety net is never bypassed.
+> **Rationale:** Backward-reference queries ("tell me more about the above") cannot be answered from document retrieval — they reference conversation history. Without a memory-generation path, these queries are incorrectly BLOCK'd. Confidence routing on the memory-generated answer ensures low-quality memory answers are still caught.
+> **Acceptance Criteria:** Given the query "Tell me more about the above" with prior conversation about SPI timing, when retrieval returns weak results, the system generates from memory context. The generated answer references prior conversation content. Confidence routing still runs on the memory-generated answer. If the memory-generated answer has composite confidence below 0.50, it is still BLOCK'd. Given a fresh conversation (empty memory) with query 'Tell me more about the above' where `has_backward_reference = True`, the system does NOT attempt memory-generation and returns BLOCK instead. Given a memory-generated answer with composite confidence 0.55, the system FLAGs (not re-retrieves) because re-retrieval is not applicable on the memory-generation path.
+
+> **REQ-1204** | Priority: MUST
+> **Description:** When `has_backward_reference` is True AND primary or fallback retrieval returns strong or moderate results, the system MUST use the standard retrieval-generation path with both retrieved documents AND conversation memory context (`memory_context` + `recent_turns`) in the generation prompt. The memory-generation path (REQ-1203) MUST NOT be triggered when retrieval quality is strong or moderate, regardless of the backward-reference signal.
+> **Rationale:** A query like "Based on what we discussed, what does the spec say about timing?" has a backward reference but also needs document retrieval. When retrieval succeeds, using documents plus memory produces a better answer than memory alone. The retrieval-first architecture means retrieval quality always takes priority over backward-reference detection.
+> **Acceptance Criteria:** Given the query "Based on what we discussed, what does the spec say about timing?" with `has_backward_reference = True` and strong retrieval results, the system generates from retrieved documents plus memory context. The memory-generation path is not triggered. The `generation_source` is "retrieval+memory".
+
+> **REQ-1205** | Priority: MUST
+> **Description:** When `suppress_memory` is True (context-reset detected by query processor), the system MUST use `standalone_query` as the primary and only retrieval query. The system MUST NOT inject `memory_context` or `recent_turns` into the generation prompt. No fallback retrieval is attempted (the standalone query IS the primary).
+> **Rationale:** When the user explicitly requests a context reset ("forget about past convo"), injecting conversation history contradicts their intent. Using standalone_query ensures retrieval is not polluted by irrelevant prior context, and excluding memory from generation prevents the LLM from referencing prior turns.
+> **Acceptance Criteria:** Given "Forget about past conversation, what's the timing spec for Y?" with `suppress_memory = True`, retrieval uses only the standalone query. The generation prompt contains no conversation history. The generated answer does not reference prior conversation turns.
+
+> **REQ-1207** | Priority: MUST
+> **Description:** Responses where `post_guardrail_action` is "block" or "flag" MUST NOT be stored in conversation memory. The response MUST still be displayed to the user (with appropriate warning for "flag" responses), but the caller MUST skip the `append_turn()` call for the assistant response. User turns MUST always be stored regardless of the response action.
+> **Rationale:** Storing BLOCK messages ("Insufficient documentation found...") and FLAG warnings in conversation memory causes error echo accumulation: subsequent queries see the error message in `recent_turns` and the LLM reproduces it. By excluding unreliable responses from memory, future turns start with clean context.
+> **Acceptance Criteria:** After a BLOCK response to "Who is Sam Altman?", the next query "What is the moon size?" does not contain "Insufficient documentation found" in its memory context. The BLOCK response was displayed to the user but not stored. The user's query "Who is Sam Altman?" IS stored (user turns always persist). FLAG responses are displayed with their warning but also excluded from memory storage.
+
+> **REQ-1209** | Priority: SHOULD
+> **Description:** The `RAGResponse` SHOULD include a `generation_source` field indicating which context was used for generation: `"retrieval"` (documents from primary or fallback retrieval), `"memory"` (conversation history via memory-generation path), or `"retrieval+memory"` (documents plus memory context). When generation is skipped (BLOCK with no generation), the field SHOULD be `null`.
+> **Rationale:** Downstream consumers (CLI, API, monitoring) need to know which path produced the answer for display, debugging, and quality tracking. The generation source also enables differentiated confidence thresholds per source type in future iterations.
+> **Acceptance Criteria:** A response generated from retrieved documents has `generation_source = "retrieval"`. A response from the memory-generation path has `generation_source = "memory"`. A response where both memory and documents were in the prompt has `generation_source = "retrieval+memory"`. A BLOCK response has `generation_source = null`.
+
 ---
 
 ## 9. Post-Generation Guardrail
@@ -152,6 +191,8 @@ Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Generation
 > Re-retrieval MUST be attempted at most once. If re-retrieval does not improve confidence above the threshold, the system MUST escalate (flag for review or return insufficient documentation message).
 > **Rationale:** This routing logic ensures that low-confidence answers are never silently returned to the user. The single retry with broader parameters gives the system one chance to recover before giving up.
 > **Acceptance Criteria:** An answer with composite confidence 0.45 triggers re-retrieval. If re-retrieval produces confidence 0.72, the answer is returned. If re-retrieval produces confidence 0.48, the system returns "Insufficient documentation found". HIGH risk answers always include a verification warning regardless of confidence.
+>
+> **Implementation note (FLAG action — display compatibility):** When the routing action is FLAG, the `verification_warning` text is appended directly to `generated_answer` as a visible block (`\n\n---\n⚠️ <warning text>`), in addition to being stored in the structured `verification_warning` field. This ensures the warning is visible to any display layer that renders only the answer text.
 
 ---
 
@@ -296,12 +337,14 @@ Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Generation
 | REQ-1006 | 3a | MUST | Conversation Memory |
 | REQ-1007 | 3a | SHOULD | Conversation Memory |
 | REQ-1008 | 3a | SHOULD | Conversation Memory |
+| REQ-1201 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1203 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1204 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1205 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1207 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1209 | 8a | SHOULD | Memory-Aware Generation Routing |
 
-**Total Requirements: 47**
-
-- MUST: 33
-- SHOULD: 12
-- MAY: 1
+**Total Requirements: 53** (MUST: 38, SHOULD: 13, MAY: 1)
 
 ---
 
@@ -329,7 +372,13 @@ Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Generation
 | REQ-901 | 11 | SHOULD | Non-Functional |
 | REQ-902 | 11 | MUST | Non-Functional |
 | REQ-903 | 11 | MUST | Non-Functional |
+| REQ-1201 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1203 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1204 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1205 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1207 | 8a | MUST | Memory-Aware Generation Routing |
+| REQ-1209 | 8a | SHOULD | Memory-Aware Generation Routing |
 
-**Total Requirements: 20** (MUST: 15, SHOULD: 4, MAY: 0)
+**Total Requirements: 26** (MUST: 20, SHOULD: 5, MAY: 0)
 
 For query processing, retrieval, memory, and reranking requirements, see `RETRIEVAL_QUERY_SPEC.md`.

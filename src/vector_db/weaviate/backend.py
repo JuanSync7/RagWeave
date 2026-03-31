@@ -27,6 +27,9 @@ from src.vector_db.weaviate.store import (
     delete_collection as _wv_delete_collection,
     delete_documents_by_source as _wv_delete_by_source,
     delete_documents_by_source_key as _wv_delete_by_source_key,
+    aggregate_by_source as _wv_aggregate_by_source,
+    get_collection_stats as _wv_get_collection_stats,
+    list_collections as _wv_list_collections,
 )
 from config.settings import WEAVIATE_COLLECTION_NAME
 
@@ -108,6 +111,28 @@ class WeaviateBackend(VectorBackend):
         return _wv_delete_by_source_key(
             client, source_key, legacy_source, collection=self._col(collection)
         )
+
+    def aggregate_by_source(
+        self,
+        client: Any,
+        collection: Optional[str] = None,
+        source_filter: Optional[str] = None,
+        connector_filter: Optional[str] = None,
+    ) -> list[dict]:
+        return _wv_aggregate_by_source(
+            client, collection=self._col(collection),
+            source_filter=source_filter, connector_filter=connector_filter,
+        )
+
+    def get_collection_stats(
+        self,
+        client: Any,
+        collection: Optional[str] = None,
+    ) -> Optional[dict]:
+        return _wv_get_collection_stats(client, collection=self._col(collection))
+
+    def list_collections(self, client: Any) -> list[dict]:
+        return _wv_list_collections(client)
 
     def close_client(self, client: Any) -> None:
         if client is not None:

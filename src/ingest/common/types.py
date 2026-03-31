@@ -2,6 +2,8 @@
 # Shared ingestion pipeline dataclasses, typed state schema, runtime container, and node-name registry.
 # Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, IngestState, PIPELINE_NODE_NAMES
 # Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
+# IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool)
+# PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
 # @end-summary
 
 """Shared ingestion pipeline types, configuration, and state contracts.
@@ -54,6 +56,9 @@ from config.settings import (
     RAG_INGESTION_PERSIST_REFACTOR_MIRROR,
     RAG_INGESTION_VERBOSE_STAGE_LOGS,
     SEMANTIC_CHUNKING_ENABLED,
+    RAG_INGESTION_VLM_MODE,
+    RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
+    RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
 )
 from src.core.embeddings import LocalBGEEmbeddings
 from src.core.knowledge_graph import KnowledgeGraphBuilder
@@ -66,6 +71,7 @@ PIPELINE_NODE_NAMES = [
     "text_cleaning",
     "document_refactoring",
     "chunking",
+    "vlm_enrichment",
     "chunk_enrichment",
     "metadata_generation",
     "cross_reference_extraction",
@@ -143,6 +149,12 @@ class IngestionConfig:
     target_bucket: str = ""  # MinIO bucket for document storage. Empty string uses MINIO_BUCKET default.
     # Retained for backward compat; routing handled by LiteLLM Router.
     ollama_url: str = OLLAMA_BASE_URL
+    vlm_mode: str = RAG_INGESTION_VLM_MODE
+    """VLM mode: "disabled" | "builtin" | "external". Default: "disabled"."""
+    hybrid_chunker_max_tokens: int = RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS
+    """Max tokens per HybridChunker chunk. Default: 512 (bge-m3 limit)."""
+    persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
+    """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
 
 
 @dataclass

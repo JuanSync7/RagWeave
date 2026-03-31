@@ -44,6 +44,12 @@
 - `src/retrieval/memory/service.py` — CREATE (ConversationService lifecycle)
 - `src/retrieval/memory/injection.py` — CREATE (query processing memory injection)
 
+### Source (Phase B — Task 7.x additions)
+
+- `src/retrieval/query/schemas.py` — MODIFY (QueryResult + QueryState new fields)
+- `src/retrieval/query/nodes/query_processor.py` — MODIFY (backward-ref detection, context-reset detection, dual-query reformulation)
+- `prompts/query_reformulate_and_evaluate.md` — MODIFY (dual-query JSON output format)
+
 ### Tests (Phase A)
 
 - `tests/retrieval/test_pre_retrieval_guardrail.py` — CREATE
@@ -56,6 +62,10 @@
 - `tests/retrieval/test_memory_context.py` — CREATE
 - `tests/retrieval/test_memory_lifecycle.py` — CREATE
 - `tests/retrieval/test_memory_injection.py` — CREATE
+- `tests/retrieval/test_query_result_schema.py` — CREATE
+- `tests/retrieval/test_backward_reference.py` — CREATE
+- `tests/retrieval/test_context_reset.py` — CREATE
+- `tests/retrieval/test_memory_reformulation.py` — CREATE
 
 ---
 
@@ -64,7 +74,8 @@
 ```
 Phase 0 (Contracts)
 ├── Task 0.1: Guardrail Types + Config (QUERY types) ────────────────────┐
-└── Task 0.5: Conversation Memory Types ────────────────────────────────┤
+├── Task 0.5: Conversation Memory Types ────────────────────────────────┤
+└── Task 0.6: Conversational Query Routing Types ──────────────────────┤
                                                                         │
 ═══════════════════════ [REVIEW GATE] ══════════════════════════════════╡
                                                                         │
@@ -78,7 +89,11 @@ Phase A (Tests — ALL PARALLEL)                                          │
 ├── A-6.1: Memory Provider ◄── Phase 0 ────────────────────────────────┤
 ├── A-6.2: Memory Context ◄── Phase 0 ─────────────────────────────────┤
 ├── A-6.3: Memory Lifecycle ◄── Phase 0 ───────────────────────────────┤
-└── A-6.4: Memory Injection ◄── Phase 0 ───────────────────────────────┘
+├── A-6.4: Memory Injection ◄── Phase 0 ───────────────────────────────┤
+├── A-7.1: Query Result Schema Extension ◄── Task 0.6 ─────────────────┤
+├── A-7.2: Backward-Reference Detection ◄── Task 0.6 ──────────────────┤
+├── A-7.3: Context-Reset Detection ◄── Task 0.6 ───────────────────────┤
+└── A-7.4: Memory-Aware Reformulation ◄── Task 0.6 ────────────────────┘
 
 Phase B (Implementation — dependency-ordered)
 
@@ -90,6 +105,7 @@ Independent start (no Phase B dependencies):
 ├── B-4.2: Embedding Cache
 ├── B-4.3: Query Result Cache
 ├── B-6.1: Memory Provider
+├── B-7.1: Query Result Schema Extension
 
 After B-6.1:
 ├── B-6.2: Memory Context ◄── B-6.1
@@ -99,6 +115,13 @@ After B-6.1 + B-6.2:
 
 After B-6.2 + B-3.4:
 ├── B-6.4: Memory Injection ◄── B-6.2, B-3.4
+
+After B-7.1:
+├── B-7.2: Backward-Reference Detection ◄── B-7.1
+├── B-7.3: Context-Reset Detection ◄── B-7.1
+
+After B-7.1 + B-7.2 + B-7.3:
+├── B-7.4: Memory-Aware Reformulation Prompt ◄── B-7.1, B-7.2, B-7.3
 ```
 
 ---
@@ -117,6 +140,10 @@ After B-6.2 + B-3.4:
 | 6.2 Memory Context | `memory/types.py` | `test_memory_context.py` | `memory/context.py` | `docs/tmp/module-memory-context.md` | `tests/retrieval/test_memory_context_coverage.py` | REQ-1002, REQ-1003, REQ-1008 |
 | 6.3 Memory Lifecycle | `memory/types.py` | `test_memory_lifecycle.py` | `memory/service.py` | `docs/tmp/module-memory-lifecycle.md` | `tests/retrieval/test_memory_lifecycle_coverage.py` | REQ-1004, REQ-1005, REQ-1006 |
 | 6.4 Memory Injection | `memory/types.py` | `test_memory_injection.py` | `memory/injection.py` | `docs/tmp/module-memory-injection.md` | `tests/retrieval/test_memory_injection_coverage.py` | REQ-1008, REQ-103 |
+| 7.1 Query Result Schema Extension | Task 0.6 contracts | `test_query_result_schema.py` | `query/schemas.py` | `docs/tmp/module-query-schemas.md` | `tests/retrieval/test_query_result_schema_coverage.py` | REQ-1101, REQ-1109 |
+| 7.2 Backward-Reference Detection | Task 0.6 contracts | `test_backward_reference.py` | `query/nodes/query_processor.py` | `docs/tmp/module-query-processor.md` | `tests/retrieval/test_backward_reference_coverage.py` | REQ-1103 |
+| 7.3 Context-Reset Detection | Task 0.6 contracts | `test_context_reset.py` | `query/nodes/query_processor.py` | `docs/tmp/module-query-processor.md` | `tests/retrieval/test_context_reset_coverage.py` | REQ-1105 |
+| 7.4 Memory-Aware Reformulation | Task 0.6 contracts | `test_memory_reformulation.py` | `query/nodes/query_processor.py`, `prompts/query_reformulate_and_evaluate.md` | `docs/tmp/module-query-processor.md` | `tests/retrieval/test_memory_reformulation_coverage.py` | REQ-1101, REQ-1102, REQ-1107 |
 
 ---
 
@@ -421,6 +448,76 @@ from src.retrieval.guardrails.types import RiskLevel, GuardrailResult
 from src.retrieval.memory.types import ConversationTurn, MemoryProvider
 print('All Phase 0 QUERY contracts import successfully')
 "
+```
+
+---
+
+## Task 0.6: Conversational Query Routing Types
+
+### Phase 0 Contract: QueryResult Extension (REQ-1101, REQ-1109)
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, TypedDict
+
+
+class QueryAction(Enum):
+    """Action to take after query processing."""
+    SEARCH = "search"
+    ASK_USER = "ask_user"
+
+
+@dataclass
+class QueryResult:
+    """Result of the query processing pipeline.
+
+    Extended with dual-query fields for conversational routing (REQ-1101, REQ-1109).
+    """
+    processed_query: str                          # Memory-enriched reformulation (REQ-1101)
+    confidence: float
+    action: QueryAction
+    standalone_query: str = ""                    # Current-turn-only polish (REQ-1101)
+    suppress_memory: bool = False                 # Context-reset detected (REQ-1105)
+    has_backward_reference: bool = False           # Backward-ref signals detected (REQ-1103)
+    clarification_message: Optional[str] = None
+    iterations: int = 0
+
+
+class QueryState(TypedDict):
+    """LangGraph state schema for query processing."""
+    original_query: str
+    current_query: str
+    confidence: float
+    reasoning: str
+    iteration: int
+    max_iterations: int
+    confidence_threshold: float
+    action: str
+    clarification_message: str
+    ollama_available: bool
+    fast_path: bool
+    standalone_query: str                          # Dual-query output (REQ-1101)
+    suppress_memory: bool                          # Context-reset flag (REQ-1105)
+    has_backward_reference: bool                   # Backward-ref flag (REQ-1103)
+```
+
+### Error Taxonomy (additions)
+
+| Exception | Raised By | When | Propagates? |
+|---|---|---|---|
+| `ValueError` | `detect_query_signals()` | Input query is None or empty | Yes — caller validates |
+
+### Integration Contracts (additions)
+
+```
+Query Processor
+    → detect_query_signals(raw_query) → (has_backward_reference, suppress_memory)
+    → reformulate_dual_query(query, memory_context) → (processed_query, standalone_query)
+    → QueryResult (with all new fields populated)
+        → rag_chain.run() uses standalone_query, suppress_memory, has_backward_reference
 ```
 
 ---
@@ -757,6 +854,84 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_memory_injection
 
 ---
 
+## Task A-7.1: Query Result Schema Extension Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/query/schemas.py` — the schema file to test
+- Only the schema contract from Task 0.6 above
+
+### Test Cases
+
+1. **Test `QueryResult` default values**: Create a `QueryResult` with only required fields. Verify `standalone_query == ""`, `suppress_memory == False`, `has_backward_reference == False`.
+2. **Test `QueryResult` with all fields populated**: Verify all fields are accessible and correctly typed.
+3. **Test `QueryState` has new fields**: Verify TypedDict includes `standalone_query`, `suppress_memory`, `has_backward_reference`.
+4. **Test backward compatibility**: Existing code creating `QueryResult(processed_query=..., confidence=..., action=...)` still works with new defaults.
+
+---
+
+## Task A-7.2: Backward-Reference Detection Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- The backward-reference detection function in `src/retrieval/query/nodes/query_processor.py`
+- Only the requirements REQ-1103
+
+### Test Cases
+
+1. **Test explicit markers**: "Tell me more about the above" → `has_backward_reference = True`
+2. **Test "you said" marker**: "Based on what you said earlier" → `True`
+3. **Test "elaborate" marker**: "Can you elaborate on that?" → `True`
+4. **Test clean query**: "What is the SPI timing spec?" → `False`
+5. **Test pronoun density**: "What about it and its properties?" → `True` (high pronoun density)
+6. **Test low pronoun density**: "What about the USB clock frequency?" → `False`
+7. **Test case insensitivity**: "TELL ME MORE" → `True`
+8. **Test partial match avoidance**: "Tell me about the above-ground cable" → should handle correctly
+
+---
+
+## Task A-7.3: Context-Reset Detection Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- The context-reset detection function in `src/retrieval/query/nodes/query_processor.py`
+- Only the requirements REQ-1105
+
+### Test Cases
+
+1. **Test "forget about past conversation"**: → `suppress_memory = True`
+2. **Test "ignore previous"**: → `True`
+3. **Test "new topic"**: → `True`
+4. **Test "start fresh"**: → `True`
+5. **Test normal query**: "What is the timing spec?" → `False`
+6. **Test combined**: "Forget the past conversation, what is X?" → `suppress_memory = True`
+7. **Test case insensitivity**: "FORGET ABOUT PAST CONVO" → `True`
+
+---
+
+## Task A-7.4: Memory-Aware Reformulation Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- The reformulation function in `src/retrieval/query/nodes/query_processor.py`
+- The reformulation prompt at `prompts/query_reformulate_and_evaluate.md`
+- Only the requirements REQ-1101, REQ-1102, REQ-1107
+
+### Test Cases
+
+1. **Test dual output**: Given a query with memory context, verify both `processed_query` and `standalone_query` are produced.
+2. **Test fresh conversation**: With no memory context, verify `standalone_query == processed_query`.
+3. **Test pronoun resolution**: Given "What's its tolerance?" with memory about component X, verify `processed_query` contains "component X".
+4. **Test standalone purity**: Given "What's its tolerance?" with memory, verify `standalone_query` does NOT contain component X context.
+5. **Test single LLM call**: Verify only one LLM call is made (REQ-1102).
+6. **Test JSON parse failure fallback**: When LLM returns non-JSON, verify graceful fallback to single-query behavior.
+
+---
+
 # Phase B — Implementation (Against Tests)
 
 Each Phase B task implements the code that makes its corresponding Phase A tests pass.
@@ -1025,6 +1200,148 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_memory_injection
 ```
 
 - [ ] Commit: "feat(retrieval): implement memory context injection into query processing"
+
+---
+
+## Task B-7.1: Query Result Schema Extension
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/query/schemas.py` — Task 0.6 output (the schema to modify)
+- Only the schema changes specified below — do NOT change existing fields
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/query/schemas.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1101, REQ-1109
+
+### Dependencies
+
+None — schema-only change.
+
+### Implementation Steps
+
+**Step 1** — Read `src/retrieval/query/schemas.py` fully.
+
+**Step 2** — Add three new fields to `QueryResult` dataclass with defaults:
+- `standalone_query: str = ""`
+- `suppress_memory: bool = False`
+- `has_backward_reference: bool = False`
+
+**Step 3** — Add three new fields to `QueryState` TypedDict:
+- `standalone_query: str`
+- `suppress_memory: bool`
+- `has_backward_reference: bool`
+
+---
+
+## Task B-7.2: Backward-Reference Detection
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/query/nodes/query_processor.py` — the query processor to modify
+- Only the detection logic specified below
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/query/nodes/query_processor.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1103
+
+### Dependencies
+
+Task 7.1 (schema fields)
+
+### Implementation Steps
+
+**Step 1** — Read `src/retrieval/query/nodes/query_processor.py` fully.
+
+**Step 2** — Add a module-level compiled regex list `_BACKWARD_REF_PATTERNS` with markers: "the above", "you said", "you mentioned", "previously", "tell me more", "elaborate", "based on what we discussed", "regarding what you mentioned", "as we discussed", "from earlier", "what about that".
+
+**Step 3** — Add a pronoun regex `_PRONOUNS` matching "it", "its", "that", "those", "this", "these", "them" and a density threshold constant `_PRONOUN_DENSITY_THRESHOLD = 0.15`.
+
+**Step 4** — Implement `_has_backward_reference(query: str) -> bool` that returns True if any backward-ref pattern matches OR pronoun density exceeds threshold.
+
+**Step 5** — Wire the function call into `process_query()` to populate `has_backward_reference` on the `QueryResult`.
+
+---
+
+## Task B-7.3: Context-Reset Detection
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/query/nodes/query_processor.py` — the query processor to modify
+- Only the detection logic specified below
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/query/nodes/query_processor.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1105
+
+### Dependencies
+
+Task 7.1 (schema fields)
+
+### Implementation Steps
+
+**Step 1** — Add a module-level compiled regex list `_CONTEXT_RESET_PATTERNS` with markers: "forget about (the )?(past |previous )?(conversation|convo|chat|discussion)", "ignore (the )?(previous|prior|past)", "new topic", "start fresh", "fresh start", "disregard what we discussed".
+
+**Step 2** — Implement `_detect_suppress_memory(query: str) -> bool` that returns True if any context-reset pattern matches.
+
+**Step 3** — Wire the function call into `process_query()` to populate `suppress_memory` on the `QueryResult`.
+
+---
+
+## Task B-7.4: Memory-Aware Reformulation Prompt
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/query/nodes/query_processor.py` — the query processor to modify
+- `prompts/query_reformulate_and_evaluate.md` — the prompt template to update
+- Only the prompt and parsing changes specified below
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `prompts/query_reformulate_and_evaluate.md` | MODIFY |
+| `src/retrieval/query/nodes/query_processor.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1101, REQ-1102, REQ-1107
+
+### Dependencies
+
+Task 7.1, 7.2, 7.3
+
+### Implementation Steps
+
+**Step 1** — Read the existing reformulation prompt. Note its current output format.
+
+**Step 2** — Update the prompt to instruct the LLM to output JSON with `processed_query` and `standalone_query` fields. Add explicit instructions for: (a) pronoun resolution using conversation context, (b) topic shift detection, (c) backward-reference expansion, (d) standalone_query must NOT contain conversation history context.
+
+**Step 3** — Update the query processor's reformulation response parser to extract both fields from JSON. On JSON parse failure, fall back to using the raw response as `processed_query` and setting `standalone_query = processed_query`.
+
+**Step 4** — When memory context is empty (fresh conversation), set `standalone_query = processed_query` without attempting dual-query parsing.
 
 ---
 

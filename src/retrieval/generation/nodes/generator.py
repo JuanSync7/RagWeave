@@ -46,11 +46,30 @@ def _get_system_prompt() -> str:
     return _SYSTEM_PROMPT
 
 
-# Regex to extract the CONFIDENCE line from LLM responses
-_CONFIDENCE_RE = re.compile(
-    r"^CONFIDENCE:\s*(high|medium|low)\s*$",
-    re.MULTILINE | re.IGNORECASE,
-)
+# Known confidence levels — the only valid values for the confidence field.
+_CONFIDENCE_LEVELS = {"high", "medium", "low"}
+
+# Strict schema format — used when the provider supports json_schema (e.g., OpenAI GPT-4o).
+# Enforces confidence as an enum at the token level — the LLM literally cannot output other values.
+_RAG_RESPONSE_FORMAT_STRICT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "rag_answer",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            },
+            "required": ["answer", "confidence"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+# Basic JSON format — used when the provider only supports json_object (e.g., Ollama).
+# The prompt instructs the schema; validation catches bad values.
+_RAG_RESPONSE_FORMAT_BASIC = {"type": "json_object"}
 
 def _build_user_prompt(context: str, question: str) -> str:
     """Build user prompt via concatenation — safe against curly braces in documents.
@@ -86,6 +105,17 @@ class OllamaGenerator:
         self._last_response = None
         # Last LLM self-reported confidence — read by rag_chain.py for composite scoring
         self._last_llm_confidence: str = "medium"
+        # Auto-detect structured output support for this model
+        try:
+            import litellm
+            if litellm.supports_response_schema(self.model):
+                self._response_format = _RAG_RESPONSE_FORMAT_STRICT
+                logger.info("Model %s supports json_schema — using strict response format", self.model)
+            else:
+                self._response_format = _RAG_RESPONSE_FORMAT_BASIC
+                logger.info("Model %s uses json_object — using basic response format", self.model)
+        except Exception:
+            self._response_format = _RAG_RESPONSE_FORMAT_BASIC
 
     def _build_messages(
         self,
@@ -173,7 +203,7 @@ class OllamaGenerator:
                 self._last_response = response
                 raw_content = response.content or None
                 if raw_content:
-                    answer, confidence = self._extract_confidence(raw_content)
+                    answer, confidence = self._extract_confidence_from_text(raw_content)
                     self._last_llm_confidence = confidence
                     span.set_attribute("llm_confidence", confidence)
                     return answer
@@ -183,27 +213,50 @@ class OllamaGenerator:
                 return None
 
     @staticmethod
-    def _extract_confidence(response_text: str) -> Tuple[str, str]:
-        """Extract and strip the CONFIDENCE line from an LLM response.
+    def _parse_structured_response(response_text: str) -> Tuple[str, str]:
+        """Parse the LLM response as structured JSON with answer + confidence.
 
-        The LLM is prompted to append "CONFIDENCE: high|medium|low" on
-        a new line after its answer. This method extracts that line and
-        returns the answer text without it.
+        The LLM is called with response_format=json_schema, which constrains
+        the output to {"answer": str, "confidence": "high"|"medium"|"low"}.
+        Falls back to text extraction if JSON parsing fails (e.g., provider
+        doesn't support structured output).
 
         Args:
-            response_text: Raw LLM response text.
+            response_text: Raw LLM response (expected JSON).
 
         Returns:
-            Tuple of (answer_text_without_confidence_line, confidence_level).
+            Tuple of (answer_text, confidence_level).
             Confidence defaults to "medium" if not parseable.
         """
-        match = _CONFIDENCE_RE.search(response_text)
-        if match:
-            confidence = match.group(1).lower()
-            # Strip the confidence line from the answer
-            answer = _CONFIDENCE_RE.sub("", response_text).rstrip()
-            return answer, confidence
-        return response_text, "medium"
+        import json
+        try:
+            data = json.loads(response_text)
+            answer = data.get("answer", "").strip()
+            confidence = data.get("confidence", "medium").strip().lower()
+            return answer or response_text, confidence
+        except (json.JSONDecodeError, AttributeError):
+            # Fallback: provider didn't return JSON — extract from text
+            return OllamaGenerator._extract_confidence_from_text(response_text)
+
+    @staticmethod
+    def _extract_confidence_from_text(response_text: str) -> Tuple[str, str]:
+        """Fallback extraction when structured output is not available.
+
+        Scans for "CONFIDENCE: high|medium|low" anywhere in the text and
+        strips it from the answer.
+        """
+        confidence = "medium"
+        lines = response_text.splitlines()
+        clean_lines = []
+        for line in lines:
+            stripped = line.strip().lower().replace("*", "")
+            if stripped.startswith("confidence:"):
+                level = stripped.split(":", 1)[1].strip()
+                if level in _CONFIDENCE_LEVELS:
+                    confidence = level
+                continue
+            clean_lines.append(line)
+        return "\n".join(clean_lines).strip(), confidence
 
     def generate_stream(
         self,

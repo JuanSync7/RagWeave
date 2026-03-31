@@ -2,7 +2,7 @@
 # Temporal activity that executes RAG queries against a preloaded RAGChain singleton.
 # The singleton is initialized once by the worker at startup — not per request.
 # Exports: execute_rag_query, init_rag_chain, shutdown_rag_chain
-# Deps: temporalio, src.retrieval.rag_chain, dataclasses
+# Deps: temporalio, src.retrieval.pipeline.rag_chain, dataclasses
 # @end-summary
 """Temporal activities for the RAG query pipeline.
 
@@ -34,7 +34,7 @@ def init_rag_chain() -> None:
         logger.warning("RAGChain already initialized, skipping re-init")
         return
 
-    from src.retrieval.rag_chain import RAGChain
+    from src.retrieval.pipeline.rag_chain import RAGChain
     logger.info("Initializing RAGChain (loading models into memory)...")
     start = time.time()
     _rag_chain = RAGChain()

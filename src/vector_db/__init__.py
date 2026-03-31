@@ -1,9 +1,10 @@
 # @summary
 # Public API for the vector_db subsystem: config-driven backend dispatcher,
-# single-collection search, multi-collection fan-out, and re-exported schemas.
+# single-collection search, multi-collection fan-out, aggregation, and re-exported schemas.
 # Exports: create_persistent_client, get_client, close_client, ensure_collection,
 #          delete_collection, add_documents, delete_by_source, delete_by_source_key,
-#          search, multi_search, DocumentRecord, SearchResult, SearchFilter, build_chunk_id
+#          search, multi_search, aggregate_by_source, get_collection_stats, list_collections,
+#          DocumentRecord, SearchResult, SearchFilter, build_chunk_id
 # Deps: config.settings, src.vector_db.backend, src.vector_db.common.schemas,
 #       src.vector_db.weaviate.store
 # @end-summary
@@ -278,6 +279,38 @@ def multi_search(
     return sorted(seen.values(), key=lambda r: r.score, reverse=True)[:limit]
 
 
+# ---------------------------------------------------------------------------
+# Aggregation and listing (FR-3050 through FR-3053)
+# ---------------------------------------------------------------------------
+
+
+def aggregate_by_source(
+    client: Any,
+    collection: Optional[str] = None,
+    source_filter: Optional[str] = None,
+    connector_filter: Optional[str] = None,
+) -> list[dict]:
+    """Group chunk counts by source_key with optional filters."""
+    return _get_vector_backend().aggregate_by_source(
+        client, _resolve_collection(collection), source_filter, connector_filter
+    )
+
+
+def get_collection_stats(
+    client: Any,
+    collection: Optional[str] = None,
+) -> Optional[dict]:
+    """Return aggregate stats for a collection; None if it does not exist."""
+    return _get_vector_backend().get_collection_stats(
+        client, _resolve_collection(collection)
+    )
+
+
+def list_collections(client: Any) -> list[dict]:
+    """Return all collections with their chunk counts."""
+    return _get_vector_backend().list_collections(client)
+
+
 __all__ = [
     # Client lifecycle
     "create_persistent_client",
@@ -293,6 +326,10 @@ __all__ = [
     # Search
     "search",
     "multi_search",
+    # Aggregation and listing
+    "aggregate_by_source",
+    "get_collection_stats",
+    "list_collections",
     # Re-exported schemas
     "DocumentRecord",
     "SearchResult",

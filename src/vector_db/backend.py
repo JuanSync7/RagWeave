@@ -125,5 +125,30 @@ class VectorBackend(ABC):
         """
         ...
 
+    @abstractmethod
+    def aggregate_by_source(
+        self,
+        client: Any,
+        collection: Optional[str] = None,
+        source_filter: Optional[str] = None,
+        connector_filter: Optional[str] = None,
+    ) -> list[dict]:
+        """Group chunk counts by source_key with optional filters."""
+        ...
+
+    @abstractmethod
+    def get_collection_stats(
+        self,
+        client: Any,
+        collection: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Return aggregate stats for a collection; None if it does not exist."""
+        ...
+
+    @abstractmethod
+    def list_collections(self, client: Any) -> list[dict]:
+        """Return all collections with their chunk counts."""
+        ...
+
     def close_client(self, client: Any) -> None:
         """Close a persistent client. Default is a no-op."""

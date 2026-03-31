@@ -91,5 +91,17 @@ class DocumentBackend(ABC):
         """Return a presigned URL for direct download of the document."""
         ...
 
+    @abstractmethod
+    def list_documents(
+        self,
+        client: Any,
+        bucket: Optional[str] = None,
+        prefix: str = "",
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List documents. Returns dicts with document_id, source_key, size_bytes, last_modified."""
+        ...
+
     def close_client(self, client: Any) -> None:
         """Close a persistent client. Default is a no-op (stateless backends)."""

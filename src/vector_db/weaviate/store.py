@@ -1,9 +1,10 @@
 # @summary
-# Weaviate embedded client helpers: connection, collection management, CRUD, and hybrid search.
+# Weaviate embedded client helpers: connection, collection management, CRUD, hybrid search, and aggregation.
 # All collection-scoped operations accept a collection parameter for multi-collection support.
 # Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
 #          add_documents, hybrid_search, delete_collection,
-#          delete_documents_by_source, delete_documents_by_source_key
+#          delete_documents_by_source, delete_documents_by_source_key,
+#          aggregate_by_source, get_collection_stats, list_collections
 # Deps: weaviate, config.settings, src.platform.observability
 # @end-summary
 """Low-level Weaviate operations: connection, schema, CRUD, and search.
@@ -311,3 +312,127 @@ def delete_documents_by_source_key(
     span.set_attribute("deleted_count", deleted)
     span.end(status="ok")
     return deleted
+
+
+# ---------------------------------------------------------------------------
+# Aggregation and listing (FR-3050 through FR-3052)
+# ---------------------------------------------------------------------------
+
+
+def aggregate_by_source(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+    source_filter: Optional[str] = None,
+    connector_filter: Optional[str] = None,
+) -> list[dict]:
+    """Return chunk counts grouped by source_key.
+
+    Each dict: source_key (str), source (str), connector (str), chunk_count (int).
+    Uses Weaviate group_by aggregate -- no full object iteration.
+
+    Raises:
+        KeyError: if the collection does not exist.
+        weaviate.exceptions.WeaviateQueryError: on query failure.
+    """
+    span = tracer.start_span(
+        "vector_store.aggregate_by_source",
+        {"collection": collection},
+    )
+    col = client.collections.get(collection)
+    filters = []
+    if source_filter:
+        filters.append(Filter.by_property("source").like(f"*{source_filter}*"))
+    if connector_filter:
+        filters.append(Filter.by_property("connector").equal(connector_filter))
+    combined = (
+        filters[0]
+        if len(filters) == 1
+        else (Filter.all_of(filters) if filters else None)
+    )
+    response = col.aggregate.over_all(
+        group_by=weaviate.classes.aggregate.GroupByAggregate(prop="source_key"),
+        filters=combined,
+        total_count=True,
+    )
+    results: list[dict] = []
+    for group in response.groups:
+        results.append({
+            "source_key": group.grouped_by.value,
+            "source": (
+                group.properties.get("source", {})
+                .get("top_occurrences", [{}])[0]
+                .get("value", "")
+            ),
+            "connector": (
+                group.properties.get("connector", {})
+                .get("top_occurrences", [{}])[0]
+                .get("value", "")
+            ),
+            "chunk_count": group.total_count,
+        })
+    span.end(status="ok")
+    return results
+
+
+def get_collection_stats(
+    client: weaviate.WeaviateClient,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> Optional[dict]:
+    """Return aggregate statistics for a collection.
+
+    Returns dict with chunk_count, document_count, connector_breakdown.
+    Returns None if the collection does not exist.
+
+    Raises:
+        weaviate.exceptions.WeaviateQueryError: on unexpected query failure.
+    """
+    span = tracer.start_span("vector_store.get_collection_stats", {"collection": collection})
+    if not client.collections.exists(collection):
+        span.end(status="not_found")
+        return None
+    col = client.collections.get(collection)
+    total = col.aggregate.over_all(total_count=True)
+    chunk_count = total.total_count or 0
+    by_source = col.aggregate.over_all(
+        group_by=weaviate.classes.aggregate.GroupByAggregate(prop="source_key"),
+        total_count=True,
+    )
+    document_count = len(by_source.groups)
+    by_connector = col.aggregate.over_all(
+        group_by=weaviate.classes.aggregate.GroupByAggregate(prop="connector"),
+        total_count=True,
+    )
+    connector_breakdown = {
+        g.grouped_by.value: g.total_count for g in by_connector.groups
+    }
+    span.end(status="ok")
+    return {
+        "chunk_count": chunk_count,
+        "document_count": document_count,
+        "connector_breakdown": connector_breakdown,
+    }
+
+
+def list_collections(
+    client: weaviate.WeaviateClient,
+) -> list[dict]:
+    """Return all collections visible to this client.
+
+    Each dict: collection_name (str), chunk_count (int).
+    Uses client.collections.list_all() for enumeration.
+
+    Raises:
+        weaviate.exceptions.WeaviateConnectionError: if client is not connected.
+    """
+    span = tracer.start_span("vector_store.list_collections")
+    all_cols = client.collections.list_all(simple=True)
+    results: list[dict] = []
+    for name in all_cols:
+        col = client.collections.get(name)
+        agg = col.aggregate.over_all(total_count=True)
+        results.append({
+            "collection_name": name,
+            "chunk_count": agg.total_count or 0,
+        })
+    span.end(status="ok")
+    return results

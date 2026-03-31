@@ -353,6 +353,8 @@ The prompt template loader constructs the LLM prompt from a static system prompt
    c. Return the assembled prompt as a list of message dicts (`[{"role": "system", ...}, {"role": "user", ...}]`).
 4. Template files are cached at module scope after first load. Changes to prompt files take effect on restart.
 
+> **Behavior Note — Memory echo suppression (rag_chain.py Stage 6):** The pipeline passes two memory inputs to the generator: `memory_context` (a rolling conversation summary) and `recent_turns` (verbatim prior Q&A turns). `recent_turns` is gated on retrieval quality: it is passed only when `retrieval_quality` is `"strong"` or `"moderate"`. When retrieval quality is `"weak"` or `"insufficient"`, `recent_turns` is set to `None` before calling `generate()` to prevent the LLM from echoing prior answers in place of grounded content. `memory_context` is always passed regardless of retrieval quality.
+
 The system prompt contains all five anti-hallucination instruction categories (REQ-601):
 - Answer ONLY from provided retrieved documents
 - Never use training data or prior knowledge
@@ -495,6 +497,8 @@ The confidence routing engine takes a `ConfidenceBreakdown` (from scoring utilit
 
 3. If action is FLAG, attach verification warning text: "WARNING: This answer pertains to a HIGH risk domain. VERIFY BEFORE IMPLEMENTATION against authoritative source documents."
 4. Return the `PostGuardrailAction` enum value and optional verification warning.
+
+> **Behavior Note — FLAG display:** When the action is FLAG, the pipeline (`rag_chain.py` Stage 7.5) appends the `verification_warning` text directly to `generated_answer` as a visible block (`\n\n---\n⚠️ <warning text>`), in addition to populating the structured `verification_warning` field. This ensures the warning is visible to any display layer that renders only the answer string.
 
 #### Key Design Decisions
 
@@ -1568,6 +1572,92 @@ To add a new check to the post-generation guardrail (e.g., factual consistency b
 
 6. **Update observability**:
    - Add the new check's metrics to the post-guardrail stage metadata.
+
+---
+
+## 11. Memory-Aware Generation Routing
+
+The generation subsystem uses two boolean signals produced by the query processor — `has_backward_reference` and `suppress_memory` — alongside the reranker score distribution to select one of four generation paths. This section documents the full routing matrix, fallback retrieval logic, memory-only generation, BLOCK/FLAG memory filtering, and the `generation_source` field that makes the chosen path observable in the response.
+
+---
+
+### 11.1 Routing Decision Table
+
+The routing decision is made in `rag_chain.run()` after the reranker scores are available. "Strong/moderate retrieval" means the best reranker score exceeds the strong retrieval threshold (default: 0.50). "Weak retrieval" means the best reranker score falls below that threshold.
+
+| `suppress_memory` | Retrieval quality | `has_backward_reference` | `memory_context` | Action | `generation_source` |
+|-------------------|-------------------|--------------------------|------------------|--------|---------------------|
+| `True` | any | any | any | Use `standalone_query`; strip memory from generation | `"retrieval"` |
+| `False` | strong/moderate | `True` | any | Generate from docs + memory | `"retrieval+memory"` |
+| `False` | strong/moderate | `False` | non-empty | Generate from docs + memory | `"retrieval+memory"` |
+| `False` | strong/moderate | `False` | empty | Generate from docs only | `"retrieval"` |
+| `False` | weak | `True` | non-empty | Generate from memory only (skip docs) | `"memory"` |
+| `False` | weak | `True` | empty | BLOCK — no memory and no retrieval (fresh conversation guard) | `null` |
+| `False` | weak | `False` | any | Standard BLOCK/FLAG path (confidence routing) | `null` |
+
+The fresh-conversation guard (row 6) prevents the memory-generation path from being invoked when `memory_context` is empty. Attempting memory-only generation with no memory content would cause the LLM to hallucinate from training data.
+
+---
+
+### 11.2 Fallback Retrieval
+
+When primary retrieval (on `processed_query`) produces weak scores and `suppress_memory` is `False`, a second retrieval attempt runs on `standalone_query` before the routing decision is finalized.
+
+```
+primary_retrieval(processed_query)  -->  best_score < threshold?
+                                                  |
+                                        secondary_retrieval(standalone_query)
+                                                  |
+                              compare best scores from both attempts
+                                                  |
+                              use whichever result set has the higher best score
+```
+
+The winning result set is written back to `RAGPipelineState` as `ranked_docs` / `reranker_scores` before routing proceeds. If the secondary attempt also produces weak scores, routing continues into the memory-routing decision matrix above.
+
+Fallback retrieval does not increment `retry_count`. It is a pre-routing probe, not a post-confidence-evaluation re-retrieve.
+
+---
+
+### 11.3 Memory-Generation Path
+
+When routing selects `generation_source="memory"`, the generator receives only `memory_context` and `recent_turns` — no retrieved documents are included in the prompt. The generation call is otherwise identical (same model, same retry wrapper).
+
+After generation, the post-guardrail confidence routing still runs, but with one change: **the RE_RETRIEVE routing action is suppressed on the memory path**. Because there are no viable retrieved documents (that is why this path was selected), re-retrieving again would loop back to the same weak result. Instead, a RE_RETRIEVE outcome is re-routed to FLAG.
+
+The full modified routing table for the memory path:
+
+| Standard action | Memory-path action |
+|-----------------|-------------------|
+| RETURN | RETURN |
+| FLAG | FLAG |
+| RE_RETRIEVE | FLAG (re-route) |
+| BLOCK | BLOCK |
+
+---
+
+### 11.4 BLOCK/FLAG Memory Filtering
+
+Caller contract: responses where `post_guardrail_action in ("block", "flag")` **must NOT be stored** via `append_turn()` into the conversation memory store.
+
+Rationale: if a blocked or flagged answer is stored as an assistant turn, subsequent memory-aware queries will inject that error response into generation context ("based on what we discussed, the system said..."), propagating incorrect content into future answers. User turns are always stored, regardless of the guardrail outcome.
+
+This is a caller-side responsibility enforced in `rag_chain.run()` before delegating to the memory provider. The memory provider itself does not enforce this — it stores whatever it is given.
+
+---
+
+### 11.5 `generation_source` Field
+
+`generation_source` is a string field set in `RAGPipelineState` by `rag_chain.run()` after the routing decision is made.
+
+| Value | Meaning |
+|-------|---------|
+| `"retrieval"` | Answer generated from retrieved documents only |
+| `"retrieval+memory"` | Answer generated from retrieved documents and injected conversation memory |
+| `"memory"` | Answer generated from conversation memory only (no retrieved documents) |
+| `null` | Pipeline did not reach generation (BLOCK, or guardrail rejection upstream) |
+
+`generation_source` is included in the response metadata. Clients and observability dashboards can use this field to distinguish answer provenance and detect shifts in routing distribution (e.g., an unexpected spike in `"memory"` responses may indicate retrieval degradation).
 
 ---
 

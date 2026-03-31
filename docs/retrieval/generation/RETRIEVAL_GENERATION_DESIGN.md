@@ -3,12 +3,12 @@
 | Field | Value |
 |-------|-------|
 | **Document** | Retrieval Generation Pipeline Design Document |
-| **Version** | 1.2 |
+| **Version** | 1.4 |
 | **Status** | Draft |
-| **Spec Reference** | `RETRIEVAL_GENERATION_SPEC.md` v1.2 (REQ-501–REQ-903) |
+| **Spec Reference** | `RETRIEVAL_GENERATION_SPEC.md` v1.3 (REQ-501–REQ-903, REQ-1201–REQ-1209) |
 | **Companion Documents** | `RETRIEVAL_GENERATION_SPEC.md`, `RETRIEVAL_GENERATION_IMPLEMENTATION.md`, `RETRIEVAL_SPEC_SUMMARY.md` |
 | **Created** | 2026-03-11 |
-| **Last Updated** | 2026-03-23 |
+| **Last Updated** | 2026-03-27 |
 
 | Version | Date | Changes |
 |---------|------|---------|
@@ -16,6 +16,7 @@
 | 1.1 | 2026-03-13 | Added Phase 6 (conversation memory) covering REQ-1001–1008, updated dependency graph and mapping |
 | 1.2 | 2026-03-23 | Renamed from Implementation Guide to Design Document; added Contract/Pattern annotations to Part B; added companion document references |
 | 1.3 | 2026-03-25 | Split from RETRIEVAL_DESIGN.md; now covers generation-side tasks only (Tasks 1.2, 1.3, 2.1, 2.2, 3.1–3.3, 4.4, 5.3) |
+| 1.4 | 2026-03-27 | AI Assistant | Added Phase 6 (Memory-Aware Generation Routing) covering REQ-1201–1209, updated dependency graph and mapping |
 
 > **Document Intent.** This document provides a technical design with task decomposition
 > and contract-grade code appendix for the retrieval pipeline specified in
@@ -230,6 +231,113 @@ Harden the pipeline against data leakage and injection.
 
 ---
 
+## Phase 6 — Memory-Aware Generation Routing
+
+Retrieval-first routing with memory-generation fallback: fallback retrieval on standalone_query, memory-generation path for backward-reference queries, suppress-memory routing, BLOCK/FLAG memory filtering, and generation source tracking.
+
+### Task 6.1: Fallback Retrieval Routing
+
+**Description:** When primary retrieval (using `processed_query`) returns weak/insufficient results and `suppress_memory` is False, execute a fallback retrieval using `standalone_query`. Use whichever retrieval produces better results (measured by best reranker score).
+
+**Requirements Covered:** REQ-1201
+
+**Dependencies:** Task 7.1 from RETRIEVAL_QUERY_DESIGN.md (schema with `standalone_query` field)
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. After primary retrieval + reranking, check `retrieval_quality` — if "weak" or "insufficient" and `suppress_memory` is False, proceed to fallback
+2. Embed `standalone_query` (check embedding cache first)
+3. Execute hybrid search with `standalone_query` embedding
+4. Rerank fallback results
+5. Compare best reranker score from primary vs fallback — use the set with higher quality
+6. Update `retrieval_quality` and `retrieval_quality_note` based on the chosen results
+7. Skip fallback when `suppress_memory` is True (standalone_query was already the primary)
+
+---
+
+### Task 6.2: Memory-Generation Path and Hybrid Routing
+
+**Description:** When all retrieval passes return weak/insufficient results AND `has_backward_reference` is True AND memory is non-empty, generate from conversation memory context only. When backward reference is True but retrieval succeeds, use standard retrieval+memory generation. Apply confidence routing to all paths.
+
+**Requirements Covered:** REQ-1203, REQ-1204
+
+**Dependencies:** Task 6.1 (fallback retrieval — must know both retrieval results)
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. After all retrieval passes, check: both weak AND `has_backward_reference == True`
+2. Guard: if `memory_context` and `recent_turns` are both empty (fresh conversation), fall through to BLOCK
+3. Build memory-only generation context: `memory_context` + formatted `recent_turns` as the "context" for the generator
+4. Call generator with memory context instead of document chunks
+5. Apply confidence routing to memory-generated answer — skip re-retrieval step (not applicable), go directly to BLOCK/FLAG
+6. When `has_backward_reference == True` AND retrieval is strong/moderate (REQ-1204): use standard path with docs + memory + turns, set `generation_source = "retrieval+memory"`
+7. Set `generation_source = "memory"` for the memory-only path
+
+---
+
+### Task 6.3: Suppress-Memory Routing
+
+**Description:** When `suppress_memory` is True (context-reset detected), use `standalone_query` as primary and only retrieval query. Exclude `memory_context` and `recent_turns` from generation prompt.
+
+**Requirements Covered:** REQ-1205
+
+**Dependencies:** Task 7.3 from RETRIEVAL_QUERY_DESIGN.md (context-reset detection)
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. At start of `rag_chain.run()`, check `query_result.suppress_memory`
+2. If True: set `search_query = standalone_query`, `gen_memory = None`, `gen_turns = None`
+3. Skip fallback retrieval (standalone_query IS the primary)
+4. Pass `gen_memory=None, gen_turns=None` to generator
+5. Set `generation_source = "retrieval"` (no memory involved)
+
+---
+
+### Task 6.4: BLOCK/FLAG Memory Filtering
+
+**Description:** Document the caller-side contract for excluding BLOCK and FLAG responses from conversation memory storage. This is a caller-side change (CLI/API/server), not a pipeline change.
+
+**Requirements Covered:** REQ-1207
+
+**Dependencies:** None — this is a caller-side contract.
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Define contract: callers MUST check `response.post_guardrail_action` before calling `append_turn()`
+2. If action is "block" or "flag": display response to user BUT skip `append_turn()` for the assistant turn
+3. Always store the user's turn regardless of response action
+4. Document the contract in the engineering guide for caller implementors
+
+---
+
+### Task 6.5: Generation Source Tracking
+
+**Description:** Add `generation_source` field to `RAGResponse` and set it based on which path produced the answer.
+
+**Requirements Covered:** REQ-1209
+
+**Dependencies:** Task 6.1, 6.2, 6.3 (all routing paths must be implemented to know the source)
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Add `generation_source: Optional[str] = None` to `RAGResponse` dataclass
+2. Set `"retrieval"` when generating from retrieved documents (primary or fallback)
+3. Set `"memory"` when generating from memory-only path
+4. Set `"retrieval+memory"` when generating from docs + memory context
+5. Set `None` when generation is skipped (BLOCK with no generation)
+
+---
+
 ## Task Dependency Graph
 
 ```
@@ -268,6 +376,13 @@ Phase 6 (Conversation Memory)
 ├── Task 6.2: Sliding Window and Rolling Summary ◄── Task 6.1 ──┤  [see RETRIEVAL_QUERY_DESIGN.md]
 ├── Task 6.3: Conversation Lifecycle Operations ◄── Task 6.1,6.2┤  [see RETRIEVAL_QUERY_DESIGN.md]
 └── Task 6.4: Memory Context Injection ◄── Task 6.2, Task 3.4 ──┘  [see RETRIEVAL_QUERY_DESIGN.md]
+
+Phase 6 (Memory-Aware Generation Routing)
+├── Task 6.1: Fallback Retrieval Routing ◄── Task 7.1 (query schema)     [see RETRIEVAL_QUERY_DESIGN.md]
+├── Task 6.2: Memory-Gen Path & Hybrid Routing ◄── Task 6.1
+├── Task 6.3: Suppress-Memory Routing ◄── Task 7.3 (reset detection)     [see RETRIEVAL_QUERY_DESIGN.md]
+├── Task 6.4: BLOCK/FLAG Memory Filtering (caller-side)
+└── Task 6.5: Generation Source Tracking ◄── Task 6.1, 6.2, 6.3
 ```
 
 ---
@@ -285,6 +400,11 @@ Phase 6 (Conversation Memory)
 | 3.3 PromptTemplate Integration | REQ-601, REQ-602 |
 | 4.4 Observability | REQ-801, REQ-802, REQ-803 |
 | 5.3 Post-Generation PII Filtering | REQ-703 |
+| 6.1 Fallback Retrieval Routing | REQ-1201 |
+| 6.2 Memory-Gen Path & Hybrid Routing | REQ-1203, REQ-1204 |
+| 6.3 Suppress-Memory Routing | REQ-1205 |
+| 6.4 BLOCK/FLAG Memory Filtering | REQ-1207 |
+| 6.5 Generation Source Tracking | REQ-1209 |
 
 ---
 
@@ -501,6 +621,11 @@ class PostGenerationGuardrail:
         if risk_level == RiskLevel.HIGH:
             return PostGuardrailAction.RETURN  # With verification warning attached
         return PostGuardrailAction.RETURN
+
+    # FLAG action display note: when action is FLAG, the pipeline appends
+    # verification_warning directly to generated_answer as a visible block
+    # ("\n\n---\n⚠️ <warning>") in addition to setting the structured field.
+    # This ensures display layers that only render answer text show the warning.
 
     def _filter_pii(self, text: str) -> tuple[str, list[dict]]:
         redactions = []
@@ -719,7 +844,7 @@ Content:
 
 ---
 
-## B.7: Retry Logic Wrapper — Contract
+## B.14: Retry Logic Wrapper — Contract
 
 **Tasks:** Task 1.3
 **Requirements:** REQ-605, REQ-902
@@ -995,7 +1120,12 @@ def format_docs_node(state: RAGPipelineState) -> dict:
 
 def generate_node(state: RAGPipelineState) -> dict:
     """Generate answer using anti-hallucination prompt with retry logic."""
-    # Implementation: see B.7 retry wrapper + B.11 PromptTemplate
+    # Implementation: see B.14 retry wrapper + B.11 PromptTemplate
+    # Memory gating: recent_turns is passed to the generator only when
+    # retrieval_quality is "strong" or "moderate". When retrieval_quality is
+    # "weak" or "insufficient", recent_turns is set to None before the
+    # generate() call to prevent the LLM from echoing prior answers in place
+    # of grounded content. memory_context (rolling summary) is always passed.
     ...
 
 def post_guardrail_node(state: RAGPipelineState) -> dict:
@@ -1121,6 +1251,121 @@ def traced(stage_name: str):
 # - Latency (elapsed time)
 # - Metadata (result_count and other scalar values from the return dict)
 # - Logs with trace ID for correlation
+```
+
+---
+
+## B.7: RAGResponse Extension and Generation Routing — Contract
+
+**Tasks:** Task 6.5, Task 6.2, Task 6.3
+**Requirements:** REQ-1209, REQ-1203, REQ-1205
+**Type:** Contract (exact — copied to implementation plan Phase 0)
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.platform.token_budget.schemas import TokenBudgetSnapshot
+
+
+@dataclass
+class RAGResponse:
+    """Complete response from the retrieval pipeline.
+
+    Extended with generation_source for conversational routing (REQ-1209).
+    """
+    query: str
+    processed_query: str
+    query_confidence: float
+    action: str
+    results: List["RankedResult"] = field(default_factory=list)
+    clarification_message: Optional[str] = None
+    kg_expanded_terms: Optional[List[str]] = None
+    generated_answer: Optional[str] = None
+    stage_timings: List[Dict[str, Any]] = field(default_factory=list)
+    timing_totals: Dict[str, float] = field(default_factory=dict)
+    budget_exhausted: bool = False
+    budget_exhausted_stage: Optional[str] = None
+    conversation_id: Optional[str] = None
+    guardrails: Optional[Dict[str, Any]] = None
+    token_budget: Optional["TokenBudgetSnapshot"] = None
+    composite_confidence: Optional[float] = None
+    confidence_breakdown: Optional[Dict[str, Any]] = None
+    post_guardrail_action: Optional[str] = None
+    version_conflicts: Optional[List[Dict[str, Any]]] = None
+    retry_count: int = 0
+    verification_warning: Optional[str] = None
+    retrieval_quality: Optional[str] = None
+    retrieval_quality_note: Optional[str] = None
+    re_retrieval_suggested: bool = False
+    re_retrieval_params: Optional[Dict[str, Any]] = None
+    generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
+```
+
+---
+
+## B.8: Memory-Generation Routing Logic — Pattern
+
+**Tasks:** Task 6.1, Task 6.2, Task 6.3
+**Requirements:** REQ-1201, REQ-1203, REQ-1204, REQ-1205
+**Type:** Pattern (illustrative — passed to implement-code, not copied to Phase 0)
+
+```python
+# Illustrative pattern — retrieval routing with memory-generation fallback
+# Shows the decision logic inside rag_chain.run() after query processing
+
+def route_retrieval_and_generation(
+    query_result,       # QueryResult with standalone_query, suppress_memory, has_backward_reference
+    memory_context,     # str | None
+    memory_recent_turns,  # list[dict] | None
+    retrieval_quality,  # str: "strong" | "moderate" | "weak" | "insufficient"
+    reranked_results,   # list[RankedResult] from primary retrieval
+):
+    """Route between retrieval-generation, memory-generation, and BLOCK paths.
+
+    Key design decisions:
+    - Retrieval-first: always run retrieval before deciding. Don't pre-classify.
+    - Fallback retrieval on standalone_query only when primary is weak AND not suppress_memory.
+    - Memory-generation path only when ALL retrieval is weak AND backward-ref AND memory non-empty.
+    - suppress_memory overrides everything: no memory in generation, standalone_query only.
+    - Confidence routing runs on ALL paths — never bypassed.
+    - Re-retrieval from REQ-706 is skipped on memory-gen path (no docs to re-retrieve).
+    """
+    # Determine generation context based on routing signals
+    if query_result.suppress_memory:
+        # REQ-1205: Context reset — no memory, standalone_query was primary
+        gen_memory = None
+        gen_turns = None
+        generation_source = "retrieval"
+    elif retrieval_quality in ("strong", "moderate"):
+        if query_result.has_backward_reference:
+            # REQ-1204: Hybrid — retrieval succeeded + backward ref
+            gen_memory = memory_context
+            gen_turns = memory_recent_turns
+            generation_source = "retrieval+memory"
+        else:
+            # Standard retrieval path with memory as supplementary context
+            gen_memory = memory_context
+            gen_turns = memory_recent_turns
+            generation_source = "retrieval"
+    else:
+        # Weak/insufficient retrieval
+        if query_result.has_backward_reference and (memory_context or memory_recent_turns):
+            # REQ-1203: Memory-generation path
+            gen_memory = memory_context
+            gen_turns = memory_recent_turns
+            generation_source = "memory"
+            reranked_results = []  # No document context
+        else:
+            # No backward ref or empty memory — standard weak path → BLOCK/FLAG
+            gen_memory = None
+            gen_turns = None
+            generation_source = None  # Will be set to None on BLOCK
+
+    return gen_memory, gen_turns, generation_source, reranked_results
 ```
 
 ---

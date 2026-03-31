@@ -1,7 +1,7 @@
 # @summary
-# MinIO low-level helpers: bucket management, document put/get/delete/exists, presigned URLs.
+# MinIO low-level helpers: bucket management, document put/get/delete/exists, presigned URLs, listing.
 # Exports: create_client, ensure_bucket, put_document, get_document,
-#          delete_document, document_exists, get_document_url, build_document_id
+#          delete_document, document_exists, get_document_url, build_document_id, list_documents
 # Deps: minio, minio.error, json, io, uuid, datetime, config.settings, src.platform.observability
 # @end-summary
 """Low-level MinIO document store operations."""
@@ -181,3 +181,51 @@ def get_document_url(
         f"{document_id}{_CONTENT_SUFFIX}",
         expires=timedelta(seconds=expires_in_seconds),
     )
+
+
+def list_documents(
+    client: Minio,
+    bucket: str = MINIO_BUCKET,
+    prefix: str = "",
+    limit: int = 1000,
+    offset: int = 0,
+) -> list[dict]:
+    """List content objects in a bucket, excluding metadata sidecars.
+
+    Returns dicts with: document_id, source_key, size_bytes, last_modified (ISO-8601).
+    Sidecars (.meta.json) are excluded from results.
+    Applies Python-side pagination (offset/limit) after collecting all matches.
+    Logs WARNING and falls back to object name stem when sidecar is missing.
+
+    Raises:
+        S3Error: re-raised if bucket is unreachable (not NoSuchKey/NoSuchBucket).
+    """
+    span = tracer.start_span(
+        "document_store.list_documents",
+        {"bucket": bucket, "prefix": prefix, "limit": limit, "offset": offset},
+    )
+    results: list[dict] = []
+    for obj in client.list_objects(bucket, prefix=prefix, recursive=True):
+        name: str = obj.object_name
+        if not name.endswith(_CONTENT_SUFFIX):
+            continue
+        stem = name[: -len(_CONTENT_SUFFIX)]
+        source_key = stem
+        try:
+            resp = client.get_object(bucket, f"{stem}{_METADATA_SUFFIX}")
+            meta = json.loads(resp.read().decode("utf-8"))
+            resp.close()
+            resp.release_conn()
+            source_key = meta.get("source_key", stem)
+        except S3Error:
+            logger.warning(
+                "list_documents: sidecar missing for %r; using stem as source_key", name
+            )
+        results.append({
+            "document_id": build_document_id(source_key),
+            "source_key": source_key,
+            "size_bytes": obj.size,
+            "last_modified": obj.last_modified.isoformat() if obj.last_modified else None,
+        })
+    span.end(status="ok")
+    return results[offset: offset + limit]

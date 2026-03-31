@@ -21,6 +21,7 @@ from src.db.minio.store import (
     delete_document as _mn_delete_document,
     document_exists as _mn_document_exists,
     get_document_url as _mn_get_document_url,
+    list_documents as _mn_list_documents,
 )
 from config.settings import MINIO_BUCKET
 
@@ -95,4 +96,16 @@ class MinioBackend(DocumentBackend):
         return _mn_get_document_url(
             client, document_id, bucket=self._bucket(bucket),
             expires_in_seconds=expires_in_seconds,
+        )
+
+    def list_documents(
+        self,
+        client: Any,
+        bucket: Optional[str] = None,
+        prefix: str = "",
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> list[dict]:
+        return _mn_list_documents(
+            client, bucket=self._bucket(bucket), prefix=prefix, limit=limit, offset=offset
         )

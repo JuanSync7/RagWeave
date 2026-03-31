@@ -1,13 +1,14 @@
 # Retrieval Pipeline — Query and Ranking Specification
 
 **AION Knowledge Management Platform**
-Version: 1.2 | Status: Draft | Domain: Retrieval Pipeline — Query Processing
+Version: 1.3 | Status: Draft | Domain: Retrieval Pipeline — Query Processing
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-03-11 | AI Assistant | Initial draft — 8-stage pipeline with 39 requirements |
 | 1.1 | 2026-03-13 | AI Assistant | Added conversation memory section (REQ-1001–1008), performance budget cross-reference |
 | 1.2 | 2026-03-17 | AI Assistant | Split from monolithic RETRIEVAL_SPEC.md. This file covers query processing, conversation memory, pre-retrieval guardrails, retrieval, and reranking (sections 1-6, REQ-101 through REQ-403 + REQ-1001 through REQ-1008). For generation, post-gen guardrails, and observability, see RETRIEVAL_GENERATION_SPEC.md. |
+| 1.3 | 2026-03-27 | AI Assistant | Added conversational query routing section (REQ-1101–1109): dual-query reformulation, backward-reference detection, suppress_memory, standalone_query |
 
 > **Document intent:** This is a normative requirements/specification document for the **query processing and retrieval** stages of the pipeline.
 > For generation, document formatting, and post-generation guardrails, see `RETRIEVAL_GENERATION_SPEC.md`.
@@ -43,6 +44,11 @@ Everything between these two points is in scope. Document ingestion, embedding p
 | **Sliding Window** | A context strategy that injects the N most recent conversation turns as context into query processing |
 | **Rolling Summary** | A compacted summary of older conversation turns that is maintained to provide long-range context without unbounded growth |
 | **Conversation Compaction** | The process of summarizing accumulated conversation turns into a condensed rolling summary, triggered manually or by turn-count thresholds |
+| **Dual-Query Reformulation** | A query processing strategy that produces two query variants in a single LLM call: a memory-enriched reformulation and a standalone current-turn-only reformulation |
+| **Standalone Query** | A reformulated query that polishes only the current turn's input without injecting conversation history — serves as a hedge against memory-enriched over-narrowing |
+| **Backward Reference** | A query element that explicitly or implicitly refers to prior conversation turns (e.g., "the above", "tell me more", "based on what we discussed") |
+| **Context Reset** | An explicit user instruction to disregard conversation history for the current query (e.g., "forget about past convo", "new topic") |
+| **Memory Suppression** | Pipeline behavior where conversation memory (recent turns and rolling summary) is excluded from generation context, triggered by explicit context reset or weak retrieval quality |
 
 ### 1.3 Requirement Priority Levels
 
@@ -73,8 +79,9 @@ User Query (natural language input)
     ▼
 ┌──────────────────────────────────────┐
 │ [1] QUERY PROCESSING                 │◄─── Conversation Memory
-│     Reformulate, score confidence,   │     (sliding window + rolling
-│     resolve multi-turn references    │      summary context injection)
+│     Reformulate → processed_query    │     (sliding window + rolling
+│     + standalone_query               │      summary context injection)
+│     Backward-ref & reset detection   │
 └──────────────┬───────────────────────┘
                │
                ▼
@@ -137,7 +144,7 @@ User Query (natural language input)
 
 | Stage | Input | Output |
 |-------|-------|--------|
-| Query Processing | Raw user query, conversation memory context | Processed query, confidence, action (search/ask_user) |
+| Query Processing | Raw user query, conversation memory context | processed_query, standalone_query, suppress_memory, has_backward_reference, confidence, action (search/ask_user) |
 | Pre-Retrieval Guardrail | Processed query, risk taxonomy, PII patterns | Validated query, risk level, or rejection |
 | Retrieval | Validated query, query embedding, filters | Ranked candidate documents (top-N) |
 | Reranking | Query, candidate documents | Re-scored documents (top-K), relevance scores |
@@ -213,6 +220,42 @@ User Query (natural language input)
 > **Description:** The system SHOULD inject conversation memory context into the query processing stage (Section 3) so that coreference resolution and query reformulation benefit from prior turns and the rolling summary.
 > **Rationale:** Conversation memory is only valuable if it influences query processing. Injecting memory context before reformulation enables the system to resolve "it", "that", and "tell me more" against prior conversation state.
 > **Acceptance Criteria:** A follow-up query "What about the clock frequency?" after a prior turn about "USB power domain voltage" is reformulated to include "USB controller" context from memory. The memory context appears in the query processing input, not just the generation prompt.
+
+---
+
+## 3b. Conversational Query Routing
+
+*Note: IDs in this section increment by 2 (odd-numbered). Even-numbered IDs REQ-1104, REQ-1106, REQ-1108 are reserved for future requirements. REQ-1102 is assigned.*
+
+> **REQ-1101** | Priority: MUST
+> **Description:** The query processor MUST produce two reformulated query variants in a single LLM call: (1) `processed_query` — a memory-enriched reformulation that resolves pronouns, expands backward references, and carries conversational context; and (2) `standalone_query` — a current-turn-only reformulation that polishes the raw query for search quality without injecting any conversation history.
+> **Rationale:** A single memory-enriched reformulation can over-narrow the query by injecting irrelevant prior context (e.g., "clock frequency" becomes "component X SPI clock frequency timing" when the user shifted topics). The standalone variant serves as a fallback when memory-enriched retrieval fails, hedging against reformulation errors without requiring a second LLM call.
+> **Acceptance Criteria:** Given a query "What about clock frequency?" with prior conversation about SPI timing for component X, the system produces: `processed_query` = "component X clock frequency specification" AND `standalone_query` = "clock frequency specification". Both variants are available in the query result for downstream routing.
+
+> **REQ-1102** | Priority: SHOULD
+> **Description:** The dual-query reformulation (REQ-1101) SHOULD NOT increase the number of LLM calls compared to the current single-query reformulation. Both query variants SHOULD be produced within a single LLM invocation by using structured output (e.g., JSON with `processed_query` and `standalone_query` fields).
+> **Rationale:** Adding a second LLM call for the standalone query would double query processing latency and cost. Producing both variants in one call keeps the overhead zero.
+> **Acceptance Criteria:** The query processor makes exactly one LLM call for reformulation regardless of whether dual-query output is enabled. Both `processed_query` and `standalone_query` are extracted from a single LLM response.
+
+> **REQ-1103** | Priority: MUST
+> **Description:** The query processor MUST detect backward-reference signals in the user's query and set a `has_backward_reference` boolean flag on the query result. Backward-reference signals include explicit markers ("the above", "you said", "previously", "tell me more", "elaborate", "based on what we discussed") and high pronoun density without a resolution target in the current turn.
+> **Rationale:** Backward-reference queries ("tell me more about the above") cannot be answered from document retrieval alone — they require conversation memory as the primary context. Detecting these queries enables the pipeline to route to a memory-generation path instead of returning BLOCK on weak retrieval.
+> **Acceptance Criteria:** The query "Tell me more about the above" sets `has_backward_reference = True`. The query "What is the SPI timing spec?" sets `has_backward_reference = False`. The query "Based on what we discussed, what does the spec say about timing?" sets `has_backward_reference = True`. Detection uses lightweight heuristics (regex + signal matching), not a separate LLM classification call.
+
+> **REQ-1105** | Priority: MUST
+> **Description:** The query processor MUST detect explicit context-reset signals in the user's query and set a `suppress_memory` boolean flag on the query result. Context-reset signals include phrases such as "forget about past conversation", "ignore previous", "new topic", "start fresh", "disregard what we discussed". When `suppress_memory` is True, the pipeline MUST use `standalone_query` for retrieval and MUST NOT inject `memory_context` or `recent_turns` into the generation prompt.
+> **Rationale:** Users may want to explicitly reset conversational context mid-conversation without starting a new conversation. Without this signal, memory-enriched reformulation may contradict the user's intent, and generation may reference irrelevant prior turns.
+> **Acceptance Criteria:** The query "Forget about the past conversation, what's the timing spec for Y?" sets `suppress_memory = True`. The pipeline uses `standalone_query` for retrieval. The generation prompt does not contain any conversation history. The query "What about the above?" sets `suppress_memory = False`.
+
+> **REQ-1107** | Priority: MUST
+> **Description:** The reformulation prompt MUST be explicitly memory-aware. It MUST instruct the LLM to: (1) resolve pronouns and references using the prepended conversation context, (2) detect topic shifts and avoid injecting prior context when the user changes topics, (3) expand backward references into concrete terms from conversation history, and (4) detect context-reset phrases and flag them.
+> **Rationale:** The current reformulation prompt was designed for single-turn query quality. Adding memory context as a prepended blob without explicit instructions for how to use it leads to ~20-30% failure rate on conversational follow-ups (over-narrowing, unresolved pronouns, missed topic shifts).
+> **Acceptance Criteria:** The reformulation prompt is stored as a separate file. It contains explicit instructions for all four capabilities. Changing the prompt does not require code changes. The prompt produces both `processed_query` and `standalone_query` variants in its structured output.
+
+> **REQ-1109** | Priority: SHOULD
+> **Description:** The query result schema SHOULD include `standalone_query: str`, `suppress_memory: bool`, and `has_backward_reference: bool` fields alongside the existing `processed_query` and `confidence` fields. On a fresh conversation with no memory context, `standalone_query` SHOULD equal `processed_query`.
+> **Rationale:** These fields enable downstream routing decisions (fallback retrieval, memory-generation path, memory suppression) without requiring the pipeline to re-analyze the query.
+> **Acceptance Criteria:** The query result object contains all three new fields. Downstream components (rag_chain) can access these fields without re-invoking the query processor. On a fresh conversation, `standalone_query == processed_query` and `suppress_memory == False` and `has_backward_reference == False`.
 
 ---
 
@@ -369,7 +412,13 @@ User Query (natural language input)
 | REQ-401 | 6 | MUST | Reranking |
 | REQ-402 | 6 | MUST | Reranking |
 | REQ-403 | 6 | MUST | Reranking |
+| REQ-1101 | 3b | MUST | Conversational Query Routing |
+| REQ-1102 | 3b | SHOULD | Conversational Query Routing |
+| REQ-1103 | 3b | MUST | Conversational Query Routing |
+| REQ-1105 | 3b | MUST | Conversational Query Routing |
+| REQ-1107 | 3b | MUST | Conversational Query Routing |
+| REQ-1109 | 3b | SHOULD | Conversational Query Routing |
 
-**Total Requirements: 28** (MUST: 20, SHOULD: 7, MAY: 1)
+**Total Requirements: 34** (MUST: 24, SHOULD: 9, MAY: 1)
 
 For generation, post-generation, observability, and NFR requirements, see `RETRIEVAL_GENERATION_SPEC.md`.

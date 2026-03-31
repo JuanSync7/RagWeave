@@ -103,7 +103,7 @@ fi
 # Stop all containers (including all profiles, not just selected ones)
 # This ensures nothing is left running from a previous config.
 "$COMPOSE" \
-    --profile app --profile workers --profile monitoring --profile observability \
+    --profile app --profile workers --profile monitoring --profile observability --profile gateway \
     "${DOWN_ARGS[@]}" 2>&1 || true
 
 # Verify nothing is still running
@@ -155,7 +155,7 @@ HEALTH_TARGETS+=("rag-temporal-db")
 # Profile-dependent health checks
 for p in "${PROFILES[@]+"${PROFILES[@]}"}"; do
     case "$p" in
-        app)           HEALTH_TARGETS+=("rag-api") ;;
+        app)           HEALTH_TARGETS+=("rag-api" "rag-nginx") ;;
         observability) HEALTH_TARGETS+=("rag-langfuse-postgres" "rag-langfuse-redis" "rag-langfuse-clickhouse" "rag-langfuse-minio") ;;
     esac
 done
@@ -194,7 +194,8 @@ echo ""
 # Quick API smoke test if app profile is active
 for p in "${PROFILES[@]+"${PROFILES[@]}"}"; do
     if [[ "$p" == "app" ]]; then
-        echo -n "[smoke] API health: "
+        # Direct API check (bypasses nginx)
+        echo -n "[smoke] API direct (port ${RAG_API_HOST_PORT:-8000}): "
         if command -v curl &>/dev/null; then
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${RAG_API_HOST_PORT:-8000}/health" 2>/dev/null || echo "000")
             if [[ "$HTTP_CODE" == "200" ]]; then
@@ -203,14 +204,31 @@ for p in "${PROFILES[@]+"${PROFILES[@]}"}"; do
                 echo "FAILED (HTTP $HTTP_CODE)"
                 ALL_HEALTHY=false
             fi
+
+            # Nginx check (through reverse proxy)
+            echo -n "[smoke] API via nginx (https): "
+            NGINX_BODY=$(curl -sk "https://localhost/health" 2>/dev/null || true)
+            HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "https://localhost/health" 2>/dev/null || echo "000")
+            if [[ "$HTTP_CODE" == "200" ]]; then
+                echo "OK (HTTP 200) — $NGINX_BODY"
+            else
+                echo "FAILED (HTTP $HTTP_CODE) — check: docker logs rag-nginx"
+                ALL_HEALTHY=false
+            fi
         else
             python3 -c "
-import urllib.request
+import urllib.request, ssl
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
 try:
     r = urllib.request.urlopen('http://localhost:${RAG_API_HOST_PORT:-8000}/health', timeout=5)
     print(f'OK (HTTP {r.status})')
 except Exception as e:
     print(f'FAILED ({e})')
+try:
+    r = urllib.request.urlopen('https://localhost/health', context=ctx, timeout=5)
+    print(f'nginx OK (HTTP {r.status})')
+except Exception as e:
+    print(f'nginx FAILED ({e})')
 " 2>/dev/null || echo "SKIP (no curl or python3)"
         fi
         break

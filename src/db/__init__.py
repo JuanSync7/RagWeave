@@ -2,7 +2,7 @@
 # Public API for the db subsystem: config-driven backend dispatcher and document store functions.
 # Exports: create_persistent_client, get_client, close_client, ensure_bucket,
 #          put_document, get_document, delete_document, document_exists, get_document_url,
-#          build_document_id, StoredDocument
+#          list_documents, build_document_id, StoredDocument
 # Deps: config.settings, src.db.backend, src.db.common.schemas, src.db.minio.store
 # @end-summary
 """Public API for the document store subsystem (MinIO and future backends).
@@ -136,6 +136,24 @@ def get_document_url(
     return _get_db_backend().get_document_url(client, document_id, bucket, expires_in_seconds)
 
 
+def list_documents(
+    client: Any,
+    bucket: Optional[str] = None,
+    prefix: str = "",
+    limit: int = 1000,
+    offset: int = 0,
+) -> list[dict]:
+    """List documents from the document store.
+
+    Returns:
+        List of dicts with document_id, source_key, size_bytes, last_modified.
+
+    Raises:
+        S3Error: if the store is unreachable.
+    """
+    return _get_db_backend().list_documents(client, bucket, prefix, limit, offset)
+
+
 __all__ = [
     # Client lifecycle
     "create_persistent_client",
@@ -149,6 +167,7 @@ __all__ = [
     "delete_document",
     "document_exists",
     "get_document_url",
+    "list_documents",
     # Re-exported schemas and utilities
     "StoredDocument",
     "build_document_id",

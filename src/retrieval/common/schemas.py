@@ -80,3 +80,5 @@ class RAGResponse:
     retrieval_quality_note: Optional[str] = None
     re_retrieval_suggested: bool = False
     re_retrieval_params: Optional[Dict[str, Any]] = None
+    generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
+    llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)

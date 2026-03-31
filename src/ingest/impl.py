@@ -2,6 +2,8 @@
 # Ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
 # Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
 # Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding, src.ingest.doc_processing
+# verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
+#   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
 # @end-summary
 
 """Ingestion pipeline runtime orchestration and public implementation API.
@@ -30,6 +32,7 @@ from config.settings import (
     GLINER_ENABLED,
     KG_OBSIDIAN_EXPORT_DIR,
     KG_PATH,
+    LLM_ROUTER_CONFIG,
     PROCESSED_DIR,
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_EXPORT_EXTENSIONS,
@@ -234,6 +237,62 @@ def _find_manifest_entry(
     return None, ManifestEntry()
 
 
+def _check_docling_chunking_config(
+    config: IngestionConfig,
+) -> tuple[list[str], list[str]]:
+    """Validate Docling-native chunking configuration.
+
+    Checks three contradiction patterns:
+    1. vlm_mode=builtin without docling installed → fatal error
+    2. vlm_mode=external without LiteLLM vision model configured → warning
+    3. hybrid_chunker_max_tokens > 512 (bge-m3 limit) → warning
+
+    Args:
+        config: IngestionConfig to validate.
+
+    Returns:
+        Tuple of (errors, warnings). Errors block pipeline start.
+        Warnings are logged but do not halt processing.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # Rule 0: vlm_mode must be one of the accepted values.
+    _VALID_VLM_MODES = {"disabled", "builtin", "external"}
+    if config.vlm_mode not in _VALID_VLM_MODES:
+        errors.append(
+            f"vlm_mode={config.vlm_mode!r} is not valid;"
+            f" must be one of {sorted(_VALID_VLM_MODES)}"
+        )
+
+    # Rule A: vlm_mode=builtin requires docling to be installed.
+    if config.vlm_mode == "builtin":
+        try:
+            from docling.document_converter import DocumentConverter  # noqa: F401
+        except ImportError:
+            errors.append(
+                "vlm_mode=builtin requires docling to be installed (uv add docling)"
+            )
+
+    # Rule B: vlm_mode=external without a vision model configured.
+    if config.vlm_mode == "external":
+        if not config.vision_model and not LLM_ROUTER_CONFIG:
+            warnings.append(
+                "vlm_mode=external is set but no vision model is configured;"
+                " VLM enrichment will be skipped at runtime"
+            )
+
+    # Rule C: hybrid_chunker_max_tokens exceeds bge-m3 maximum input.
+    if config.hybrid_chunker_max_tokens > 512:
+        warnings.append(
+            f"hybrid_chunker_max_tokens ({config.hybrid_chunker_max_tokens})"
+            " exceeds bge-m3 maximum input (512);"
+            " chunks may be silently truncated during embedding"
+        )
+
+    return errors, warnings
+
+
 def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     """Validate ingestion configuration compatibility and return actionable feedback.
 
@@ -258,6 +317,12 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     if config.enable_vision_processing:
         if not config.enable_multimodal_processing:
             errors.append("vision processing requires multimodal_processing to be enabled")
+
+    # Docling-native chunking validation (Task 4.2).
+    dc_errors, dc_warnings = _check_docling_chunking_config(config)
+    errors.extend(dc_errors)
+    warnings.extend(dc_warnings)
+
     return IngestionDesignCheck(ok=not errors, errors=errors, warnings=warnings)
 
 
@@ -296,8 +361,6 @@ def ingest_file(
         processing log, and content hashes for both the source and clean text.
     """
     config = runtime.config
-    clean_store_dir = config.clean_store_dir
-    store = CleanDocumentStore(Path(clean_store_dir)) if clean_store_dir else None
 
     # ── Phase 1 ──────────────────────────────────────────────────────────
     phase1 = run_document_processing(
@@ -325,9 +388,11 @@ def ingest_file(
 
     # Determine final clean text
     clean_text: str = phase1.get("refactored_text") or phase1.get("cleaned_text", "")
+    clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
 
-    # ── Persist to CleanDocumentStore ─────────────────────────────────────
-    if store is not None:
+    # ── Debug export (opt-in via export_processed) ────────────────────────
+    if config.export_processed and config.clean_store_dir:
+        _debug_store = CleanDocumentStore(Path(config.clean_store_dir))
         meta = {
             "source_key": source_key,
             "source_name": source_name,
@@ -336,12 +401,13 @@ def ingest_file(
             "connector": connector,
             "source_version": source_version,
             "source_hash": phase1.get("source_hash", ""),
-            "refactored_text": phase1.get("refactored_text"),
         }
-        store.write(source_key, clean_text, meta)
-        clean_hash = store.clean_hash(source_key)
-    else:
-        clean_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()
+        _debug_store.write(
+            source_key,
+            clean_text,
+            meta,
+            docling_document=phase1.get("docling_document") if config.persist_docling_document else None,
+        )
 
     # ── Write mirror artifacts (optional) ─────────────────────────────────
     if config.persist_refactor_mirror:
@@ -356,7 +422,7 @@ def ingest_file(
         }
         _write_refactor_mirror_artifacts(source_identity, phase1, config)
 
-    # ── Phase 2 ──────────────────────────────────────────────────────────
+    # ── Phase 2 (DoclingDocument passed in-memory from Phase 1) ──────────
     phase2 = run_embedding_pipeline(
         runtime=runtime,
         source_key=source_key,
@@ -368,6 +434,7 @@ def ingest_file(
         clean_text=clean_text,
         clean_hash=clean_hash,
         refactored_text=phase1.get("refactored_text"),
+        docling_document=phase1.get("docling_document"),
     )
 
     return IngestFileResult(
@@ -467,6 +534,9 @@ def ingest_directory(
                 source,
                 legacy_source=str(manifest.get(source, {}).get("source", "")),
             )
+            # Clean up debug export artifacts if they exist.
+            if config.clean_store_dir:
+                CleanDocumentStore(Path(config.clean_store_dir)).delete(source)
             manifest.pop(source, None)
 
         _db_client = None
@@ -498,13 +568,10 @@ def ingest_directory(
             matched_key, matched_entry = _find_manifest_entry(manifest, source)
             previous_hash = matched_entry.get("content_hash", "") if update else ""
             previous_uri = matched_entry.get("source_uri", "") if update else ""
-            # Idempotency check: skip if source unchanged and clean store entry exists
+            # Idempotency check: skip if source unchanged (hash match in manifest)
             if update and previous_hash:
                 current_hash = sha256_path(source_path)
-                store_ok = (not config.clean_store_dir) or CleanDocumentStore(
-                    Path(config.clean_store_dir)
-                ).exists(source["source_key"])
-                if current_hash == previous_hash and store_ok:
+                if current_hash == previous_hash:
                     skipped += 1
                     if matched_key and matched_key != source["source_key"]:
                         manifest.pop(matched_key, None)
@@ -578,13 +645,7 @@ def ingest_directory(
                 }
                 save_manifest(manifest)
 
-                if config.export_processed and config.clean_store_dir:
-                    _store = CleanDocumentStore(Path(config.clean_store_dir))
-                    if _store.exists(source["source_key"]):
-                        _clean_text, _ = _store.read(source["source_key"])
-                        export_stem = f"{source_path.stem}.{hashlib.sha1(source['source_key'].encode('utf-8')).hexdigest()[:8]}"
-                        PROCESSED_DIR.mkdir(exist_ok=True)
-                        (PROCESSED_DIR / f"{export_stem}.cleaned.md").write_text(_clean_text, encoding="utf-8")
+                # Debug export is handled inside ingest_file when export_processed=True.
             except (OSError, ValueError, RuntimeError) as exc:
                 failed += 1
                 logger.exception(

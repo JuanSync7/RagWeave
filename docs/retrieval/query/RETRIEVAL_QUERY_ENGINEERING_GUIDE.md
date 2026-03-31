@@ -1512,7 +1512,97 @@ The query subsystem starts and performs a vector database health check. If the h
 
 ---
 
-## 11. Appendix: Requirement Coverage
+## 11. Conversational Query Routing
+
+The query processor applies lightweight heuristics to detect whether the current user turn contains backward references to the conversation or a request to reset context. These signals feed two parallel outputs from the LLM reformulation call (`processed_query` and `standalone_query`) and control which query reaches the retrieval stage.
+
+---
+
+### 11.1 Dual-Query Reformulation
+
+The query processor produces both `processed_query` and `standalone_query` in a single LLM call. The reformulation prompt instructs the LLM to output JSON with both fields:
+
+```json
+{
+  "processed_query": "...",
+  "standalone_query": "..."
+}
+```
+
+- **`processed_query`**: the conversation-aware reformulation. On turns with backward references, this resolves pronouns and coreferences using injected memory context.
+- **`standalone_query`**: a self-contained version of the query as if no prior conversation existed.
+
+On fresh conversations (no prior turns), `standalone_query == processed_query`. The dual-output approach adds no LLM call overhead — both fields are produced in the same reformulation call that already exists.
+
+The downstream routing decision (see `rag_chain.py`) then selects which query reaches the vector store based on the signals below.
+
+---
+
+### 11.2 Backward-Reference Detection
+
+`_has_backward_reference(query: str) -> bool` in the query processor node applies a fast regex and pronoun-density check to the bare user query (before memory is prepended) to detect whether the turn refers back to prior conversation.
+
+**Phrase markers (compiled at module level, case-insensitive):**
+
+```python
+_BACKWARD_REF_PATTERNS = re.compile(
+    r"\b(the above|you said|previously|tell me more|elaborate|"
+    r"based on what we discussed|as you mentioned|like before)\b",
+    re.IGNORECASE,
+)
+```
+
+**Pronoun-density heuristic:**
+
+```python
+_PRONOUNS = {"it", "its", "they", "them", "their", "this", "that", "these", "those",
+             "he", "she", "his", "her", "which", "what"}
+_PRONOUN_DENSITY_THRESHOLD = 0.15
+```
+
+Pronoun density is computed as `pronoun_count / total_word_count`. A query exceeding the threshold (0.15) is treated as a backward reference even if no phrase marker matched.
+
+**Why run on the bare query:** Memory context is prepended to the reformulation prompt string. Running detection on the memory-prepended string would frequently match pronouns in the injected history, producing false positives. The detection always operates on the raw user turn only.
+
+---
+
+### 11.3 Context-Reset Detection
+
+`_detect_suppress_memory(query: str) -> bool` detects explicit user intent to start a fresh context and ignore prior conversation turns.
+
+**Phrase markers (compiled at module level, case-insensitive):**
+
+```python
+_SUPPRESS_MEMORY_PATTERNS = re.compile(
+    r"\b(forget about past conversation|ignore previous|new topic|start fresh|"
+    r"disregard prior|let'?s start over|ignore what we discussed)\b",
+    re.IGNORECASE,
+)
+```
+
+When detected, the pipeline sets `suppress_memory=True` in `RAGPipelineState`. The generation subsystem then:
+- Uses `standalone_query` for retrieval (not `processed_query`).
+- Strips `memory_context` and `recent_turns` from the generation prompt.
+
+This allows a user to pivot to an unrelated question without their prior conversation history polluting retrieval or generation.
+
+---
+
+### 11.4 Configuration
+
+| Name | Value | Location |
+|------|-------|----------|
+| `_PRONOUN_DENSITY_THRESHOLD` | `0.15` | Module-level constant in query processor node |
+| `_BACKWARD_REF_PATTERNS` | Compiled regex | Module-level, compiled once at import |
+| `_SUPPRESS_MEMORY_PATTERNS` | Compiled regex | Module-level, compiled once at import |
+
+Detection runs before the LLM reformulation call on the bare user query string. It has zero LLM latency cost.
+
+Both `has_backward_reference` and `suppress_memory` are written into `RAGPipelineState` and forwarded to the generation subsystem as routing inputs.
+
+---
+
+## 12. Appendix: Requirement Coverage
 
 | Spec Requirement | Priority | Covered By |
 |-----------------|----------|------------|

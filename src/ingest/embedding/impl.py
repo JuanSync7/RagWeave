@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from src.ingest.common.types import Runtime
 from src.ingest.embedding.state import EmbeddingPipelineState
@@ -28,6 +28,7 @@ def run_embedding_pipeline(
     clean_text: str,
     clean_hash: str,
     refactored_text: Optional[str] = None,
+    docling_document: Optional[Any] = None,
 ) -> EmbeddingPipelineState:
     """Run the Phase 2 Embedding Pipeline for a single clean document.
 
@@ -42,6 +43,9 @@ def run_embedding_pipeline(
         clean_text: Clean Markdown text from CleanDocumentStore.
         clean_hash: SHA-256 of ``clean_text`` for change detection.
         refactored_text: LLM-refactored text from Phase 1, if available.
+        docling_document: Native DoclingDocument loaded from CleanDocumentStore,
+            or ``None`` if not persisted. Read by chunking_node to select
+            HybridChunker vs markdown path.
 
     Returns:
         Final ``EmbeddingPipelineState`` after all nodes have run.
@@ -58,6 +62,7 @@ def run_embedding_pipeline(
         "cleaned_text": clean_text,
         "refactored_text": refactored_text,
         "clean_hash": clean_hash,
+        "docling_document": docling_document,
         "chunks": [],
         "enriched_chunks": [],
         "metadata_summary": "",

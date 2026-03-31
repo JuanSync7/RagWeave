@@ -4,7 +4,7 @@
 > **Companion spec:** `DOCUMENT_PROCESSING_SPEC.md`
 > **Upstream:** DOCUMENT_PROCESSING_SPEC.md
 > **Downstream:** DOCUMENT_PROCESSING_DESIGN.md
-> **Last updated:** 2026-03-24
+> **Last updated:** 2026-03-31
 
 ---
 
@@ -16,7 +16,7 @@ Engineering organisations accumulate critical knowledge across hundreds of docum
 
 ### How It Works
 
-A source document enters the pipeline from the filesystem and passes through five sequential stages. First, the document is ingested: its format is detected, its content is extracted into a normalised text representation, and a content fingerprint is computed for change detection. Second, the extracted text is parsed into a hierarchical section tree, with tables, figures, and abbreviation definitions identified and extracted. Third, if figures were detected, an optional multimodal stage converts each figure image into a text description so that visual content becomes searchable. Fourth, the text is cleaned — whitespace is normalised, boilerplate artefacts are removed, and figure descriptions are integrated at their original positions. Fifth, an optional refactoring stage restructures paragraphs so each is self-contained, resolving implicit references and expanding ambiguous abbreviations. The final output is a clean document and its metadata envelope, persisted to a dedicated store that serves as the sole input to the downstream embedding phase. The two phases are decoupled at this storage boundary, not connected by an in-memory handoff.
+A source document enters the pipeline from the filesystem and passes through up to five sequential stages. First, the document is ingested: its format is detected, its content is extracted into a normalised text representation, and a content fingerprint is computed for change detection. Second, the extracted text is parsed into a hierarchical section tree, with tables, figures, and abbreviation definitions identified and extracted. **The default structure detection provider is Docling**, which converts binary formats (PDF, DOCX, HTML, PPTX, XLSX) into a structured `DoclingDocument` object preserving paragraph boundaries, table structure, and heading hierarchy. Third, if figures were detected, an optional multimodal stage converts each figure image into a text description so that visual content becomes searchable (Docling supports builtin SmolVLM at parse time or external VLM post-chunking). **When Docling successfully parses a document, the fourth and fifth stages are skipped** — the `DoclingDocument` already contains clean, structured content that does not require text cleaning or LLM-based refactoring. For non-Docling paths (Docling disabled or parsing failed with fallback enabled), the fourth stage cleans the text and the fifth optionally restructures paragraphs for self-containedness. The final output is a clean document, its metadata envelope, and (for Docling-parsed documents) a serialized `DoclingDocument` JSON file, all persisted to a dedicated store that serves as the sole input to the downstream embedding phase. The two phases are decoupled at this storage boundary, not connected by an in-memory handoff.
 
 ### Tunable Knobs
 
@@ -59,40 +59,45 @@ Source Document (filesystem path)
                          ▼
 ┌──────────────────────────────────────────────────┐
 │ [2] STRUCTURE DETECTION                          │
+│     Default: Docling DocumentConverter           │
 │     Hierarchical section tree · figure/table     │
-│     extraction · abbreviation merge · confidence │
+│     extraction · DoclingDocument production      │
 └────────────────────────┬─────────────────────────┘
                          │
-                         ▼
-┌──────────────────────────────────────────────────┐
-│ [3] MULTIMODAL PROCESSING            [optional]  │
-│     VLM figure-to-text (fires if figures > 0)    │
-└────────────────────────┬─────────────────────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────┐
-│ [4] TEXT CLEANING                                │
-│     Whitespace norm · boilerplate removal        │
-│     Figure/table description integration         │
-└────────────────────────┬─────────────────────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────┐
-│ [5] DOCUMENT REFACTORING             [optional]  │
-│     Self-contained paragraph restructuring       │
-│     Self-correcting iteration · fact-check       │
-└────────────────────────┬─────────────────────────┘
-                         │
-                         ▼
-        ┌────────────────────────────────────┐
-        │        CLEAN DOCUMENT STORE        │
-        │  {source_key}.md                   │
-        │  {source_key}.meta.json            │
-        │  (sole input to Embedding Pipeline)│
-        └────────────────────────────────────┘
+                    ┌────┴────┐
+                    │ Docling │
+                    │success? │
+                    └─┬────┬──┘
+                 NO   │    │ YES (fast path)
+                      ▼    │
+┌─────────────────────────────────┐    │
+│ [3] MULTIMODAL    [optional]    │    │
+│     VLM figure-to-text          │    │
+└────────────────┬────────────────┘    │
+                 │                     │
+                 ▼                     │
+┌─────────────────────────────────┐    │
+│ [4] TEXT CLEANING [conditional] │    │
+│     (skipped if Docling path)   │    │
+└────────────────┬────────────────┘    │
+                 │                     │
+                 ▼                     │
+┌─────────────────────────────────┐    │
+│ [5] REFACTORING   [optional]    │    │
+│     (skipped if Docling path)   │    │
+└────────────────┬────────────────┘    │
+                 │                     │
+                 ▼                     ▼
+        ┌────────────────────────────────────────┐
+        │        CLEAN DOCUMENT STORE            │
+        │  {source_key}.md                       │
+        │  {source_key}.meta.json                │
+        │  {source_key}.docling.json [if Docling]│
+        │  (sole input to Embedding Pipeline)    │
+        └────────────────────────────────────────┘
 ```
 
-Stages marked `[optional]` are conditional: multimodal processing fires only when figures are detected; refactoring is skippable via configuration. Cross-cutting platform requirements (re-ingestion detection, review tier management, batch processing, configuration schema, error handling framework, NFRs) are defined in `INGESTION_PLATFORM_SPEC.md`.
+Stages marked `[optional]` or `[conditional]` may be skipped. When Docling parsing succeeds, Nodes 4–5 are bypassed — the `DoclingDocument` carries the authoritative structure. See `DOCLING_CHUNKING_SPEC.md` for the full Docling-native subsystem specification. Cross-cutting platform requirements are defined in `INGESTION_PLATFORM_SPEC.md`.
 
 ---
 
@@ -108,7 +113,7 @@ Stages marked `[optional]` are conditional: multimodal processing fires only whe
 | **NFR-** | Non-Functional Requirement |
 | **SC-** | Security / Compliance Requirement |
 
-The spec covers **53 functional requirements** across five stages plus the output contract: 50 MUST, 3 SHOULD, 0 MAY.
+The spec covers **56 functional requirements** across five stages plus the output contract: 53 MUST, 3 SHOULD, 0 MAY.
 
 ---
 
@@ -117,11 +122,11 @@ The spec covers **53 functional requirements** across five stages plus the outpu
 | ID Range | Domain | Coverage |
 |----------|--------|----------|
 | FR-100–FR-199 | Document Ingestion (13 reqs) | Eight supported input formats, format detection, format-specific extraction rules (slide-order PPTX, sheet-by-sheet XLSX), SHA-256 content hashing, deterministic document IDs, encoding fallback chain, domain vocabulary loading, log file exclusion, local filesystem ingestion, future SharePoint integration |
-| FR-200–FR-299 | Structure Detection (8 reqs) | Hierarchical section tree, table extraction with markdown conversion, figure detection with bounding boxes/captions, figure image export, abbreviation auto-detection and vocabulary merge, extraction confidence scoring, low-confidence flagging, swappable detection provider |
+| FR-200–FR-299 | Structure Detection (10 reqs) | Hierarchical section tree, table extraction with markdown conversion, figure detection with bounding boxes/captions, figure image export, abbreviation auto-detection and vocabulary merge, extraction confidence scoring, low-confidence flagging, swappable detection provider (default: Docling), Docling fast path (skip Nodes 4–5), Docling model/artifact configuration |
 | FR-300–FR-399 | Multimodal Processing (7 reqs) | VLM-based figure description, conditional execution, description content requirements (labels, values, relationships), prohibition on speculative content, per-description confidence, swappable VLM provider, failure fallback |
 | FR-400–FR-499 | Text Cleaning (5 reqs) | Whitespace normalisation, configurable boilerplate removal, repeated header/footer reduction, figure description integration at original positions, table markdown integration |
 | FR-500–FR-599 | Document Refactoring (11 reqs) | Self-contained paragraph restructuring, configurable skip, self-correcting iteration loop, fact-check validation, completeness threshold, content safety constraints (no fact addition/removal), fail-safe fallback, source immutability, mirror artefact model, provenance mapping, citation resolution |
-| FR-580–FR-589 | Clean Document Store Contract (7 reqs) | One `.md` and one `.meta.json` per source, metadata envelope schema, full content in Markdown, heading hierarchy preservation, atomic writes, configurable root directory |
+| FR-580–FR-589 | Clean Document Store Contract (8 reqs) | One `.md` and one `.meta.json` per source, metadata envelope schema (with `docling_document_available` flag), full content in Markdown, heading hierarchy preservation, atomic writes, configurable root directory, DoclingDocument persistence (`.docling.json`) |
 
 ---
 
@@ -153,6 +158,7 @@ The spec covers **53 functional requirements** across five stages plus the outpu
 - **Domain vocabulary as a shared contract:** A single external vocabulary file spans both pipeline phases — abbreviations auto-detected in structure detection are merged into it, and terms are injected into all downstream prompts.
 - **Refactoring as an immutable mirror:** The original source document is never modified. Refactored text is a derived artefact with provenance metadata mapping every span back to its source location.
 - **Self-correcting refactoring loop:** Multi-pass iteration with fact-check and completeness check before accepting output, rather than single-pass rewrite.
+- **Docling as default structure detection:** Docling produces a rich `DoclingDocument` that preserves paragraph boundaries, table structure, and heading hierarchy. When available, this object is threaded through both pipeline phases — enabling the Embedding Pipeline's `HybridChunker` to perform structure-aware, token-aware chunking instead of heuristic markdown splitting. Documents parsed by Docling skip text cleaning and refactoring (redundant with Docling's output quality), reducing latency and LLM costs.
 - **Startup config validation:** Contradictory or incomplete configuration produces a startup error before any documents are processed.
 
 ---
@@ -162,7 +168,7 @@ The spec covers **53 functional requirements** across five stages plus the outpu
 | Dependency | Role | Swappable |
 |------------|------|-----------|
 | Graph orchestration framework | DAG execution, conditional routing | Via configuration interface |
-| Structure detection library | Document parsing, section tree, figure/table extraction | Yes — provider selectable via config |
+| Structure detection library (default: Docling ≥2.82.0) | Document parsing, section tree, figure/table extraction, DoclingDocument production | Yes — provider selectable via config; Docling is the default and recommended provider |
 | Vision-language model (VLM) | Figure-to-text descriptions | Yes — provider and model selectable via config |
 | Language model (LLM) | Document refactoring | Yes — independent of generation-layer LLM |
 | Domain vocabulary file | Abbreviation expansions, compound terms, domain contexts | External YAML — loadable per deployment |
@@ -174,6 +180,7 @@ The spec covers **53 functional requirements** across five stages plus the outpu
 | Document | Purpose | Relationship |
 |----------|---------|-------------|
 | DOCUMENT_PROCESSING_SPEC.md | Authoritative requirements specification | Source of truth — this summary distils it |
+| DOCLING_CHUNKING_SPEC.md | Docling-native chunking subsystem specification | Specifies DoclingDocument threading, HybridChunker, VLM modes, fallback behavior |
 | **DOCUMENT_PROCESSING_SPEC_SUMMARY.md** (this document) | Executive summary | Stakeholder-ready digest |
 | DOCUMENT_PROCESSING_DESIGN.md | Task decomposition and code appendix | Next step in the chain |
 | DOCUMENT_PROCESSING_IMPLEMENTATION.md | Six-phase implementation plan | Operationalises the design |
@@ -188,7 +195,9 @@ The spec covers **53 functional requirements** across five stages plus the outpu
 
 | Term | Definition |
 |------|-----------|
-| Clean Document Store | The persistent storage boundary between the Document Processing Pipeline and the Embedding Pipeline. Contains one `.md` and one `.meta.json` per source document. |
+| Clean Document Store | The persistent storage boundary between the Document Processing Pipeline and the Embedding Pipeline. Contains one `.md` and one `.meta.json` per source document, plus an optional `.docling.json` for Docling-parsed documents. |
+| Docling | The default structure detection provider. Converts binary formats into structured `DoclingDocument` objects. When Docling parsing succeeds, Nodes 4–5 are skipped (fast path). |
+| DoclingDocument | The structured document object produced by Docling, threaded through the pipeline and persisted to the Clean Document Store for the Embedding Pipeline's `HybridChunker`. |
 | source_key | A stable, deterministic identifier derived from the source file path, used to name artefacts in the Clean Document Store. |
 | Review Tier | A trust classification (Fully/Partially/Self Reviewed) assigned to each document, controlling its visibility weight in retrieval results. |
 | Re-ingestion | Processing a previously ingested document again after detecting a content change, including cleanup of old artefacts before writing new ones. |

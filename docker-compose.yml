@@ -181,6 +181,8 @@ services:
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - RAG_CACHE_PROVIDER=redis
       - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
+      - RAG_QUERY_CONFIDENCE_THRESHOLD=${RAG_QUERY_CONFIDENCE_THRESHOLD:-0.0}
+      - RAG_STAGE_BUDGET_EMBEDDING_MS=${RAG_STAGE_BUDGET_EMBEDDING_MS:-8000}
     depends_on:
       - temporal
       - rag-redis
@@ -206,6 +208,25 @@ services:
       # Docker default: /var/run/docker.sock
       # Podman: set CONTAINER_SOCK=$XDG_RUNTIME_DIR/podman/podman.sock in .env
       - ${CONTAINER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  rag-minio:
+    image: minio/minio:latest
+    container_name: rag-minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${RAG_MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${RAG_MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "${RAG_MINIO_PORT:-9000}:9000"
+      - "${RAG_MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rag-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   rag-redis:
@@ -435,7 +456,7 @@ services:
     restart: unless-stopped
 
   rag-nginx:
-    profiles: ["gateway"]
+    profiles: ["app"]
     image: nginx:alpine
     container_name: rag-nginx
     ports:
@@ -448,7 +469,7 @@ services:
       rag-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate --spider -q https://localhost/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1/health 2>/dev/null | grep -q '\"status\"'"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -457,6 +478,7 @@ services:
 volumes:
   rag-postgres-data:
   temporal-db-data:
+  rag-minio-data:
   rag-redis-data:
   langfuse-postgres-data:
   langfuse-redis-data:

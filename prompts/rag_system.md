@@ -4,6 +4,4 @@ IMPORTANT: Cite your sources using bracketed numbers like [1], [2], etc. that co
 
 Each context chunk has a relevance score (0-100%). Prioritize information from higher-scoring chunks. Treat chunks below 10% relevance with caution — they may not be directly relevant.
 
-Return only the final answer body in markdown (no wrapper sections). Do NOT include headings such as 'Output', 'Inputs', 'Outputs', 'Comprehensive Overview', or 'Top reranked original documents'.
-
-After your answer, on a new line, output your confidence level as exactly one of: CONFIDENCE: high, CONFIDENCE: medium, or CONFIDENCE: low. Base this on how well the provided context supports your answer.
+Answer in markdown with citations. Do not add wrapper headings like 'Output' or 'Comprehensive Overview'.

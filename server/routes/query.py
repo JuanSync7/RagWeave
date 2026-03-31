@@ -95,7 +95,7 @@ def _stream_llm(
 ):
     """Stream generation tokens via LLMProvider (provider-agnostic)."""
     from src.platform.llm import get_llm_provider
-    from src.retrieval.generator import _SYSTEM_PROMPT, _build_user_prompt
+    from src.retrieval.generation.nodes.generator import _get_system_prompt as _get_gen_system_prompt, _build_user_prompt
 
     def _record_stage(stage: str, bucket: str, started_at: float) -> None:
         if stage_timings is None:
@@ -114,7 +114,7 @@ def _stream_llm(
         context = "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks))
     user_message = _build_user_prompt(context=context, question=query)
 
-    messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    messages: list[dict] = [{"role": "system", "content": _get_gen_system_prompt()}]
     if memory_context:
         messages.append(
             {
@@ -243,7 +243,10 @@ async def run_query(
                 content=user_text,
                 query_id=workflow_id,
             )
-            if assistant_text:
+            # REQ-1207: Don't store BLOCK/FLAG responses in memory —
+            # prevents error echo accumulation across turns.
+            post_action = result.get("post_guardrail_action", "")
+            if assistant_text and post_action not in ("block", "flag"):
                 memory.append_turn(
                     tenant_id=tenant_id,
                     subject=principal.subject,

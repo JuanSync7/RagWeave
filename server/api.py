@@ -54,6 +54,7 @@ from src.platform.security.rbac import require_role
 from server.console import create_console_router
 from server.routes import (
     create_admin_router,
+    create_documents_router,
     create_query_router,
     create_system_router,
 )
@@ -61,12 +62,27 @@ from server.utils import console_ok as _console_ok, error_payload as _error_payl
 from server.schemas import (
     QueryRequest,
 )
+import src.db as _db
+import src.vector_db as _vector_db
 
 # Use uvicorn's logger/formatter so API logs match server output
 # (INFO prefix + colorized level formatting).
 logger = logging.getLogger("uvicorn.error").getChild("rag.server.api")
 
 _temporal_client: Client | None = None
+
+# Document store clients — gracefully degrade if unavailable at startup.
+# MinIO is a separate HTTP service (should always connect).
+# Weaviate runs in embedded mode inside the worker; the API uses it read-only
+# for chunk-count aggregation and degrades to None if unavailable.
+try:
+    _db_client = _db.create_persistent_client()
+except Exception as _exc:
+    logger.warning("Document store (MinIO) client init failed: %s — /documents endpoints unavailable", _exc)
+    _db_client = None
+
+# The API container does not run embedded Weaviate — chunk counts are unavailable here.
+_vector_client = None
 _obs_tracer = get_tracer()
 _rate_limiter = InMemoryRateLimiter(
     limit=RATE_LIMIT_REQUESTS_PER_MINUTE,
@@ -296,6 +312,7 @@ app.include_router(
     )
 )
 app.include_router(create_admin_router())
+app.include_router(create_documents_router(db_client=_db_client, vector_client=_vector_client))
 app.include_router(create_system_router(get_temporal_client=_get_temporal_client, logger=logger))
 app.include_router(
     create_console_router(

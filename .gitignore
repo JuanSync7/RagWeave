@@ -19,6 +19,12 @@ processed/*.json
 processed/*.md
 !processed/README.md
 
+# Clean document store (regenerable via ingestion)
+data/clean_store/
+
+# Models (downloaded via huggingface_hub)
+models/baai/
+
 # Knowledge graph (regenerable)
 .knowledge_graph.json
 

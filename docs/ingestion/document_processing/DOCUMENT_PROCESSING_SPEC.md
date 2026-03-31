@@ -14,14 +14,15 @@
 |-------|-------|
 | System | AION RAG Document Embedding Pipeline |
 | Document Type | Pipeline Specification — Document Processing Phase |
-| Companion Documents | EMBEDDING_PIPELINE_SPEC.md (Embedding Phase Functional Requirements), INGESTION_PLATFORM_SPEC.md (Platform/Cross-Cutting Requirements), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), DOCUMENT_PROCESSING_IMPLEMENTATION.md (Phase 1 Implementation Guide) |
-| Version | 1.0.0 |
+| Companion Documents | EMBEDDING_PIPELINE_SPEC.md (Embedding Phase Functional Requirements), INGESTION_PLATFORM_SPEC.md (Platform/Cross-Cutting Requirements), DOCLING_CHUNKING_SPEC.md (Docling-Native Chunking Subsystem), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), DOCUMENT_PROCESSING_IMPLEMENTATION.md (Phase 1 Implementation Guide) |
+| Version | 1.1.0 |
 | Status | Draft |
 | Supersedes | INGESTION_PIPELINE_SPEC.md (sections 3.1–3.5) |
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-03-18 | AI Assistant | Created by splitting INGESTION_PIPELINE_SPEC.md at the Document Processing / Embedding boundary. Contains FR-100 through FR-599 and adds the Clean Document Store output contract (FR-580–FR-589). |
+| 1.1.0 | 2026-03-31 | AI Assistant | Updated to reflect Docling as the default/primary structure detection provider. Added FR-209 (Docling fast path skipping Nodes 4–5), FR-210 (Docling model/artifact configuration), FR-588 (DoclingDocument persistence). Updated architecture diagram to show Docling-native path. Added DOCLING_CHUNKING_SPEC.md as companion document. Updated metadata envelope schema (FR-583) with `docling_document_available` flag. Added Docling/DoclingDocument/DoclingParseResult to terminology. |
 
 ---
 
@@ -76,6 +77,9 @@ The following terms are used throughout this specification. A complete glossary 
 | Idempotent | An operation that produces the same result whether applied once or multiple times |
 | Clean Document Store | The persistent storage boundary between the Document Processing Pipeline and the Embedding Pipeline; contains one `.md` and one `.meta.json` per source document |
 | source_key | A stable, deterministic identifier derived from the source file path, used to name artefacts in the Clean Document Store |
+| Docling | The default structure detection provider. Converts PDF, DOCX, HTML, and other binary formats into structured `DoclingDocument` objects preserving paragraph boundaries, table structure, list hierarchies, figure metadata, and heading hierarchy. See `DOCLING_CHUNKING_SPEC.md` for full subsystem specification. |
+| DoclingDocument | The structured document object produced by Docling's `DocumentConverter`. Contains typed document items (paragraphs, tables, lists, figures, code blocks) with hierarchical section structure. When available, it is threaded through the pipeline and persisted to the Clean Document Store for use by the Embedding Pipeline's `HybridChunker`. |
+| DoclingParseResult | The normalized dataclass returned by `parse_with_docling()`, containing the markdown export, figure metadata, headings, and the native `DoclingDocument` object. |
 
 ### 1.4 Requirement Priority Levels
 
@@ -156,7 +160,9 @@ The RAG Document Embedding Pipeline is one component of a larger AI-Enabled Know
 
 ### 2.1 High-Level Architecture
 
-The Document Processing Pipeline SHALL process documents through a directed acyclic graph (DAG) of five processing stages, implemented using a graph-based orchestration framework (LangGraph, which is part of the LangChain ecosystem). Each document SHALL flow through the following stages in order, producing a persisted clean document in the Clean Document Store:
+The Document Processing Pipeline SHALL process documents through a directed acyclic graph (DAG) of five processing stages, implemented using a graph-based orchestration framework (LangGraph, which is part of the LangChain ecosystem). Each document SHALL flow through the following stages in order, producing a persisted clean document in the Clean Document Store.
+
+**Docling is the default structure detection provider** (enabled by default via `RAG_INGESTION_DOCLING_ENABLED=true`). When Docling successfully parses a document, it produces a `DoclingDocument` object that preserves rich structural information. Documents parsed by Docling follow a **fast path** that skips the Text Cleaning and Document Refactoring stages, because the `DoclingDocument` already contains clean, structured content that Docling's `HybridChunker` can consume directly in the Embedding Pipeline. See `DOCLING_CHUNKING_SPEC.md` for the full Docling-native subsystem specification.
 
 ```text
 Source Document (filesystem path)
@@ -171,50 +177,62 @@ Source Document (filesystem path)
                ▼
 ┌──────────────────────────────────────┐
 │ [2] STRUCTURE DETECTION              │
+│     Default: Docling DocumentConverter│
 │     Parse hierarchical section tree, │
 │     extract figures and tables       │
+│     Produce DoclingDocument object   │
 └──────────────┬───────────────────────┘
                │
-               ▼
-┌──────────────────────────────────────┐
-│ [3] MULTIMODAL PROCESSING [optional] │
-│     Convert figures to text via VLM  │
-└──────────────┬───────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────┐
-│ [4] TEXT CLEANING                    │
-│     Normalise text, remove           │
-│     boilerplate, integrate figures   │
-└──────────────┬───────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────┐
-│ [5] DOCUMENT REFACTORING [optional]  │
-│     Restructure for self-contained   │
-│     paragraphs, resolve references   │
-└──────────────┬───────────────────────┘
-               │
-               ▼
-    ┌─────────────────────────────────┐
-    │     CLEAN DOCUMENT STORE        │
-    │  {source_key}.md + .meta.json   │
-    │  persisted to disk per document │
-    └─────────────────────────────────┘
+               ├── Docling success ──────────────────────┐
+               │   (docling_document_available = true)    │
+               │                                         │
+               ▼                                         │
+┌──────────────────────────────────────┐                 │
+│ [3] MULTIMODAL PROCESSING [optional] │                 │
+│     Convert figures to text via VLM  │                 │
+│     (builtin SmolVLM or external)    │                 │
+└──────────────┬───────────────────────┘                 │
+               │                                         │
+          ┌────┴────────────────────────┐                │
+          │ Docling path?               │                │
+          │ (docling_document_available) │                │
+          └────┬─────────────┬──────────┘                │
+               │ NO          │ YES ──────────────────────┤
+               ▼                                         │
+┌──────────────────────────────────────┐                 │
+│ [4] TEXT CLEANING      [conditional] │                 │
+│     Normalise text, remove           │                 │
+│     boilerplate, integrate figures   │                 │
+└──────────────┬───────────────────────┘                 │
+               │                                         │
+               ▼                                         │
+┌──────────────────────────────────────┐                 │
+│ [5] DOCUMENT REFACTORING [optional]  │                 │
+│     Restructure for self-contained   │                 │
+│     paragraphs, resolve references   │                 │
+└──────────────┬───────────────────────┘                 │
+               │                                         │
+               ▼                                         ▼
+    ┌───────────────────────────────────────────┐
+    │          CLEAN DOCUMENT STORE             │
+    │  {source_key}.md + .meta.json             │
+    │  {source_key}.docling.json [if available] │
+    │  persisted to disk per document           │
+    └───────────────────────────────────────────┘
          (read by EMBEDDING_PIPELINE_SPEC.md)
 ```
 
-Stages marked with `[optional]` are conditional and may be skipped based on configuration or document characteristics.
+Stages marked with `[optional]` or `[conditional]` may be skipped based on configuration or document characteristics. When Docling parsing succeeds, nodes 4 and 5 are bypassed — the `DoclingDocument` carries the authoritative structure for downstream chunking.
 
 ### 2.2 Stage Descriptions
 
 | # | Stage | Purpose | Conditional |
 |---|-------|---------|-------------|
 | 1 | Document Ingestion | Read source file, detect format, compute content hash, detect re-ingestion | No |
-| 2 | Structure Detection | Parse document into hierarchical section tree, extract figures and tables | No |
-| 3 | Multimodal Processing | Convert detected figures into text descriptions using a vision-language model | Yes — only if figures detected (tentatively convert figures to text first) |
-| 4 | Text Cleaning | Normalise text, remove boilerplate, integrate figure/table descriptions | No |
-| 5 | Document Refactoring | Restructure content for self-containedness, resolve implicit references | Yes — skippable via config |
+| 2 | Structure Detection | Parse document into hierarchical section tree, extract figures and tables. Default provider: Docling `DocumentConverter`, producing a `DoclingDocument` object. | No |
+| 3 | Multimodal Processing | Convert detected figures into text descriptions using a vision-language model (builtin SmolVLM at parse time, or external VLM post-chunking) | Yes — only if figures detected and VLM mode is not `disabled` |
+| 4 | Text Cleaning | Normalise text, remove boilerplate, integrate figure/table descriptions | Yes — skipped when Docling parsing succeeds (`docling_document_available = true`) |
+| 5 | Document Refactoring | Restructure content for self-containedness, resolve implicit references | Yes — skipped via config or when Docling parsing succeeds |
 
 ### 2.3 Processing Stage Independence
 
@@ -455,14 +473,37 @@ Each processing stage SHALL:
 
 > **FR-208** | Priority: MUST
 >
-> **Description:** The structure detection provider MUST be swappable via configuration.
+> **Description:** The structure detection provider MUST be swappable via configuration. The default provider is **Docling** (`RAG_INGESTION_DOCLING_ENABLED=true`), which parses binary formats (PDF, DOCX, HTML, PPTX, XLSX) into a structured `DoclingDocument` object preserving paragraph boundaries, table structure, list hierarchies, figure metadata, and heading hierarchy. When Docling parsing succeeds, the pipeline sets `docling_document_available = true` and threads the native `DoclingDocument` through the pipeline state. If Docling is disabled or parsing fails (with `RAG_INGESTION_DOCLING_STRICT=false`), the system falls back to regex-based heuristic extraction.
 >
-> **Rationale:** Different structure detection tools (e.g., Docling, Unstructured, custom parsers) have different strengths; the system must allow switching without code changes. Supports the swappability-over-lock-in principle.
+> **Rationale:** Docling provides superior structure preservation for binary document formats compared to heuristic extraction. However, different tools may have different strengths for specific format families; the system must allow switching without code changes. Supports the swappability-over-lock-in principle.
 >
 > **Acceptance Criteria:**
-> 1. Given configuration specifying provider A, the system uses provider A for structure detection.
-> 2. Changing the configuration to provider B and re-running uses provider B with no code changes.
-> 3. Both providers implement the same interface and produce compatible output structures.
+> 1. Given default configuration (`RAG_INGESTION_DOCLING_ENABLED=true`), the system uses Docling's `DocumentConverter` for structure detection and produces a `DoclingDocument`.
+> 2. Given `RAG_INGESTION_DOCLING_ENABLED=false`, the system uses the regex-based fallback with no code changes.
+> 3. Given a Docling parse error with `RAG_INGESTION_DOCLING_STRICT=true`, the pipeline records the error and halts processing for that document.
+> 4. Given a Docling parse error with `RAG_INGESTION_DOCLING_STRICT=false`, the pipeline falls back to regex heuristics and continues.
+
+> **FR-209** | Priority: MUST
+>
+> **Description:** When Docling successfully parses a document (`docling_document_available = true`), the Text Cleaning (Node 4) and Document Refactoring (Node 5) stages MUST be skipped. The `DoclingDocument` already contains clean, structured content that does not require whitespace normalisation, boilerplate removal, or LLM-based paragraph refactoring — these operations are redundant and risk degrading the structure that Docling preserved.
+>
+> **Rationale:** Docling's `DocumentConverter` produces well-structured output that has already removed layout artefacts. Running text cleaning and refactoring on this output is wasteful (unnecessary LLM calls for refactoring) and potentially harmful (text manipulation could break structural boundaries that the Embedding Pipeline's `HybridChunker` relies on). See `DOCLING_CHUNKING_SPEC.md` FR-2000–FR-2099 for DoclingDocument preservation requirements.
+>
+> **Acceptance Criteria:**
+> 1. Given a PDF document parsed successfully by Docling, the pipeline skips Node 4 (Text Cleaning) and Node 5 (Document Refactoring), proceeding directly from Node 3 (or Node 2 if no figures) to the Clean Document Store.
+> 2. Given a document where Docling parsing fails and falls back to regex extraction, Nodes 4 and 5 execute normally.
+> 3. Pipeline logs indicate which path was taken (Docling fast path vs. fallback path).
+
+> **FR-210** | Priority: MUST
+>
+> **Description:** The Docling parser model version MUST be configurable via `RAG_INGESTION_DOCLING_MODEL` (default: `docling-parse-v2`). The system MUST support auto-downloading required models when `RAG_INGESTION_DOCLING_AUTO_DOWNLOAD=true` (default) and MUST support a custom model cache path via `RAG_INGESTION_DOCLING_ARTIFACTS_PATH`.
+>
+> **Rationale:** Docling uses downloadable ML models for layout analysis and table extraction. In air-gapped environments, pre-downloading to a custom path is required. Model version pinning ensures reproducible processing.
+>
+> **Acceptance Criteria:**
+> 1. Given `RAG_INGESTION_DOCLING_MODEL=docling-parse-v2`, the system initialises Docling with the v2 parser.
+> 2. Given `RAG_INGESTION_DOCLING_AUTO_DOWNLOAD=false` and no models present, the system fails with a clear error at startup, not mid-document.
+> 3. Given `RAG_INGESTION_DOCLING_ARTIFACTS_PATH=/models/docling`, the system loads models from that directory.
 
 ### 3.3 Multimodal Processing (FR-300)
 
@@ -713,7 +754,7 @@ Each processing stage SHALL:
 
 ### 3.6 Clean Document Store Output Contract (FR-580)
 
-This section defines the output contract of the Document Processing Pipeline — the schema of the Clean Document Store that the Embedding Pipeline reads as its sole input. Every source document that completes processing MUST produce exactly two artefacts in the Clean Document Store: a Markdown content file and a companion metadata envelope.
+This section defines the output contract of the Document Processing Pipeline — the schema of the Clean Document Store that the Embedding Pipeline reads as its sole input. Every source document that completes processing MUST produce at least two artefacts in the Clean Document Store: a Markdown content file and a companion metadata envelope. Documents parsed by Docling additionally produce a third artefact — a serialized `DoclingDocument` JSON file — when `RAG_INGESTION_PERSIST_DOCLING_DOCUMENT=true` (default).
 
 > **FR-581** | Priority: MUST
 >
@@ -754,9 +795,9 @@ This section defines the output contract of the Document Processing Pipeline —
 > | `table_count` | integer | Number of tables extracted |
 > | `has_figures` | boolean | Whether any figures were detected |
 > | `figure_count` | integer | Number of figures detected |
-> | `processing_flags` | object | `{"multimodal_enabled": bool, "refactoring_enabled": bool}` |
+> | `processing_flags` | object | `{"multimodal_enabled": bool, "refactoring_enabled": bool, "docling_document_available": bool}` |
 >
-> **Rationale:** The `source_hash` and `clean_hash` are the two independent change-detection keys: the Document Processing Pipeline compares `source_hash` to decide if it needs to re-run; the Embedding Pipeline compares `clean_hash` to decide if it needs to re-embed. Separating the two hashes makes each pipeline's skip logic independent. The remaining fields are consumed by the Embedding Pipeline to populate chunk metadata and apply retrieval filters without re-parsing the document.
+> **Rationale:** The `source_hash` and `clean_hash` are the two independent change-detection keys: the Document Processing Pipeline compares `source_hash` to decide if it needs to re-run; the Embedding Pipeline compares `clean_hash` to decide if it needs to re-embed. Separating the two hashes makes each pipeline's skip logic independent. The `docling_document_available` flag signals whether the Embedding Pipeline should use the Docling-native `HybridChunker` path or fall back to markdown-based chunking. The remaining fields are consumed by the Embedding Pipeline to populate chunk metadata and apply retrieval filters without re-parsing the document.
 >
 > **Acceptance Criteria:**
 > 1. Given a processed document, all fields in the table above are present in the metadata JSON.
@@ -808,6 +849,19 @@ This section defines the output contract of the Document Processing Pipeline —
 > 2. Changing the configured path and re-running writes to the new location.
 > 3. The default path (if not configured) is a subdirectory of the working directory.
 
+> **FR-588** | Priority: MUST
+>
+> **Description:** When Docling successfully parses a document and `RAG_INGESTION_PERSIST_DOCLING_DOCUMENT=true` (default), the system MUST persist the native `DoclingDocument` as `{source_key}.docling.json` in the Clean Document Store. The file MUST use a versioned envelope format (`{"_schema_version": "docling-native-v1", "document": {...}}`). The Embedding Pipeline reads this file to reconstruct the `DoclingDocument` for `HybridChunker` consumption.
+>
+> **Rationale:** The `DoclingDocument` carries rich structural information (paragraph boundaries, table cell structure, list hierarchies, figure metadata) that the Embedding Pipeline's `HybridChunker` requires for structure-aware chunking. Without persistence across the Phase 1/Phase 2 boundary, this structural information would be lost and the Embedding Pipeline would fall back to inferior markdown-based chunking. See `DOCLING_CHUNKING_SPEC.md` for the full subsystem specification.
+>
+> **Acceptance Criteria:**
+> 1. Given a PDF parsed by Docling with persistence enabled, the system writes `{source_key}.docling.json` atomically alongside `{source_key}.md` and `{source_key}.meta.json`.
+> 2. The JSON contains a `_schema_version` field set to `"docling-native-v1"` and a `document` field containing the serialized `DoclingDocument`.
+> 3. The Embedding Pipeline can deserialize the file back to a `DoclingDocument` object via `DoclingDocument.model_validate()`.
+> 4. Given `RAG_INGESTION_PERSIST_DOCLING_DOCUMENT=false`, no `.docling.json` file is written.
+> 5. Given a document where Docling parsing fails, no `.docling.json` file is written regardless of the persistence setting.
+
 ---
 
 ## Pipeline Requirements Traceability Matrix
@@ -836,7 +890,9 @@ This matrix covers FR-101 through FR-589 — the full scope of this specificatio
 | FR-205 | 3.2 | MUST | Structure Detection — abbreviation auto-detection |
 | FR-206 | 3.2 | MUST | Structure Detection — extraction confidence score |
 | FR-207 | 3.2 | MUST | Structure Detection — low-confidence flagging |
-| FR-208 | 3.2 | MUST | Structure Detection — swappable provider |
+| FR-208 | 3.2 | MUST | Structure Detection — swappable provider (default: Docling) |
+| FR-209 | 3.2 | MUST | Structure Detection — Docling fast path (skip Nodes 4–5) |
+| FR-210 | 3.2 | MUST | Structure Detection — Docling model version and artifact config |
 | FR-301 | 3.3 | MUST | Multimodal Processing — VLM figure description |
 | FR-302 | 3.3 | MUST | Multimodal Processing — conditional execution |
 | FR-303 | 3.3 | MUST | Multimodal Processing — description content requirements |
@@ -867,15 +923,16 @@ This matrix covers FR-101 through FR-589 — the full scope of this specificatio
 | FR-585 | 3.6 | MUST | Clean Document Store — heading hierarchy preservation |
 | FR-586 | 3.6 | MUST | Clean Document Store — no partial writes on failure |
 | FR-587 | 3.6 | SHOULD | Clean Document Store — configurable root directory |
+| FR-588 | 3.6 | MUST | Clean Document Store — DoclingDocument persistence (.docling.json) |
 
 ### Requirement Priority Summary
 
 | Priority | Count | Requirement IDs |
 |----------|-------|-----------------|
-| MUST | 50 | FR-101–109, FR-111–112, FR-201–208, FR-301–307, FR-401–405, FR-501–511, FR-581–586 |
+| MUST | 53 | FR-101–109, FR-111–112, FR-201–210, FR-301–307, FR-401–405, FR-501–511, FR-581–586, FR-588 |
 | SHOULD | 3 | FR-110, FR-113, FR-587 |
 | MAY | 0 | — |
-| **Total** | **53** | **FR-101 through FR-587** |
+| **Total** | **56** | **FR-101 through FR-588** |
 
 ---
 
@@ -886,6 +943,7 @@ This specification is part of the Document Processing Pipeline documentation cha
 | Document | Purpose | Relationship |
 |----------|---------|-------------|
 | **DOCUMENT_PROCESSING_SPEC.md** (this document) | Authoritative requirements specification | Source of truth for all requirements |
+| DOCLING_CHUNKING_SPEC.md | Docling-native chunking subsystem specification | Specifies DoclingDocument threading, HybridChunker integration, VLM modes, and fallback behavior (FR-2000–FR-2699). Modifies behavior defined in FR-200–FR-299, FR-400–FR-499, FR-500–FR-599, FR-600–FR-699. |
 | DOCUMENT_PROCESSING_SPEC_SUMMARY.md | Executive summary | Summarizes this spec for stakeholder distribution |
 | DOCUMENT_PROCESSING_DESIGN.md | Task decomposition and code appendix | Translates this spec's requirements into implementation tasks |
 | DOCUMENT_PROCESSING_IMPLEMENTATION.md | Six-phase implementation plan | Operationalizes the design into executable phases |

@@ -27,7 +27,7 @@ dependencies = [
   "redis",
   "pyjwt[crypto]",
   "mcp>=1.26.0",
-  "docling>=2.79.0",
+  "docling>=2.82.0",
   "nemoguardrails>=0.21.0",
   "litellm",
   "pyyaml",
@@ -40,6 +40,7 @@ dependencies = [
 dev = [
   "pytest",
   "pytest-mock",
+  "deptry",
 ]
 pii = [
   "presidio-analyzer",
@@ -66,6 +67,26 @@ all = [
   "rag[qdrant]",
 ]
 
+[tool.deptry]
+exclude = [".venv"]
+# pinecone-client installs as 'pinecone' — map the package name to its import name
+package_module_name_map = {"pinecone-client" = "pinecone"}
+
+[tool.deptry.per_rule_ignores]
+# uvicorn: CLI entry point, never imported directly
+# accelerate: loaded automatically by transformers/torch at runtime
+# pytest-mock: pytest plugin, used via fixture not import
+# deptry: dev tool, not imported in source
+DEP002 = ["uvicorn", "accelerate", "pytest-mock", "deptry"]
+# starlette: always bundled with fastapi
+# docling_core: always bundled with docling
+DEP003 = ["starlette", "docling_core"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "libcst>=1.8.6",
+]

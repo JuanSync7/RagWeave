@@ -301,8 +301,8 @@ class InjectionDetector:
             f"<msg>{query}</msg>"
         )
 
-        from src.retrieval.query_processor import _call_ollama
-        from src.retrieval.utils import parse_json_object
+        from src.retrieval.query.nodes.query_processor import _call_ollama
+        from src.common.utils import parse_json_object
 
         result = _call_ollama(
             prompt, system="You are a security classifier. Output only JSON."

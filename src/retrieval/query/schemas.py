@@ -26,6 +26,9 @@ class QueryResult:
     processed_query: str
     confidence: float
     action: QueryAction
+    standalone_query: str = ""
+    suppress_memory: bool = False
+    has_backward_reference: bool = False
     clarification_message: Optional[str] = None
     iterations: int = 0
 
@@ -44,3 +47,7 @@ class QueryState(TypedDict):
     clarification_message: str
     ollama_available: bool
     fast_path: bool
+    standalone_query: str
+    suppress_memory: bool
+    has_backward_reference: bool
+    has_memory_context: bool

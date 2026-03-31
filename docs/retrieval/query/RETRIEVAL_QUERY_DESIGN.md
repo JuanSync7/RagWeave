@@ -3,9 +3,9 @@
 | Field | Value |
 |-------|-------|
 | **Document** | Retrieval Query Pipeline Design Document |
-| **Version** | 1.2 |
+| **Version** | 1.4 |
 | **Status** | Draft |
-| **Spec Reference** | `RETRIEVAL_QUERY_SPEC.md` v1.2 (REQ-101–REQ-403, REQ-1001–REQ-1008) |
+| **Spec Reference** | `RETRIEVAL_QUERY_SPEC.md` v1.3 (REQ-101–REQ-403, REQ-1001–REQ-1008, REQ-1101–REQ-1109) |
 | **Companion Documents** | `RETRIEVAL_QUERY_SPEC.md`, `RETRIEVAL_QUERY_IMPLEMENTATION.md`, `RETRIEVAL_SPEC_SUMMARY.md` |
 | **Created** | 2026-03-11 |
 | **Last Updated** | 2026-03-23 |
@@ -16,6 +16,7 @@
 | 1.1 | 2026-03-13 | Added Phase 6 (conversation memory) covering REQ-1001–1008, updated dependency graph and mapping |
 | 1.2 | 2026-03-23 | Renamed from Implementation Guide to Design Document; added Contract/Pattern annotations to Part B; added companion document references |
 | 1.3 | 2026-03-25 | Split from RETRIEVAL_DESIGN.md; now covers query-side tasks only (Tasks 1.1, 1.4, 2.3, 3.4, 4.1–4.3, 5.1–5.2, 6.1–6.4) |
+| 1.4 | 2026-03-27 | AI Assistant | Added Phase 7 (Conversational Query Routing) covering REQ-1101–1109, updated dependency graph and mapping |
 
 > **Document Intent.** This document provides a technical design with task decomposition
 > and contract-grade code appendix for the retrieval pipeline specified in
@@ -311,6 +312,89 @@ Persistent multi-turn conversation support with tenant isolation, sliding window
 
 ---
 
+## Phase 7 — Conversational Query Routing
+
+Memory-aware query processing: dual-query reformulation, backward-reference detection, context-reset detection, and updated prompts.
+
+### Task 7.1: Query Result Schema Extension
+
+**Description:** Extend the `QueryResult` dataclass with three new fields: `standalone_query` (str), `suppress_memory` (bool), and `has_backward_reference` (bool). On fresh conversations with no memory context, `standalone_query` equals `processed_query`.
+
+**Requirements Covered:** REQ-1101, REQ-1109
+
+**Dependencies:** Task 6.4 (Memory Context Injection — establishes memory-aware query processing)
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Add `standalone_query: str = ""` field to `QueryResult` dataclass
+2. Add `suppress_memory: bool = False` field to `QueryResult`
+3. Add `has_backward_reference: bool = False` field to `QueryResult`
+4. Update `QueryState` TypedDict with corresponding fields for LangGraph state flow
+5. Ensure backward compatibility — existing callers that don't use the new fields get defaults
+
+---
+
+### Task 7.2: Backward-Reference Detection
+
+**Description:** Implement a lightweight heuristic function that detects backward-reference signals in the user's query. Uses regex pattern matching for explicit markers and pronoun density analysis.
+
+**Requirements Covered:** REQ-1103
+
+**Dependencies:** Task 7.1 (schema fields to populate)
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Define backward-reference marker patterns (regex): "the above", "you said", "previously", "tell me more", "elaborate", "based on what we discussed", "regarding what you mentioned"
+2. Implement pronoun density check (high density of "it", "that", "those", "this" without resolution targets in current turn)
+3. Return boolean flag — True if any marker matches OR pronoun density exceeds threshold
+4. Ensure detection runs BEFORE the LLM call (heuristic, not LLM-classified)
+
+---
+
+### Task 7.3: Context-Reset Detection
+
+**Description:** Implement detection of explicit context-reset signals in the user's query. When detected, set `suppress_memory = True` on the query result.
+
+**Requirements Covered:** REQ-1105
+
+**Dependencies:** Task 7.1 (schema fields to populate)
+
+**Complexity:** S
+
+**Subtasks:**
+
+1. Define context-reset patterns (regex): "forget about past", "ignore previous", "new topic", "start fresh", "disregard what we discussed", "forget the conversation"
+2. Return boolean flag — True if any pattern matches
+3. Wire into query processing before reformulation so `suppress_memory` is available for prompt construction
+
+---
+
+### Task 7.4: Memory-Aware Reformulation Prompt
+
+**Description:** Rewrite the reformulation prompt to produce dual-query output (both `processed_query` and `standalone_query` in a single LLM call) with explicit instructions for pronoun resolution, topic shift detection, backward-reference expansion, and context-reset flagging.
+
+**Requirements Covered:** REQ-1101, REQ-1102, REQ-1107
+
+**Dependencies:** Task 7.1 (schema), Task 7.2 (backward-ref detection feeds into prompt context), Task 7.3 (context-reset detection feeds into prompt context)
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. Update the reformulation prompt template to instruct the LLM to output JSON with `processed_query` and `standalone_query` fields
+2. Add explicit instructions for pronoun resolution using conversation context
+3. Add instructions for topic shift detection (don't inject prior context on new topics)
+4. Add instructions for backward-reference expansion ("the above" → concrete terms)
+5. Update the query processor to parse the dual-query JSON response
+6. Fall back to current single-query behavior if JSON parsing fails (graceful degradation)
+7. Set `standalone_query = processed_query` when memory context is empty (fresh conversation)
+
+---
+
 ## Task Dependency Graph
 
 ```
@@ -349,6 +433,12 @@ Phase 6 (Conversation Memory)
 ├── Task 6.2: Sliding Window and Rolling Summary ◄── Task 6.1 ──┤
 ├── Task 6.3: Conversation Lifecycle Operations ◄── Task 6.1,6.2┤
 └── Task 6.4: Memory Context Injection ◄── Task 6.2, Task 3.4 ──┘
+
+Phase 7 (Conversational Query Routing)
+├── Task 7.1: Query Result Schema Extension ◄── Task 6.4
+├── Task 7.2: Backward-Reference Detection ◄── Task 7.1
+├── Task 7.3: Context-Reset Detection ◄── Task 7.1
+└── Task 7.4: Memory-Aware Reformulation Prompt ◄── Task 7.1, 7.2, 7.3
 ```
 
 ---
@@ -370,6 +460,10 @@ Phase 6 (Conversation Memory)
 | 6.2 Sliding Window and Rolling Summary | REQ-1002, REQ-1003, REQ-1008 |
 | 6.3 Conversation Lifecycle Operations | REQ-1004, REQ-1005, REQ-1006 |
 | 6.4 Memory Context Injection | REQ-1008, REQ-103 |
+| 7.1 Query Result Schema Extension | REQ-1101, REQ-1109 |
+| 7.2 Backward-Reference Detection | REQ-1103 |
+| 7.3 Context-Reset Detection | REQ-1105 |
+| 7.4 Memory-Aware Reformulation Prompt | REQ-1101, REQ-1102, REQ-1107 |
 
 ---
 
@@ -1117,6 +1211,123 @@ class ConversationService:
 - Service layer wraps the provider to keep route handlers thin.
 - Compaction is a separate explicit operation, not automatic, to give operators control.
 - Conversation ID is returned on creation and echoed on every subsequent query response.
+
+---
+
+## B.7: Query Result Schema Extension — Contract
+
+**Tasks:** Task 7.1
+**Requirements:** REQ-1101, REQ-1109
+**Type:** Contract (exact — copied to implementation plan Phase 0)
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, TypedDict
+
+
+class QueryAction(Enum):
+    """Action to take after query processing."""
+    SEARCH = "search"
+    ASK_USER = "ask_user"
+
+
+@dataclass
+class QueryResult:
+    """Result of the query processing pipeline.
+
+    Extended with dual-query fields for conversational routing (REQ-1101, REQ-1109).
+    """
+    processed_query: str                          # Memory-enriched reformulation (REQ-1101)
+    confidence: float
+    action: QueryAction
+    standalone_query: str = ""                    # Current-turn-only polish (REQ-1101)
+    suppress_memory: bool = False                 # Context-reset detected (REQ-1105)
+    has_backward_reference: bool = False           # Backward-ref signals detected (REQ-1103)
+    clarification_message: Optional[str] = None
+    iterations: int = 0
+
+
+class QueryState(TypedDict):
+    """LangGraph state schema for query processing."""
+    original_query: str
+    current_query: str
+    confidence: float
+    reasoning: str
+    iteration: int
+    max_iterations: int
+    confidence_threshold: float
+    action: str
+    clarification_message: str
+    ollama_available: bool
+    fast_path: bool
+    standalone_query: str                          # Dual-query output (REQ-1101)
+    suppress_memory: bool                          # Context-reset flag (REQ-1105)
+    has_backward_reference: bool                   # Backward-ref flag (REQ-1103)
+```
+
+---
+
+## B.17: Backward-Reference and Context-Reset Detection — Pattern
+
+**Tasks:** Task 7.2, Task 7.3
+**Requirements:** REQ-1103, REQ-1105
+**Type:** Pattern (illustrative — passed to implement-code, not copied to Phase 0)
+
+```python
+# Illustrative pattern — backward-reference and context-reset detection
+import re
+from typing import Tuple
+
+# Backward-reference markers (REQ-1103)
+_BACKWARD_REF_PATTERNS = [
+    re.compile(r"\b(the above|you said|you mentioned|previously|tell me more|elaborate"
+               r"|based on what we discussed|regarding what you mentioned|as we discussed"
+               r"|from earlier|what about that)\b", re.IGNORECASE),
+]
+
+# Context-reset markers (REQ-1105)
+_CONTEXT_RESET_PATTERNS = [
+    re.compile(r"\b(forget about (the )?(past |previous )?(conversation|convo|chat|discussion)"
+               r"|ignore (the )?(previous|prior|past)"
+               r"|new topic|start fresh|fresh start"
+               r"|disregard what we discussed)\b", re.IGNORECASE),
+]
+
+# Pronouns that may indicate backward reference when dense
+_PRONOUNS = re.compile(r"\b(it|its|that|those|this|these|them)\b", re.IGNORECASE)
+_PRONOUN_DENSITY_THRESHOLD = 0.15  # fraction of words
+
+
+def detect_query_signals(raw_query: str) -> Tuple[bool, bool]:
+    """Detect backward-reference and context-reset signals in a query.
+
+    Returns:
+        (has_backward_reference, suppress_memory) tuple.
+
+    Key design decisions:
+    - Regex-based, not LLM-classified — runs before the LLM call, zero latency cost.
+    - Pronoun density is a soft signal — only triggers when density exceeds threshold
+      AND no concrete noun targets are present in the current turn.
+    - Context-reset takes priority: if both backward-ref and reset are detected,
+      suppress_memory=True means the pipeline ignores memory regardless of backward-ref.
+    """
+    has_backward_ref = any(p.search(raw_query) for p in _BACKWARD_REF_PATTERNS)
+    suppress_memory = any(p.search(raw_query) for p in _CONTEXT_RESET_PATTERNS)
+
+    # Pronoun density check (only if no explicit marker found)
+    if not has_backward_ref:
+        words = raw_query.split()
+        if words:
+            pronoun_count = len(_PRONOUNS.findall(raw_query))
+            density = pronoun_count / len(words)
+            if density >= _PRONOUN_DENSITY_THRESHOLD:
+                has_backward_ref = True
+
+    return has_backward_ref, suppress_memory
+```
 
 ---
 

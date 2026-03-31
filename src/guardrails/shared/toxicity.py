@@ -147,7 +147,7 @@ class ToxicityFilter:
         else:
             prompt = _SELF_CHECK_INPUT_PROMPT.format(text=text)
 
-        from src.retrieval.query_processor import _call_ollama
+        from src.retrieval.query.nodes.query_processor import _call_ollama
 
         result = _call_ollama(
             prompt,

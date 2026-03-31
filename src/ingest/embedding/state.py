@@ -2,6 +2,9 @@
 # LangGraph TypedDict state contract for the Phase 2 Embedding Pipeline.
 # Exports: EmbeddingPipelineState
 # Deps: src.ingest.common.types, src.ingest.common.schemas
+# Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
+#   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
+#   stored_count, errors, processing_log, docling_document (Optional[Any])
 # @end-summary
 
 """State contract for the Embedding Pipeline (Phase 2, nodes 6–13)."""
@@ -88,3 +91,8 @@ class EmbeddingPipelineState(TypedDict, total=False):
     stored_count: int
     errors: List[str]
     processing_log: List[str]
+    docling_document: Optional[Any]
+    """Native DoclingDocument object loaded from CleanDocumentStore at
+    Phase 2 initialization. None if no .docling.json was stored (fallback
+    path). Read by chunking_node to select HybridChunker vs markdown path.
+    """

@@ -434,7 +434,7 @@ def run_query_cli() -> None:
     spin_thread.start()
 
     # Heavy import — pulls in torch, transformers, sentence_transformers (~8s)
-    from src.retrieval.rag_chain import RAGChain
+    from src.retrieval.pipeline.rag_chain import RAGChain
 
     # Init RAG pipeline (models load in parallel inside RAGChain)
     try:

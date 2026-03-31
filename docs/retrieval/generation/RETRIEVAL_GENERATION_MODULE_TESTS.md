@@ -310,6 +310,7 @@ Must NOT receive: `src/retrieval/confidence/engine.py`, any Phase A test files.
 - [ ] `test_route_re_retrieve_sets_broader_params_on_state` — REQ-706: when routing to re-retrieve, the returned state includes broadened search parameters (e.g., increased `search_limit` or relaxed `alpha`) — Phase D agent confirms parameter names from engineering guide
 - [ ] `test_route_re_retrieve_increments_count_on_state` — REQ-706: the `re_retrieve_count` field in the returned state is incremented by 1 after a re-retrieve routing decision
 - [ ] `test_route_second_retrieval_confidence_above_threshold_returns_answer` — REQ-706: if re-retrieval raises composite from 0.45 to 0.72, the engine routes to return; verified with two sequential routing calls on the same state
+- [ ] `test_route_flag_action_appends_warning_to_generated_answer` — REQ-706: when the routing action is FLAG, `verification_warning` text is appended to `generated_answer` as `"\n\n---\n⚠️ <warning>"` so the warning is visible in the answer string, not only in the structured field
 
 ### Known test gaps (to note in Phase D agent output)
 - The re-retrieval parameter broadening logic (what specifically changes in search parameters) may not be observable without integration test — unit test can only verify that the state reflects changed parameters, not that the broader search produces better results.
@@ -376,11 +377,19 @@ Must NOT receive: `src/retrieval/guardrails/post_generation.py`, any Phase A tes
 - [ ] `test_guardrail_low_risk_numerical_claim_not_subject_to_additional_filtering` — REQ-705: LOW risk answer with an unsupported numerical claim is NOT flagged (additional filtering only applies to HIGH risk)
 - [ ] `test_guardrail_high_risk_answer_includes_verification_warning` — REQ-705/REQ-706: any HIGH risk answer that passes routing includes `"VERIFY BEFORE IMPLEMENTATION"` (or the documented equivalent) in the final output
 - [ ] `test_guardrail_all_six_routing_outcomes_reachable` — REQ-706: by varying composite confidence and risk level inputs, all routing outcomes (return/LOW, return+warning/HIGH, re-retrieve, block) are reachable through the guardrail
+- [ ] `test_guardrail_flag_action_warning_visible_in_generated_answer` — REQ-706: when routing action is FLAG, the `verification_warning` text appears inside `generated_answer` (appended as `"\n\n---\n⚠️ <warning>"`) so that display layers rendering only the answer string show the warning
+
+Memory echo suppression (rag_chain.py Stage 6 — integration-level; include as pipeline integration tests if in scope):
+- [ ] `test_pipeline_weak_retrieval_quality_suppresses_recent_turns` — retrieval_quality="weak" results in `recent_turns=None` being passed to the generator (not the original turn list)
+- [ ] `test_pipeline_insufficient_retrieval_quality_suppresses_recent_turns` — retrieval_quality="insufficient" results in `recent_turns=None` being passed to the generator
+- [ ] `test_pipeline_strong_retrieval_quality_passes_recent_turns_unchanged` — retrieval_quality="strong" results in the original `recent_turns` list being passed to the generator unmodified
+- [ ] `test_pipeline_memory_context_always_passed_regardless_of_retrieval_quality` — `memory_context` (rolling summary) is passed to the generator for all retrieval quality values including "weak" and "insufficient"
 
 ### Known test gaps (to note in Phase D agent output)
 - Person NER detection accuracy depends on an external NER model — unit tests can only verify that a well-known person name (e.g., `"John Smith"`) triggers redaction; model accuracy for ambiguous names is not unit-testable.
 - System prompt leak detection is heuristic (substring matching) — tests can only cover exact substring matches, not semantic paraphrasing of system prompt content.
 - Citation coverage fuzzy matching threshold: sentence-level grounding tests are sensitive to the similarity metric and threshold — Phase D agent must confirm the threshold from the engineering guide before writing boundary assertions.
+- Memory echo suppression tests are integration-level (they verify `rag_chain.py` behavior, not a standalone module) — Phase D agent should note if these fall outside the post-generation guardrail module boundary and suggest them as `test_rag_chain_memory_gating.py` tests instead.
 
 ### Pytest command
 ```bash
@@ -520,6 +529,83 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_retry_logic_cove
 
 ---
 
+## Module: Memory-Aware Generation Routing
+
+**Source:** `src/retrieval/generation/nodes/generator.py`, `src/retrieval/pipeline/rag_chain.py`
+**Engineering Guide Section:** `docs/retrieval/RETRIEVAL_GENERATION_ENGINEERING_GUIDE.md` → Section 3: `src/retrieval/generation/nodes/generator.py` and `src/retrieval/pipeline/rag_chain.py`
+**Phase 0 contracts:** `src/retrieval/query/schemas.py`, `src/retrieval/memory/types.py`, `src/retrieval/confidence/types.py`
+**FR coverage:** REQ-603, REQ-606, REQ-1002, REQ-1011, REQ-1012, REQ-1013
+**Phase D test file:** `tests/retrieval/test_memory_aware_generation_routing_coverage.py`
+
+### Isolation contract for this module's Phase D agent
+
+Agent input (ONLY these):
+1. Module sections from `RETRIEVAL_GENERATION_ENGINEERING_GUIDE.md` for `src/retrieval/generation/nodes/generator.py` and `src/retrieval/pipeline/rag_chain.py` (Purpose, Error behavior, Test guide sub-sections)
+2. Phase 0 contracts: `src/retrieval/query/schemas.py`, `src/retrieval/memory/types.py`, `src/retrieval/confidence/types.py`
+3. FR numbers: REQ-603, REQ-606, REQ-1002, REQ-1011, REQ-1012, REQ-1013
+
+Must NOT receive: source files, any Phase A test files.
+
+### Fallback Retrieval (`test_fallback_retrieval`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_fallback_triggered_on_weak` — REQ-1011: when primary retrieval quality is "weak", the pipeline triggers a fallback retrieval pass using `standalone_query` (not `processed_query`); mock verifies `standalone_query` is passed to the retrieval call
+- [ ] `test_fallback_not_triggered_on_strong` — REQ-1011: when primary retrieval quality is "strong", no fallback retrieval is performed; the retrieval mock is called exactly once
+- [ ] `test_fallback_skipped_on_suppress_memory` — REQ-1011: when `suppress_memory=True`, fallback retrieval is not triggered even if primary retrieval quality is "weak"
+- [ ] `test_better_results_selected` — REQ-1011: when fallback retrieval produces higher-quality results than primary, the fallback results are used for generation (selection logic verified by comparing mock result sets)
+- [ ] `test_both_weak` — REQ-1011: when both primary and fallback retrieval are weak, the best-of comparison still runs and one result set is passed to the generator (no exception; graceful degradation)
+
+### Memory-Generation Path (`test_memory_generation_path`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_memory_gen_triggered` — REQ-1012: when retrieval results are weak AND `has_backward_reference=True` AND memory context is non-empty, the pipeline takes the memory-generation path (generator is called with `source="memory"`)
+- [ ] `test_fresh_conversation_block` — REQ-1012: when `has_backward_reference=True` but memory context is empty (no prior turns), the pipeline returns a deterministic BLOCK response rather than attempting memory generation
+- [ ] `test_hybrid_retrieval_plus_memory` — REQ-1012: when `has_backward_reference=True` AND retrieval quality is "strong", the pipeline uses both retrieval results and memory context for generation (`source="retrieval+memory"`, NOT `source="memory"`)
+- [ ] `test_confidence_routing_on_memory_gen` — REQ-1012: when the memory-generation path produces a low-confidence answer, the routing engine routes to BLOCK (memory generation does not bypass confidence routing)
+- [ ] `test_re_retrieve_skip_on_memory` — REQ-1012: when on the memory-generation path, a RE_RETRIEVE routing decision is re-routed to FLAG instead (memory path does not support re-retrieval loops)
+- [ ] `test_generation_source_memory` — REQ-1013: when the memory-generation path is taken, `GenerationResult.source` is `"memory"` in the returned pipeline state
+
+### Suppress-Memory Routing (`test_suppress_memory_routing`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_standalone_as_primary` — REQ-1011: when `suppress_memory=True`, the pipeline uses `standalone_query` as the primary query for retrieval (not `processed_query`)
+- [ ] `test_no_memory_in_generation` — REQ-1011: when `suppress_memory=True`, the generator is called without `memory_context` or `recent_turns` in its prompt inputs (neither field is populated)
+- [ ] `test_no_fallback` — REQ-1011: when `suppress_memory=True`, fallback retrieval is not triggered regardless of primary retrieval quality
+- [ ] `test_source_retrieval` — REQ-1013: when `suppress_memory=True` and retrieval succeeds, `GenerationResult.source` is `"retrieval"` (not `"retrieval+memory"`)
+
+### BLOCK/FLAG Memory Filtering (`test_block_flag_memory_filtering`)
+(derived from engineering guide's "Error behavior" sub-section)
+
+- [ ] `test_block_not_stored` — REQ-1002: when the pipeline produces a BLOCK response, `append_turn()` is NOT called for the assistant turn; the BLOCK answer is not stored in conversation memory
+- [ ] `test_flag_not_stored` — REQ-1002: when the pipeline produces a FLAG response, `append_turn()` is NOT called for the assistant turn; the flagged answer is not stored in conversation memory
+- [ ] `test_user_turn_always_stored` — REQ-1002: the user's query turn is stored in conversation memory regardless of the final routing outcome (BLOCK, FLAG, or RETURN)
+- [ ] `test_return_response_stored` — REQ-1002: when the pipeline produces a normal RETURN response, `append_turn()` IS called for the assistant turn with the generated answer
+- [ ] `test_no_echo_after_block` — REQ-1002: after a BLOCK response, the subsequent query's memory context does not include the blocked assistant response (the conversation window contains only the user turn, not a blocked answer)
+
+### Generation Source Tracking (`test_generation_source`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_source_retrieval` — REQ-1013: standard retrieval path with no memory augmentation → `GenerationResult.source == "retrieval"`
+- [ ] `test_source_memory` — REQ-1013: memory-generation path (weak retrieval + backward reference + non-empty memory) → `GenerationResult.source == "memory"`
+- [ ] `test_source_retrieval_plus_memory` — REQ-1013: hybrid path (strong retrieval + backward reference) → `GenerationResult.source == "retrieval+memory"`
+- [ ] `test_source_null_on_block` — REQ-1013: BLOCK routing outcome → `GenerationResult.source` is `None` (no generation source when answer is blocked)
+- [ ] `test_source_with_suppress_memory` — REQ-1013: `suppress_memory=True` with successful retrieval → `GenerationResult.source == "retrieval"` (memory suppression does not alter source label for retrieval path)
+
+### Known test gaps (to note in Phase D agent output)
+- Retrieval quality classification ("weak" vs. "strong") threshold depends on reranking scores and document count — unit tests must mock the quality classifier output; the exact threshold boundary should be confirmed from the engineering guide before writing quality-boundary tests.
+- The best-of comparison between primary and fallback results (the selection logic) may use composite confidence, document count, or reranking scores — the exact selection criterion must be confirmed from the engineering guide to write `test_better_results_selected` accurately.
+- Memory-generation path prompt construction (what exactly is passed to the LLM when `source="memory"`) is not observable at the unit level without reading the generator source — Phase D agent must use engineering guide documentation of the prompt schema.
+- `test_no_echo_after_block` requires sequencing two pipeline calls on the same conversation — this is at the boundary of unit and integration testing; Phase D agent should note if it exceeds module isolation.
+
+### Pytest command
+```bash
+cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_memory_aware_generation_routing_coverage.py -v
+# Expected: FAIL (new tests — implementation exists but these are new coverage tests)
+# Phase E will confirm ALL PASS after full suite verification
+```
+
+---
+
 ## Phase D dispatch order
 
 All Phase D tasks run in parallel (no dependencies between modules).
@@ -533,6 +619,7 @@ All Phase D tasks run in parallel (no dependencies between modules).
 - [ ] Module: Post-Generation Guardrail — spec review complete
 - [ ] Module: Observability Tracing — spec review complete
 - [ ] Module: Retry Wrapper — spec review complete
+- [ ] Module: Memory-Aware Generation Routing — spec review complete
 
 ---
 
@@ -545,8 +632,10 @@ All Phase D tasks run in parallel (no dependencies between modules).
 | REQ-503 | Document Formatter | `test_document_formatter_coverage.py` |
 | REQ-601 | Prompt Template Loader | `test_prompt_template_coverage.py` |
 | REQ-602 | Prompt Template Loader | `test_prompt_template_coverage.py` |
+| REQ-603 | Memory-Aware Generation Routing | `test_memory_aware_generation_routing_coverage.py` |
 | REQ-604 | Confidence Scoring Utilities | `test_confidence_scoring_coverage.py` |
 | REQ-605 | Retry Wrapper | `test_retry_logic_coverage.py` |
+| REQ-606 | Memory-Aware Generation Routing | `test_memory_aware_generation_routing_coverage.py` |
 | REQ-701 | Confidence Scoring Utilities + Confidence Routing Engine | `test_confidence_scoring_coverage.py`, `test_pipeline_routing_coverage.py` |
 | REQ-702 | Post-Generation Guardrail | `test_post_generation_guardrail_coverage.py` |
 | REQ-703 | Post-Generation Guardrail | `test_post_generation_guardrail_coverage.py` |
@@ -559,3 +648,7 @@ All Phase D tasks run in parallel (no dependencies between modules).
 | REQ-901 | Cross-module (latency) | Integration tests (not Phase D white-box) |
 | REQ-902 | Retry Wrapper + Confidence Routing Engine | `test_retry_logic_coverage.py`, `test_pipeline_routing_coverage.py` |
 | REQ-903 | All modules (config externalization) | Per-module coverage tests (config loading assertions in each test file) |
+| REQ-1002 | Memory-Aware Generation Routing | `test_memory_aware_generation_routing_coverage.py` |
+| REQ-1011 | Memory-Aware Generation Routing | `test_memory_aware_generation_routing_coverage.py` |
+| REQ-1012 | Memory-Aware Generation Routing | `test_memory_aware_generation_routing_coverage.py` |
+| REQ-1013 | Memory-Aware Generation Routing | `test_memory_aware_generation_routing_coverage.py` |

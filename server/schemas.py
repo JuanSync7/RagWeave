@@ -1,6 +1,9 @@
 # @summary
 # Pydantic request/response models for the RAG API server.
-# Exports: QueryRequest, QueryResponse, ChunkResult, HealthResponse
+# Exports: QueryRequest, QueryResponse, ChunkResult, HealthResponse,
+#          DocumentSummary, DocumentListResponse, DocumentDetailResponse,
+#          DocumentUrlResponse, SourceSummary, SourceListResponse,
+#          CollectionItem, CollectionStatsResponse, CollectionListResponse
 # Deps: pydantic
 # @end-summary
 """Pydantic models for RAG API request/response serialization."""
@@ -121,6 +124,8 @@ class QueryResponse(BaseModel):
     clarification_message: Optional[str] = None
     kg_expanded_terms: Optional[list[str]] = None
     generated_answer: Optional[str] = None
+    llm_confidence: Optional[str] = None  # "high" | "medium" | "low"
+    generation_source: Optional[str] = None  # "retrieval" | "memory" | "retrieval+memory"
     workflow_id: Optional[str] = None
     latency_ms: Optional[float] = None
     stage_timings: list[dict] = Field(default_factory=list)
@@ -213,11 +218,47 @@ class ConsoleQueryRequest(BaseModel):
     compact_now: bool = Field(default=False)
 
 
+# Mapping from ConsoleIngestionRequest field name → IngestionConfig field name.
+# Used by to_config() and contract tests.  Only non-None Optional fields
+# are overlaid — fields with required defaults (update_mode, build_kg, …)
+# are always forwarded.
+INGESTION_REQUEST_FIELD_MAP: dict[str, str] = {
+    "update_mode": "update_mode",
+    "build_kg": "build_kg",
+    "semantic_chunking": "semantic_chunking",
+    "export_processed": "export_processed",
+    "verbose_stages": "verbose_stage_logs",
+    "persist_refactor_mirror": "persist_refactor_mirror",
+    "docling_enabled": "enable_docling_parser",
+    "docling_model": "docling_model",
+    "docling_artifacts_path": "docling_artifacts_path",
+    "docling_strict": "docling_strict",
+    "docling_auto_download": "docling_auto_download",
+    "vlm_mode": "vlm_mode",
+    "hybrid_chunker_max_tokens": "hybrid_chunker_max_tokens",
+    "vision_enabled": "enable_vision_processing",
+    "vision_provider": "vision_provider",
+    "vision_model": "vision_model",
+    "vision_api_base_url": "vision_api_base_url",
+    "vision_timeout_seconds": "vision_timeout_seconds",
+    "vision_max_figures": "vision_max_figures",
+    "vision_auto_pull": "vision_auto_pull",
+    "vision_strict": "vision_strict",
+    "target_collection": "target_collection",
+}
+
+
 class ConsoleIngestionRequest(BaseModel):
-    """Console ingestion request for file, directory, or full documents ingestion."""
+    """Console ingestion request for file, directory, or full documents ingestion.
+
+    Fields marked Optional default to None — ``to_config()`` overlays only
+    non-None values onto an ``IngestionConfig`` with its own env-var defaults.
+    This keeps the API schema decoupled from config defaults.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    # ── Execution mode (not part of IngestionConfig) ────────────────────
     mode: Literal["single_file", "directory", "all_documents"] = Field(
         default="all_documents"
     )
@@ -225,6 +266,7 @@ class ConsoleIngestionRequest(BaseModel):
         default=None,
         description="Required for single_file and directory modes",
     )
+    # ── Pipeline behavioral knobs ───────────────────────────────────────
     update_mode: bool = Field(default=True)
     build_kg: bool = Field(default=True)
     export_obsidian: bool = Field(default=False)
@@ -232,11 +274,15 @@ class ConsoleIngestionRequest(BaseModel):
     export_processed: bool = Field(default=False)
     verbose_stages: Optional[bool] = None
     persist_refactor_mirror: Optional[bool] = None
+    # ── Docling configuration ───────────────────────────────────────────
     docling_enabled: Optional[bool] = None
     docling_model: Optional[str] = None
     docling_artifacts_path: Optional[str] = None
     docling_strict: Optional[bool] = None
     docling_auto_download: Optional[bool] = None
+    # ── VLM / vision configuration ──────────────────────────────────────
+    vlm_mode: Optional[Literal["disabled", "builtin", "external"]] = None
+    hybrid_chunker_max_tokens: Optional[int] = Field(default=None, ge=64, le=2048)
     vision_enabled: Optional[bool] = None
     vision_provider: Optional[Literal["ollama", "openai_compatible"]] = None
     vision_model: Optional[str] = None
@@ -245,6 +291,26 @@ class ConsoleIngestionRequest(BaseModel):
     vision_max_figures: Optional[int] = Field(default=None, ge=1, le=32)
     vision_auto_pull: Optional[bool] = None
     vision_strict: Optional[bool] = None
+    # ── Target collection ───────────────────────────────────────────────
+    target_collection: Optional[str] = Field(
+        default=None, min_length=1, max_length=128,
+        description="Vector store collection name",
+    )
+
+    def to_config(self) -> "IngestionConfig":
+        """Build an IngestionConfig by overlaying non-None request fields.
+
+        Fields not present in the request (None) keep their IngestionConfig
+        env-var defaults.  Fields with explicit values override the defaults.
+        """
+        from src.ingest.common.types import IngestionConfig
+
+        overrides: dict[str, Any] = {}
+        for req_field, cfg_field in INGESTION_REQUEST_FIELD_MAP.items():
+            value = getattr(self, req_field, None)
+            if value is not None:
+                overrides[cfg_field] = value
+        return IngestionConfig(**overrides)
 
 
 class ConsoleCommandRequest(BaseModel):
@@ -306,3 +372,85 @@ class ConversationHistoryResponse(BaseModel):
 
 class ConversationCompactRequest(BaseModel):
     conversation_id: str = Field(..., min_length=3, max_length=128)
+
+
+# ---------------------------------------------------------------------------
+# Document & Collection Management schemas (FR-3060 through FR-3067)
+# ---------------------------------------------------------------------------
+
+
+class DocumentSummary(BaseModel):
+    """Summary of a single ingested document (FR-3060)."""
+
+    document_id: str
+    source: str
+    source_key: str
+    connector: str
+    chunk_count: Optional[int] = None
+    ingested_at: Optional[str] = None
+
+
+class DocumentListResponse(BaseModel):
+    """Paginated list of ingested documents (FR-3061)."""
+
+    documents: list[DocumentSummary] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class DocumentDetailResponse(BaseModel):
+    """Full content and metadata of a single document (FR-3062)."""
+
+    document_id: str
+    content: str
+    metadata: dict
+    chunk_count: Optional[int] = None
+
+
+class DocumentUrlResponse(BaseModel):
+    """Presigned download URL for a document (FR-3063)."""
+
+    document_id: str
+    url: str
+    expires_in: int
+
+
+class SourceSummary(BaseModel):
+    """Summary statistics for a single document source (FR-3064)."""
+
+    source: str
+    connector: str
+    document_count: int
+    chunk_count: int
+
+
+class SourceListResponse(BaseModel):
+    """Paginated list of document sources (FR-3065)."""
+
+    sources: list[SourceSummary] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class CollectionItem(BaseModel):
+    """A single vector collection with its chunk count (FR-3067)."""
+
+    collection_name: str
+    chunk_count: int
+
+
+class CollectionStatsResponse(BaseModel):
+    """Aggregate statistics for a vector collection (FR-3066)."""
+
+    collection_name: str
+    document_count: int
+    chunk_count: int
+    connector_breakdown: dict[str, int]
+
+
+class CollectionListResponse(BaseModel):
+    """List of all vector collections (FR-3067)."""
+
+    collections: list[CollectionItem]

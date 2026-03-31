@@ -325,6 +325,17 @@ def display_results(response, elapsed: float) -> None:
         for line in response.generated_answer.split("\n"):
             print(f"  {line}")
         print()
+        # Always show LLM confidence indicator
+        llm_conf = getattr(response, "llm_confidence", None)
+        if llm_conf:
+            if llm_conf == "high":
+                conf_color = B_GREEN
+            elif llm_conf == "medium":
+                conf_color = B_YELLOW
+            else:
+                conf_color = B_RED
+            print(f"  {DIM}{'─' * 72}{RESET}")
+            print(f"  {conf_color}Confidence: {llm_conf}{RESET}")
         print(f"  {DIM}{'─' * 72}{RESET}")
 
     if not response.results:

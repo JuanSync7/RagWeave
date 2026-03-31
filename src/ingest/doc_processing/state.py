@@ -2,6 +2,8 @@
 # LangGraph TypedDict state contract for the Phase 1 Document Processing Pipeline.
 # Exports: DocumentProcessingState
 # Deps: src.ingest.common.types
+# Fields: runtime, source_*, raw_text, structure, multimodal_notes, cleaned_text,
+#   refactored_text, errors, should_skip, processing_log, docling_document (Optional[Any])
 # @end-summary
 
 """State contract for the Document Processing Pipeline (Phase 1, nodes 1–5)."""
@@ -43,6 +45,9 @@ class DocumentProcessingState(TypedDict, total=False):
     structure : dict
         Structure detection results: ``has_figures`` (bool), ``figures`` (list),
         ``heading_count`` (int), ``docling_enabled`` (bool), ``docling_model`` (str).
+        After ``structure_detection_node`` runs, also contains
+        ``docling_document_available: bool`` indicating whether a
+        ``DoclingDocument`` was successfully obtained.
     multimodal_notes : list[str]
         Vision-generated notes for figures. Empty list if multimodal disabled.
     cleaned_text : str
@@ -74,3 +79,11 @@ class DocumentProcessingState(TypedDict, total=False):
     errors: List[str]
     should_skip: bool
     processing_log: List[str]
+    docling_document: Optional[Any]
+    """Native DoclingDocument object from Docling parse. None if Docling
+    parsing was disabled or failed. Propagated to CleanDocumentStore and
+    used by Phase 2 HybridChunker path.
+
+    The structure dict will contain docling_document_available: bool
+    set by structure_detection_node after it runs.
+    """

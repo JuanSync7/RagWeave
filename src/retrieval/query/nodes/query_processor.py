@@ -235,6 +235,60 @@ def _detect_injection(query: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Backward-reference and context-reset detection (REQ-1103, REQ-1105)
+# ---------------------------------------------------------------------------
+
+# Backward-reference markers (REQ-1103)
+_BACKWARD_REF_PATTERNS = [
+    re.compile(
+        r"\b(the above|you said|you mentioned|previously|tell me more|elaborate"
+        r"|based on what we discussed|regarding what you mentioned|as we discussed"
+        r"|from earlier|what about that)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Context-reset markers (REQ-1105)
+_CONTEXT_RESET_PATTERNS = [
+    re.compile(
+        r"\b(forget about (the )?(past |previous )?(conversation|convo|chat|discussion)"
+        r"|ignore (the )?(previous|prior|past)"
+        r"|new topic|start fresh|fresh start"
+        r"|disregard what we discussed)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Pronouns for backward-ref density check
+_PRONOUNS = re.compile(r"\b(it|its|that|those|this|these|them)\b", re.IGNORECASE)
+_PRONOUN_DENSITY_THRESHOLD = 0.15
+
+
+def _has_backward_reference(query: str) -> bool:
+    """Detect backward-reference signals in a query (REQ-1103).
+
+    Returns True if the query contains explicit backward-reference markers
+    or has high pronoun density without resolution targets.
+    """
+    if any(p.search(query) for p in _BACKWARD_REF_PATTERNS):
+        return True
+    words = query.split()
+    if words:
+        pronoun_count = len(_PRONOUNS.findall(query))
+        if pronoun_count / len(words) >= _PRONOUN_DENSITY_THRESHOLD:
+            return True
+    return False
+
+
+def _detect_suppress_memory(query: str) -> bool:
+    """Detect explicit context-reset signals in a query (REQ-1105).
+
+    Returns True if the user explicitly asks to ignore conversation history.
+    """
+    return any(p.search(query) for p in _CONTEXT_RESET_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
 # LLM helper (backed by LiteLLM Router via LLMProvider)
 # ---------------------------------------------------------------------------
 
@@ -434,30 +488,44 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
     if result:
         try:
             parsed = parse_json_object(result)
-            reformulated = str(parsed.get("reformulated_query", "")).strip()
+
+            # Support new dual-query format (processed_query + standalone_query) and
+            # backward-compatible legacy format (reformulated_query).
+            processed = (
+                str(parsed.get("processed_query", "")).strip()
+                or str(parsed.get("reformulated_query", "")).strip()
+            )
+            standalone = str(parsed.get("standalone_query", "")).strip()
             confidence = float(parsed.get("confidence", 0.0))
             confidence = max(0.0, min(1.0, confidence))
             reasoning = str(parsed.get("reasoning", ""))
 
-            if reformulated:
+            if processed:
                 logger.info(
                     "Iteration %d: '%s' -> '%s' (confidence=%.2f, reasoning='%s')",
                     new_iteration,
                     state["current_query"],
-                    reformulated,
+                    processed,
                     confidence,
                     reasoning,
                 )
             else:
-                reformulated = state["current_query"]
+                processed = state["current_query"]
                 logger.info(
                     "Iteration %d: reformulation empty, keeping current query (confidence=%.2f, reasoning='%s')",
                     new_iteration,
                     confidence,
                     reasoning,
                 )
+
+            # When no memory context is present, standalone_query must equal
+            # processed_query (no conversation to separate out).
+            if not state.get("has_memory_context", False) or not standalone:
+                standalone = processed
+
             return {
-                "current_query": reformulated,
+                "current_query": processed,
+                "standalone_query": standalone,
                 "iteration": new_iteration,
                 "confidence": confidence,
                 "reasoning": reasoning,
@@ -466,8 +534,11 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
             logger.warning(
                 "Failed to parse combined JSON: %s. Raw: %s", e, result[:200]
             )
+            # Fallback: treat raw response as processed_query; standalone mirrors it.
+            fallback_query = state["current_query"]
             return {
-                "current_query": state["current_query"],
+                "current_query": fallback_query,
+                "standalone_query": fallback_query,
                 "iteration": new_iteration,
                 "confidence": 0.5,
                 "reasoning": "parse failed",
@@ -479,6 +550,7 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
     )
     return {
         "current_query": state["current_query"],
+        "standalone_query": state["current_query"],
         "iteration": new_iteration,
         "confidence": 0.5,
         "reasoning": "empty response",
@@ -595,6 +667,8 @@ def process_query(
     confidence_threshold: float = QUERY_CONFIDENCE_THRESHOLD,
     max_iterations: int = MAX_SANITIZATION_ITERATIONS,
     fast_path: bool = False,
+    memory_context: Optional[str] = None,
+    user_query: Optional[str] = None,
 ) -> QueryResult:
     """Query processing loop with confidence-based routing.
 
@@ -604,19 +678,38 @@ def process_query(
 
     Falls back to word-count heuristic if Ollama is unavailable.
 
+    When ``memory_context`` is provided (non-empty), the graph state is
+    flagged with ``has_memory_context=True`` so the reformulation node
+    can produce a distinct ``standalone_query`` (current-turn only) in
+    addition to the context-enriched ``processed_query``. When memory
+    context is absent, ``standalone_query`` mirrors ``processed_query``.
+
     Args:
-        raw_query: The raw user query.
+        raw_query: The raw user query (may already include prepended
+            conversation context when called from rag_chain).
         confidence_threshold: Minimum confidence to proceed with search.
         max_iterations: Max reformulation attempts before asking user.
+        fast_path: Skip LLM reformulation when True.
+        memory_context: The raw conversation memory string (used only to
+            set the ``has_memory_context`` flag; the caller is responsible
+            for prepending it to ``raw_query`` before this call).
+        user_query: The bare user query without any memory prepending. When
+            provided, detection functions (_has_backward_reference,
+            _detect_suppress_memory) operate on this string instead of
+            ``raw_query`` to avoid false positives from memory context
+            containing reference phrases (review bug B2).
 
     Returns:
-        QueryResult with the processed query and recommended action.
+        QueryResult with the processed query, standalone query, and
+        recommended action.
     """
     _ensure_file_logging()
     with get_tracer().span("query_processor.process_query", {"raw_query_len": len(raw_query)}) as root_span:
         ollama_available = _check_llm_available()
         if not ollama_available:
             logger.warning("LLM unavailable; falling back to heuristic mode")
+
+        has_memory_context = bool(memory_context and memory_context.strip())
 
         initial_state: QueryState = {
             "original_query": raw_query,
@@ -630,6 +723,10 @@ def process_query(
             "clarification_message": "",
             "ollama_available": ollama_available,
             "fast_path": fast_path,
+            "standalone_query": "",
+            "suppress_memory": False,
+            "has_backward_reference": False,
+            "has_memory_context": has_memory_context,
         }
 
         logger.info("Processing query: '%s'", raw_query[:100])
@@ -642,20 +739,39 @@ def process_query(
         )
         clarification = final_state["clarification_message"] or None
 
+        # Resolve standalone_query: fall back to processed_query when absent
+        # or when there was no memory context to separate out.
+        processed_query = final_state["current_query"]
+        standalone_query = final_state.get("standalone_query") or ""
+        if not has_memory_context or not standalone_query:
+            standalone_query = processed_query
+
         logger.info(
-            "Query processing complete: action=%s confidence=%.2f iterations=%d query='%s'",
+            "Query processing complete: action=%s confidence=%.2f iterations=%d "
+            "query='%s' standalone='%s'",
             action.value,
             final_state["confidence"],
             final_state["iteration"],
-            final_state["current_query"][:100],
+            processed_query[:100],
+            standalone_query[:100],
         )
 
+        # Detect conversational routing signals (REQ-1103, REQ-1105).
+        # Use bare user query for signal detection to avoid false positives
+        # from memory context containing reference phrases (review bug B2).
+        detection_query = user_query if user_query is not None else raw_query
+        has_backward_ref = _has_backward_reference(detection_query)
+        suppress_mem = _detect_suppress_memory(detection_query)
+
         result = QueryResult(
-            processed_query=final_state["current_query"],
+            processed_query=processed_query,
+            standalone_query=standalone_query,
             confidence=final_state["confidence"],
             action=action,
             clarification_message=clarification,
             iterations=final_state["iteration"],
+            has_backward_reference=has_backward_ref,
+            suppress_memory=suppress_mem,
         )
         root_span.set_attribute("action", result.action.value)
         root_span.set_attribute("confidence", result.confidence)

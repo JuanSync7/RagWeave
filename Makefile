@@ -5,7 +5,7 @@
 # @end-summary
 
 .PHONY: install console-install console-check console-build console-watch \
-        py-compile-check test all-check setup
+        py-compile-check test dep-check import-check all-check setup restart restart-all
 
 # Full project setup (Python + TypeScript)
 setup:
@@ -31,12 +31,24 @@ console-watch:
 	npm --prefix server/console/web run watch
 
 py-compile-check:
-	uv run python -m py_compile server/api.py server/activities.py src/retrieval/rag_chain.py
+	uv run python -m py_compile server/api.py server/activities.py src/retrieval/pipeline/rag_chain.py
 
 test:
 	uv run pytest
+
+dep-check:
+	uv run deptry .
+
+import-check:
+	uv run python -m import_check
 
 all-check:
 	npm --prefix server/console/web ci
 	$(MAKE) py-compile-check
 	$(MAKE) console-check
+
+restart:
+	./scripts/restart_stack.sh --app --workers --build
+
+restart-all:
+	./scripts/restart_stack.sh --all --build

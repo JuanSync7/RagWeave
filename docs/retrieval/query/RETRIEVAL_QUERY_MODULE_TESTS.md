@@ -505,6 +505,72 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_memory_lifecycle
 
 ---
 
+## Module: Conversational Query Routing
+
+**Source:** `src/retrieval/query/nodes/query_processor.py`
+**Engineering Guide Section:** `docs/retrieval/RETRIEVAL_QUERY_ENGINEERING_GUIDE.md` → Section 3.9: `src/retrieval/query/nodes/query_processor.py`
+**Phase 0 contracts:** `src/retrieval/query/schemas.py`, `src/retrieval/memory/types.py`
+**FR coverage:** REQ-103, REQ-1002, REQ-1009, REQ-1010
+**Phase D test file:** `tests/retrieval/test_conversational_query_routing_coverage.py`
+
+### Isolation contract for this module's Phase D agent
+
+Agent input (ONLY these):
+1. Module section from `RETRIEVAL_QUERY_ENGINEERING_GUIDE.md` for `src/retrieval/query/nodes/query_processor.py` (Purpose, Error behavior, Test guide sub-sections)
+2. Phase 0 contracts: `src/retrieval/query/schemas.py`, `src/retrieval/memory/types.py`
+3. FR numbers: REQ-103, REQ-1002, REQ-1009, REQ-1010
+
+Must NOT receive: `src/retrieval/query/nodes/query_processor.py`, any Phase A test files.
+
+### Backward-Reference Detection (`test_backward_reference_detection`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_explicit_marker_the_above` — REQ-103: `"Tell me more about the above"` → `has_backward_reference` returns `True` (explicit backward-reference marker detected)
+- [ ] `test_explicit_marker_you_said` — REQ-103: `"Based on what you said"` → `has_backward_reference` returns `True`
+- [ ] `test_explicit_marker_elaborate` — REQ-103: `"Can you elaborate?"` → `has_backward_reference` returns `True`
+- [ ] `test_no_backward_ref` — REQ-103: `"What is the SPI timing spec?"` → `has_backward_reference` returns `False` (self-contained query, no backward-reference markers or high pronoun density)
+- [ ] `test_pronoun_density_high` — REQ-103: `"What about it and its properties?"` → `has_backward_reference` returns `True` (pronoun density threshold exceeded)
+- [ ] `test_pronoun_density_low` — REQ-103: `"What about the USB clock?"` → `has_backward_reference` returns `False` (no pronouns, no markers)
+- [ ] `test_case_insensitive` — REQ-103: `"TELL ME MORE"` → `has_backward_reference` returns `True` (backward-reference detection is case-insensitive)
+
+### Context-Reset Detection (`test_context_reset_detection`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_forget_past_conversation` — REQ-1009: `"Forget about past conversation"` → `is_context_reset` returns `True`
+- [ ] `test_ignore_previous` — REQ-1009: `"Ignore previous"` → `is_context_reset` returns `True`
+- [ ] `test_new_topic` — REQ-1009: `"New topic, what is X?"` → `is_context_reset` returns `True`
+- [ ] `test_start_fresh` — REQ-1009: `"Start fresh"` → `is_context_reset` returns `True`
+- [ ] `test_normal_query` — REQ-1009: `"What is the timing spec?"` → `is_context_reset` returns `False`
+- [ ] `test_case_insensitive` — REQ-1009: `"FORGET ABOUT PAST CONVO"` → `is_context_reset` returns `True` (reset detection is case-insensitive)
+
+### Dual-Query Output (`test_dual_query_output`)
+(derived from engineering guide's "Test guide → Behaviors to test")
+
+- [ ] `test_both_variants_produced` — REQ-1010: query processor result contains both `processed_query` and `standalone_query` fields; neither is `None` after a successful processing run
+- [ ] `test_fresh_conversation_equality` — REQ-1010: when no prior memory context exists (empty `ConversationState`), `standalone_query == processed_query` (no reformulation needed)
+- [ ] `test_standalone_no_memory_leakage` — REQ-1010: `standalone_query` does NOT contain any memory context terms (conversation history phrases, summary text, or prior query content) even when `processed_query` does include reformulated context
+- [ ] `test_json_parse_failure_fallback` — REQ-1010: when the LLM returns malformed JSON (cannot parse dual-query output), `standalone_query` gracefully falls back to the value of `processed_query` without raising; no exception propagates to the caller
+
+### QueryResult Schema (`test_query_result_schema`)
+(derived from engineering guide's "Error behavior" sub-section)
+
+- [ ] `test_default_values` — REQ-1010: constructing a `QueryResult` with only required fields leaves `standalone_query`, `has_backward_reference`, and `is_context_reset` at their documented default values (e.g., `standalone_query=None` or matches `processed_query`, boolean fields `False`)
+- [ ] `test_backward_compatibility` — REQ-1010: existing code that constructs `QueryResult` without the new conversational routing fields (`standalone_query`, `has_backward_reference`, `is_context_reset`) continues to work without `TypeError` (new fields have defaults; no required-field breakage)
+
+### Known test gaps (to note in Phase D agent output)
+- Pronoun density threshold boundary (the exact token-count ratio that tips `has_backward_reference` from `False` to `True`) is not specified in the spec — Phase D agent must read the engineering guide's documented threshold before writing density boundary tests.
+- Backward-reference and context-reset heuristics are pattern-based; edge cases combining markers and reset phrases in the same query (e.g., `"Forget what you said, but elaborate on the above"`) require engineering guide confirmation of evaluation order.
+- The LLM-based dual-query split depends on a JSON prompt contract; the exact field names in the LLM response (`processed_query`, `standalone_query`) must be confirmed from the engineering guide before writing the JSON parse failure test.
+
+### Pytest command
+```bash
+cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_conversational_query_routing_coverage.py -v
+# Expected: FAIL (new tests — implementation exists but these are new coverage tests)
+# Phase E will confirm ALL PASS after full suite verification
+```
+
+---
+
 ## Phase D dispatch order
 
 All Phase D test-writing tasks are independent of each other and can be dispatched in parallel. No module's tests depend on another module's Phase D output.
@@ -521,6 +587,7 @@ All Phase D test-writing tasks are independent of each other and can be dispatch
 | D-6 | Multi-Turn Conversation State | `test_memory_context_coverage.py` |
 | D-7 | Conversation Memory Provider | `test_memory_provider_coverage.py` |
 | D-8 | Conversation Lifecycle Operations | `test_memory_lifecycle_coverage.py` |
+| D-9 | Conversational Query Routing | `test_conversational_query_routing_coverage.py` |
 
 ### Phase D gate (all must be complete before Phase E starts)
 
@@ -532,6 +599,7 @@ All Phase D test-writing tasks are independent of each other and can be dispatch
 - [ ] Module: Multi-Turn Conversation State — spec review complete
 - [ ] Module: Conversation Memory Provider — spec review complete
 - [ ] Module: Conversation Lifecycle Operations — spec review complete
+- [ ] Module: Conversational Query Routing — spec review complete
 
 ---
 
@@ -539,7 +607,7 @@ All Phase D test-writing tasks are independent of each other and can be dispatch
 
 | Spec Requirement | Covered by Module | Phase D Test File |
 |------------------|-------------------|-------------------|
-| REQ-103 | Multi-Turn Conversation State | `test_memory_context_coverage.py` |
+| REQ-103 | Multi-Turn Conversation State + Conversational Query Routing | `test_memory_context_coverage.py`, `test_conversational_query_routing_coverage.py` |
 | REQ-201 | Pre-Retrieval Guardrail | `test_pre_retrieval_guardrail_coverage.py` |
 | REQ-202 | Pre-Retrieval Guardrail + Risk Classification Config | `test_pre_retrieval_guardrail_coverage.py`, `test_risk_classification_coverage.py` |
 | REQ-203 | Pre-Retrieval Guardrail + Risk Classification Config | `test_pre_retrieval_guardrail_coverage.py`, `test_risk_classification_coverage.py` |
@@ -554,10 +622,12 @@ All Phase D test-writing tasks are independent of each other and can be dispatch
 | REQ-705 | Risk Classification Config | `test_risk_classification_coverage.py` |
 | REQ-903 | Pre-Retrieval Guardrail + Risk Classification Config + Result Cache + Pool | Per-module config loading assertions in each test file |
 | REQ-1001 | Conversation Memory Provider + Conversation Lifecycle | `test_memory_provider_coverage.py`, `test_memory_lifecycle_coverage.py` |
-| REQ-1002 | Multi-Turn Conversation State + Conversation Memory Provider | `test_memory_context_coverage.py`, `test_memory_provider_coverage.py` |
+| REQ-1002 | Multi-Turn Conversation State + Conversation Memory Provider + Conversational Query Routing | `test_memory_context_coverage.py`, `test_memory_provider_coverage.py`, `test_conversational_query_routing_coverage.py` |
 | REQ-1003 | Conversation Memory Provider | `test_memory_provider_coverage.py` |
 | REQ-1004 | Conversation Lifecycle Operations | `test_memory_lifecycle_coverage.py` |
 | REQ-1005 | Conversation Lifecycle Operations | `test_memory_lifecycle_coverage.py` |
 | REQ-1006 | Conversation Lifecycle Operations | `test_memory_lifecycle_coverage.py` |
 | REQ-1007 | Conversation Memory Provider | `test_memory_provider_coverage.py` |
 | REQ-1008 | Conversation Lifecycle Operations + Multi-Turn Conversation State | `test_memory_lifecycle_coverage.py`, `test_memory_context_coverage.py` |
+| REQ-1009 | Conversational Query Routing | `test_conversational_query_routing_coverage.py` |
+| REQ-1010 | Conversational Query Routing | `test_conversational_query_routing_coverage.py` |

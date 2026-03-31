@@ -340,6 +340,8 @@ class RAGChain:
                             QUERY_CONFIDENCE_THRESHOLD,
                             max_query_iterations,
                             RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
+                            memory_context,
+                            query,
                         )
                         rail_future: _Fut = stage1_pool.submit(
                             run_input_rails,
@@ -354,6 +356,8 @@ class RAGChain:
                         processing_query,
                         max_iterations=max_query_iterations,
                         fast_path=RAG_DEFAULT_FAST_PATH if fast_path is None else bool(fast_path),
+                        memory_context=memory_context,
+                        user_query=query,
                     )
             tp.record("query_processing", "retrieval", started_at=t0)
             if tp.check_stage_budget("query_processing"):
@@ -440,6 +444,13 @@ class RAGChain:
                 else query_result.processed_query
             )
 
+            # REQ-1205: Suppress-memory routing — context reset detected
+            if query_result.suppress_memory:
+                # Use standalone_query for retrieval, strip all memory
+                processed_query = query_result.standalone_query
+                memory_context = None
+                memory_recent_turns = None
+
             # Stage 2: KG expansion
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
@@ -511,7 +522,7 @@ class RAGChain:
                 filters.append(SearchFilter(property="source", operator="eq", value=source_filter))
             if heading_filter:
                 filters.append(SearchFilter(property="heading", operator="eq", value=heading_filter))
-            if tenant_id:
+            if tenant_id and tenant_id != "default":
                 filters.append(SearchFilter(property="tenant_id", operator="eq", value=tenant_id))
 
             with self.tracer.span("rag_chain.hybrid_search", parent=root_span) as search_span:
@@ -613,6 +624,82 @@ class RAGChain:
                         "is generated from loosely related content and may not be reliable."
                     )
 
+            # REQ-1201: Fallback retrieval on standalone_query when primary is weak
+            if (
+                retrieval_quality in ("weak", "insufficient")
+                and not query_result.suppress_memory
+                and query_result.standalone_query
+                and query_result.standalone_query != processed_query
+            ):
+                t0 = time.perf_counter()
+                with self.tracer.span("rag_chain.fallback_retrieval", parent=root_span) as fb_span:
+                    # Embed standalone_query (check cache first)
+                    fb_query = query_result.standalone_query
+                    fb_cache_hit = fb_query in self._embedding_cache
+                    if fb_cache_hit:
+                        fb_embedding = self._embedding_cache[fb_query]
+                        self._embedding_cache.move_to_end(fb_query)
+                    else:
+                        fb_embedding = self.embeddings.embed_query(fb_query)
+                        self._embedding_cache[fb_query] = fb_embedding
+                        if len(self._embedding_cache) > self._embedding_cache_max:
+                            self._embedding_cache.popitem(last=False)
+
+                    # Build BM25 query with KG terms
+                    fb_bm25_query = (
+                        fb_query + " " + " ".join(kg_expanded_terms[:3])
+                        if kg_expanded_terms
+                        else fb_query
+                    )
+
+                    # Hybrid search with same parameters
+                    fb_search_results = self.retry_provider.execute(
+                        operation_name="weaviate_hybrid_search_fallback",
+                        fn=lambda: self._do_search(
+                            fb_bm25_query, fb_embedding, alpha, search_limit, filters or None,
+                        ),
+                        policy=self.retry_policy,
+                        idempotency_key=f"search_fb:{fb_query}:{source_filter}:{heading_filter}:{search_limit}",
+                    )
+
+                    # Rerank fallback results
+                    if fb_search_results:
+                        fb_reranked = self.reranker.rerank(
+                            query=fb_query,
+                            documents=fb_search_results,
+                            top_k=rerank_top_k,
+                        )
+
+                        # Compare best reranker scores: primary vs fallback
+                        primary_best = max(r.score for r in reranked) if reranked else 0.0
+                        fallback_best = max(r.score for r in fb_reranked) if fb_reranked else 0.0
+
+                        fb_span.set_attribute("primary_best_score", primary_best)
+                        fb_span.set_attribute("fallback_best_score", fallback_best)
+                        fb_span.set_attribute("fallback_wins", fallback_best > primary_best)
+
+                        if fallback_best > primary_best:
+                            logger.info(
+                                "Fallback retrieval improved best score: %.3f -> %.3f",
+                                primary_best, fallback_best,
+                            )
+                            reranked = fb_reranked
+                            scores = [r.score for r in reranked]
+                            # Re-classify retrieval quality with new scores
+                            if fallback_best >= RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD:
+                                retrieval_quality = "strong"
+                                retrieval_quality_note = None
+                            elif fallback_best >= RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD:
+                                retrieval_quality = "moderate"
+                                retrieval_quality_note = None
+                            elif fallback_best >= RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD:
+                                retrieval_quality = "weak"
+                                retrieval_quality_note = (
+                                    "Retrieved documents have limited relevance to your query. "
+                                    "The answer below is based on the best available evidence."
+                                )
+                tp.record("fallback_retrieval", "retrieval", started_at=t0)
+
             # Stage 5.5: Document formatting (REQ-501–REQ-503)
             version_conflicts = []
             formatted_context_str = None
@@ -629,29 +716,87 @@ class RAGChain:
 
             # Stage 6: Generation (skippable for streaming callers)
             generated_answer = None
-            if not skip_generation and self._generator and reranked and not tp.budget_exhausted:
+            generation_source = None
+            if not skip_generation and self._generator and not tp.budget_exhausted and (
+                reranked or (query_result.has_backward_reference and (memory_context or memory_recent_turns))
+            ):
                 t0 = time.perf_counter()
                 with self.tracer.span("rag_chain.generate", parent=root_span) as generate_span:
                     context_chunks = [r.text for r in reranked]
                     scores = [r.score for r in reranked]
 
-                    # Use formatted context if document formatting is enabled
-                    if formatted_context_str:
-                        generated_answer = self._generator.generate(
-                            query=processed_query,
-                            context_chunks=[formatted_context_str],
-                            scores=None,
-                            memory_context=memory_context,
-                            recent_turns=memory_recent_turns,
+                    # REQ-1203, REQ-1204, REQ-1205: Memory-aware generation routing
+                    generation_source = None
+                    if query_result.suppress_memory:
+                        # REQ-1205: Context reset — no memory in generation
+                        effective_turns = None
+                        effective_memory = None
+                        generation_source = "retrieval"
+                    elif retrieval_quality in ("strong", "moderate"):
+                        if query_result.has_backward_reference:
+                            # REQ-1204: Hybrid — retrieval succeeded + backward ref
+                            effective_turns = memory_recent_turns
+                            effective_memory = memory_context
+                            generation_source = "retrieval+memory"
+                        else:
+                            # Standard retrieval path
+                            effective_turns = memory_recent_turns
+                            effective_memory = memory_context
+                            generation_source = (
+                                "retrieval+memory"
+                                if (memory_context or memory_recent_turns)
+                                else "retrieval"
+                            )
+                    elif query_result.has_backward_reference and not memory_context and not memory_recent_turns:
+                        # REQ-1203 guard: backward ref on fresh conversation — deterministic BLOCK
+                        effective_turns = None
+                        effective_memory = None
+                        context_chunks = []
+                        scores = []
+                        formatted_context_str = None
+                        reranked = []
+                        generation_source = None
+                        skip_generation = True
+                        generated_answer = (
+                            "Insufficient conversation history to answer this follow-up. "
+                            "Please provide more context or start with a specific question."
                         )
+                    elif query_result.has_backward_reference and (memory_context or memory_recent_turns):
+                        # REQ-1203: Memory-generation path — both retrievals weak + backward ref + non-empty memory
+                        effective_turns = memory_recent_turns
+                        effective_memory = memory_context
+                        generation_source = "memory"
+                        # Clear document context — generate from memory only
+                        context_chunks = []
+                        scores = []
+                        formatted_context_str = None
+                        reranked = []  # No docs for memory-only generation
                     else:
-                        generated_answer = self._generator.generate(
-                            query=processed_query,
-                            context_chunks=context_chunks,
-                            scores=scores,
-                            memory_context=memory_context,
-                            recent_turns=memory_recent_turns,
-                        )
+                        # Weak retrieval, no backward ref — suppress recent_turns only (spec line 91)
+                        # memory_context (rolling summary) is still passed per spec requirement
+                        effective_turns = None
+                        effective_memory = memory_context
+                        generation_source = "retrieval"
+
+                    # Use formatted context if document formatting is enabled
+                    # (skip_generation may be set by fresh-convo guard above)
+                    if not skip_generation:
+                        if formatted_context_str:
+                            generated_answer = self._generator.generate(
+                                query=processed_query,
+                                context_chunks=[formatted_context_str],
+                                scores=None,
+                                memory_context=effective_memory,
+                                recent_turns=effective_turns,
+                            )
+                        else:
+                            generated_answer = self._generator.generate(
+                                query=processed_query,
+                                context_chunks=context_chunks,
+                                scores=scores,
+                                memory_context=effective_memory,
+                                recent_turns=effective_turns,
+                            )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 tp.record("generation", "generation", started_at=t0)
                 if tp.check_stage_budget("generation"):
@@ -815,10 +960,11 @@ class RAGChain:
                 re_retrieval_suggested = False
                 re_retrieval_params = None
 
-                if action == PostGuardrailAction.RE_RETRIEVE:
+                if action == PostGuardrailAction.RE_RETRIEVE and generation_source != "memory":
                     # Don't block — return the first answer and suggest re-retrieval.
                     # The caller (UI/API) can request a second attempt with these
                     # broader params. The user sees both side-by-side and chooses.
+                    # Skip when generation_source is "memory" — no docs to re-retrieve.
                     re_retrieval_suggested = True
                     re_retrieval_params = {
                         "alpha": max(0.0, alpha - 0.15),
@@ -830,6 +976,18 @@ class RAGChain:
                         "This answer has moderate confidence. A broader search "
                         "may yield better results — re-retrieval is available."
                     )
+                elif action == PostGuardrailAction.RE_RETRIEVE and generation_source == "memory":
+                    # REQ-1203: Re-retrieval not applicable on memory path — re-route to FLAG
+                    verification_warning = (
+                        "This answer was generated from conversation history and has limited confidence. "
+                        "Please verify against source documents."
+                    )
+                    generated_answer = (
+                        f"{generated_answer}\n\n"
+                        f"---\n"
+                        f"⚠️ {verification_warning}"
+                    )
+                    post_guardrail_action = PostGuardrailAction.FLAG.value
                 elif action == PostGuardrailAction.BLOCK:
                     generated_answer = (
                         "Insufficient documentation found to provide a reliable answer. "
@@ -840,6 +998,17 @@ class RAGChain:
                         "This answer has limited confidence. "
                         "Please verify against source documents before relying on it."
                     )
+                    generated_answer = (
+                        f"{generated_answer}\n\n"
+                        f"---\n"
+                        f"⚠️ {verification_warning}"
+                    )
+
+            # Extract LLM self-reported confidence as structured data.
+            # Display formatting is the UI/console layer's responsibility.
+            llm_confidence = None
+            if self._generator:
+                llm_confidence = getattr(self._generator, "_last_llm_confidence", None)
 
             tp.log_summary()
             root_span.set_attribute("duration_ms", int((time.perf_counter() - pipeline_start) * 1000))
@@ -873,6 +1042,8 @@ class RAGChain:
                 retrieval_quality_note=retrieval_quality_note,
                 re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
                 re_retrieval_params=re_retrieval_params,
+                generation_source=generation_source,
+                llm_confidence=llm_confidence,
             )
 
 

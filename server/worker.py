@@ -72,7 +72,7 @@ async def main() -> None:
     logger.info("Models loaded in %.1fs — ready to serve queries", time.time() - start)
 
     # Phase 1b: Pre-warm Ollama so the first query doesn't pay cold-start cost
-    from src.retrieval.query_processor import warm_up_ollama
+    from src.retrieval.query.nodes.query_processor import warm_up_ollama
     warm_up_ollama()
 
     # Phase 2: Connect to Temporal

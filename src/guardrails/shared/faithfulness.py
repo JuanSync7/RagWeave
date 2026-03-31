@@ -250,7 +250,7 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query_processor import _call_ollama
+            from src.retrieval.query.nodes.query_processor import _call_ollama
 
             response = _call_ollama(
                 prompt,
@@ -298,7 +298,7 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query_processor import _call_ollama
+            from src.retrieval.query.nodes.query_processor import _call_ollama
             from src.common.utils import parse_json_object
 
             response = _call_ollama(

@@ -106,6 +106,25 @@ After B-1.1 [QUERY — see RETRIEVAL_QUERY_IMPLEMENTATION.md], B-1.2, B-2.1:
 └── B-2.2: Pipeline Routing ◄── B-1.1 [QUERY — see RETRIEVAL_QUERY_IMPLEMENTATION.md], B-1.2, B-2.1          [CRITICAL]
 
 Critical path: B-1.3 → B-2.1 → B-1.2 → B-2.2
+
+Phase 6 (Memory-Aware Generation Routing — REQ-1201/1203/1204/1205/1207/1209)
+
+Phase 0 prerequisite:
+└── Task 0.5: RAGResponse extension (generation_source field)
+
+Phase A (Tests — ALL PARALLEL):
+├── A-6.1: Fallback Retrieval Routing ◄── Phase 0 (Task 0.5)
+├── A-6.2: Memory-Generation Path ◄── Phase 0 (Task 0.5)
+├── A-6.3: Suppress-Memory Routing ◄── Phase 0 (Task 0.5)
+├── A-6.4: BLOCK/FLAG Memory Filtering ◄── Phase 0 (Task 0.5)
+└── A-6.5: Generation Source Tracking ◄── Phase 0 (Task 0.5)
+
+Phase B (Implementation — dependency-ordered):
+├── B-6.1: Fallback Retrieval Routing ◄── Query Task 7.1 (standalone_query schema)
+├── B-6.3: Suppress-Memory Routing ◄── Query Task 7.3 (suppress_memory detection)
+├── B-6.2: Memory-Generation Path ◄── B-6.1
+├── B-6.5: Generation Source Tracking ◄── B-6.1, B-6.2, B-6.3
+└── B-6.4: BLOCK/FLAG Caller Contract ◄── (no pipeline deps — documentation only)
 ```
 
 ---
@@ -122,6 +141,11 @@ Critical path: B-1.3 → B-2.1 → B-1.2 → B-2.2
 | 3.2 Version Conflicts | `formatting/types.py` | `test_version_conflicts.py` | `formatting/conflicts.py` | `docs/tmp/module-version-conflicts.md` | `tests/retrieval/test_version_conflicts_coverage.py` | REQ-502 |
 | 3.3 Prompt Template | — | `test_prompt_template.py` | `prompt_loader.py` | `docs/tmp/module-prompt-loader.md` | `tests/retrieval/test_prompt_template_coverage.py` | REQ-601, REQ-602 |
 | 4.4 Observability | `observability/types.py` | `test_observability.py` | `observability/tracing.py` | `docs/tmp/module-observability.md` | `tests/retrieval/test_observability_coverage.py` | REQ-801, REQ-802, REQ-803 |
+| 6.1 Fallback Retrieval Routing | Task 0.5 (`RAGResponse`) | `test_fallback_retrieval_routing.py` | `pipeline/rag_chain.py` | — | — | REQ-1201 |
+| 6.2 Memory-Generation Path | Task 0.5 (`RAGResponse`) | `test_memory_generation_path.py` | `pipeline/rag_chain.py` | — | — | REQ-1203, REQ-1204 |
+| 6.3 Suppress-Memory Routing | Task 0.5 (`RAGResponse`) | `test_suppress_memory_routing.py` | `pipeline/rag_chain.py` | — | — | REQ-1205 |
+| 6.4 BLOCK/FLAG Memory Filtering | Task 0.5 (caller contract) | `test_block_flag_memory_filtering.py` | Caller code (CLI/API) | — | — | REQ-1207 |
+| 6.5 Generation Source Tracking | Task 0.5 (`RAGResponse.generation_source`) | `test_generation_source_tracking.py` | `common/schemas.py`, `pipeline/rag_chain.py` | — | — | REQ-1209 |
 
 ---
 
@@ -832,6 +856,74 @@ def traced(stage_name: str) -> Callable:
 
 - [ ] Verify imports resolve
 
+---
+
+## Task 0.5: Memory-Aware Generation Routing Types
+
+### Phase 0 Contract: RAGResponse Extension (REQ-1209)
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.platform.token_budget.schemas import TokenBudgetSnapshot
+
+
+@dataclass
+class RAGResponse:
+    """Complete response from the retrieval pipeline.
+
+    Extended with generation_source for conversational routing (REQ-1209).
+    """
+    query: str
+    processed_query: str
+    query_confidence: float
+    action: str
+    results: List["RankedResult"] = field(default_factory=list)
+    clarification_message: Optional[str] = None
+    kg_expanded_terms: Optional[List[str]] = None
+    generated_answer: Optional[str] = None
+    stage_timings: List[Dict[str, Any]] = field(default_factory=list)
+    timing_totals: Dict[str, float] = field(default_factory=dict)
+    budget_exhausted: bool = False
+    budget_exhausted_stage: Optional[str] = None
+    conversation_id: Optional[str] = None
+    guardrails: Optional[Dict[str, Any]] = None
+    token_budget: Optional["TokenBudgetSnapshot"] = None
+    composite_confidence: Optional[float] = None
+    confidence_breakdown: Optional[Dict[str, Any]] = None
+    post_guardrail_action: Optional[str] = None
+    version_conflicts: Optional[List[Dict[str, Any]]] = None
+    retry_count: int = 0
+    verification_warning: Optional[str] = None
+    retrieval_quality: Optional[str] = None
+    retrieval_quality_note: Optional[str] = None
+    re_retrieval_suggested: bool = False
+    re_retrieval_params: Optional[Dict[str, Any]] = None
+    generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
+```
+
+### Integration Contracts (additions)
+
+```
+rag_chain.run()
+    → QueryResult.suppress_memory → determines retrieval path
+    → QueryResult.standalone_query → fallback retrieval query
+    → QueryResult.has_backward_reference → memory-generation path trigger
+
+    Routing decision:
+        suppress_memory=True → standalone retrieval only, no memory in generation
+        retrieval strong/moderate → standard generation (docs ± memory)
+        retrieval weak + backward_ref + non-empty memory → memory-generation
+        retrieval weak + no backward_ref → BLOCK/FLAG (existing behavior)
+
+    → RAGResponse.generation_source set based on which path
+    → Caller checks post_guardrail_action before append_turn() (REQ-1207)
+```
+
 - [ ] Verify all Phase 0 files import correctly:
 ```bash
 cd /home/juansync7/RAG && python -c "
@@ -918,6 +1010,14 @@ Confidence routing (REQ-706):
 - [ ] composite=0.40, retry_count=1 → BLOCK
 - [ ] composite exactly at 0.70 → RETURN (threshold is > 0.70, test boundary)
 - [ ] composite exactly at 0.50 → RE_RETRIEVE (threshold is 0.50-0.70 range)
+- [ ] FLAG action → verification_warning text is appended to generated_answer as "\n\n---\n⚠️ <warning>" (Stage 7.5 behavior — warning visible in answer text, not only in structured field)
+
+Memory echo suppression (rag_chain.py Stage 6):
+- [ ] retrieval_quality="strong" → recent_turns passed to generator unchanged
+- [ ] retrieval_quality="moderate" → recent_turns passed to generator unchanged
+- [ ] retrieval_quality="weak" → recent_turns suppressed (None) before generate() call
+- [ ] retrieval_quality="insufficient" → recent_turns suppressed (None) before generate() call
+- [ ] memory_context (rolling summary) always passed regardless of retrieval_quality
 
 ```bash
 cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_post_generation_guardrail.py -v
@@ -1041,7 +1141,7 @@ Post-guardrail routing (REQ-706):
 - [ ] Re-retrieval increases search_limit and shifts alpha toward BM25 (REQ-706)
 - [ ] post_guardrail_action="re_retrieve" with retry_count=1 → escalate (no infinite loop)
 - [ ] post_guardrail_action="block" → "Insufficient documentation found" message
-- [ ] post_guardrail_action="flag" → escalation to review queue
+- [ ] post_guardrail_action="flag" → escalation to review queue; verification_warning text appended to generated_answer as visible block
 
 Graceful degradation (REQ-902):
 - [ ] Generation unavailable → return retrieved docs without synthesis
@@ -1165,6 +1265,96 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_observability.py
 
 ---
 
+## Task A-6.1: Fallback Retrieval Routing Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` — the pipeline to test
+- Only the requirements REQ-1201
+
+### Test Cases
+
+1. **Test fallback triggered on weak retrieval**: Mock primary retrieval returning weak results, verify standalone_query retrieval is attempted.
+2. **Test fallback NOT triggered on strong retrieval**: Mock strong primary retrieval, verify no fallback.
+3. **Test fallback NOT triggered when suppress_memory=True**: Verify fallback skipped because standalone was already primary.
+4. **Test better results selected**: Mock primary weak + fallback moderate, verify fallback results used.
+5. **Test both weak**: Mock both retrievals weak, verify best-of comparison still runs.
+
+---
+
+## Task A-6.2: Memory-Generation Path Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` — the pipeline to test
+- Only the requirements REQ-1203, REQ-1204
+
+### Test Cases
+
+1. **Test memory-gen triggered**: Both retrievals weak + has_backward_reference=True + non-empty memory → generates from memory.
+2. **Test fresh conversation guard**: has_backward_reference=True + empty memory → BLOCK (not memory-gen).
+3. **Test hybrid case (REQ-1204)**: has_backward_reference=True + strong retrieval → standard retrieval+memory path, NOT memory-gen.
+4. **Test confidence routing on memory-gen**: Memory-generated answer with low confidence → BLOCK.
+5. **Test re-retrieval skip**: Memory-generated answer → confidence routing skips re-retrieval step.
+6. **Test generation_source="memory"**: Memory-gen path sets generation_source correctly.
+
+---
+
+## Task A-6.3: Suppress-Memory Routing Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` — the pipeline to test
+- Only the requirements REQ-1205
+
+### Test Cases
+
+1. **Test suppress_memory=True routing**: Verify standalone_query used as primary, no memory in generation.
+2. **Test no fallback when suppress_memory**: Verify fallback retrieval is skipped.
+3. **Test generation has no memory**: Verify generation prompt does not contain memory_context or recent_turns.
+4. **Test generation_source="retrieval"**: Verify source is "retrieval" not "retrieval+memory".
+
+---
+
+## Task A-6.4: BLOCK/FLAG Memory Filtering Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- Caller-side contract documentation
+- Only the requirements REQ-1207
+
+### Test Cases
+
+1. **Test BLOCK response not stored**: After BLOCK, verify append_turn() not called for assistant turn.
+2. **Test FLAG response not stored**: After FLAG, verify append_turn() not called for assistant turn.
+3. **Test user turn always stored**: User's query IS stored regardless of response action.
+4. **Test RETURN response stored**: Normal response IS stored in memory.
+5. **Test no echo**: After BLOCK on query A, query B's memory context does not contain BLOCK message.
+
+---
+
+## Task A-6.5: Generation Source Tracking Tests
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` and `src/retrieval/common/schemas.py`
+- Only the requirements REQ-1209
+
+### Test Cases
+
+1. **Test source="retrieval"**: Standard retrieval generation → "retrieval".
+2. **Test source="memory"**: Memory-generation path → "memory".
+3. **Test source="retrieval+memory"**: Hybrid backward-ref + strong retrieval → "retrieval+memory".
+4. **Test source=None**: BLOCK with no generation → None.
+5. **Test suppress_memory source**: suppress_memory=True + successful retrieval → "retrieval" (not "retrieval+memory").
+
+---
+
 # Phase B — Implementation (Against Tests)
 
 Each Phase B task implements the code that makes its corresponding Phase A tests pass.
@@ -1270,6 +1460,8 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_confidence_scori
 - [ ] Enforce single retry limit: retry_count < 1 check (REQ-706)
 - [ ] Implement graceful degradation nodes for each optional component (REQ-902)
 - [ ] Wire all nodes and conditional edges in `build_rag_pipeline()`
+- [ ] **Stage 6 — memory echo suppression**: In the generation node, gate `recent_turns` on `retrieval_quality in ("strong", "moderate")`; pass `None` for weak/insufficient quality. `memory_context` (rolling summary) is always passed regardless of retrieval quality.
+- [ ] **Stage 7.5 — FLAG display**: In the FLAG branch of confidence routing, append `verification_warning` to `generated_answer` as `"\n\n---\n⚠️ <warning text>"` in addition to setting the structured `verification_warning` field.
 
 ```bash
 cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_pipeline_routing.py -v
@@ -1380,6 +1572,183 @@ cd /home/juansync7/RAG && python -m pytest tests/retrieval/test_observability.py
 ```
 
 - [ ] Commit: "feat(retrieval): implement end-to-end observability with tracing"
+
+---
+
+## Task B-6.1: Fallback Retrieval Routing
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` — the pipeline to modify
+- `src/retrieval/query/schemas.py` — to read QueryResult fields
+- Only the routing changes specified below — do NOT change existing retrieval or reranking logic
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/pipeline/rag_chain.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1201
+
+### Dependencies
+
+Task 7.1 from query implementation (schema with standalone_query)
+
+### Implementation Steps
+
+**Step 1** — Read `rag_chain.py` fully. Find the section after primary retrieval + reranking where `retrieval_quality` is computed.
+
+**Step 2** — After quality classification, add fallback logic:
+- If `retrieval_quality in ("weak", "insufficient")` AND `NOT query_result.suppress_memory`:
+  - Embed `query_result.standalone_query` (use existing embedding method, check cache first)
+  - Execute hybrid search with standalone_query embedding
+  - Rerank fallback results
+  - Compare best reranker score from primary vs fallback
+  - Use the set with higher best score
+  - Update `retrieval_quality` and `retrieval_quality_note` based on chosen results
+
+**Step 3** — Skip fallback entirely when `query_result.suppress_memory is True`.
+
+---
+
+## Task B-6.2: Memory-Generation Path and Hybrid Routing
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` — the pipeline to modify
+- Only the generation routing changes specified below
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/pipeline/rag_chain.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1203, REQ-1204
+
+### Dependencies
+
+Task 6.1 (fallback retrieval)
+
+### Implementation Steps
+
+**Step 1** — After all retrieval passes and quality classification, add routing logic:
+- If `retrieval_quality in ("weak", "insufficient")` AND `query_result.has_backward_reference` AND (`memory_context` or `memory_recent_turns` is non-empty):
+  - Set `generation_source = "memory"`
+  - Generate using `memory_context + recent_turns` as context (no document chunks)
+  - When running confidence routing: skip re-retrieval step, go directly to BLOCK/FLAG thresholds
+- If `has_backward_reference` AND retrieval is strong/moderate:
+  - Set `generation_source = "retrieval+memory"`
+  - Use standard generation with docs + memory + turns (existing behavior, just tag the source)
+- Guard: if `has_backward_reference` AND empty memory (fresh convo): fall through to standard BLOCK
+
+**Step 2** — For memory-only generation: build a context string from `memory_context` and formatted `recent_turns`, pass as the context chunks to the generator.
+
+---
+
+## Task B-6.3: Suppress-Memory Routing
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/pipeline/rag_chain.py` — the pipeline to modify
+- Only the suppress_memory routing logic
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/pipeline/rag_chain.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1205
+
+### Dependencies
+
+Task 7.3 from query implementation (suppress_memory detection)
+
+### Implementation Steps
+
+**Step 1** — At the start of `rag_chain.run()`, after query processing, check `query_result.suppress_memory`:
+- If True: set `search_query = query_result.standalone_query`
+- Set `memory_context = None` and `memory_recent_turns = None` for generation
+- Skip fallback retrieval (standalone IS the primary)
+- Set `generation_source = "retrieval"`
+
+---
+
+## Task B-6.4: BLOCK/FLAG Memory Filtering (Caller Contract)
+
+### Agent Isolation Contract
+
+This is a caller-side contract, not a pipeline change. Document the contract for CLI/API implementors.
+
+### Target Files
+
+| File | Action |
+|---|---|
+| Caller code (CLI/API/server) | MODIFY (contract) |
+
+### Requirements Covered
+
+REQ-1207
+
+### Dependencies
+
+None
+
+### Implementation Steps
+
+**Step 1** — Document the caller contract: before calling `append_turn()`, check `response.post_guardrail_action`:
+- If action is "block" or "flag": display response to user, but skip `append_turn()` for the assistant turn.
+- Always store the user's turn.
+
+**Step 2** — This is a documentation + caller-side change. The pipeline itself does not change.
+
+---
+
+## Task B-6.5: Generation Source Tracking
+
+### Agent Isolation Contract
+
+You have access to:
+- `src/retrieval/common/schemas.py` — RAGResponse to modify
+- `src/retrieval/pipeline/rag_chain.py` — to set the field
+
+### Target Files
+
+| File | Action |
+|---|---|
+| `src/retrieval/common/schemas.py` | MODIFY |
+| `src/retrieval/pipeline/rag_chain.py` | MODIFY |
+
+### Requirements Covered
+
+REQ-1209
+
+### Dependencies
+
+Tasks 6.1, 6.2, 6.3
+
+### Implementation Steps
+
+**Step 1** — Add `generation_source: Optional[str] = None` to `RAGResponse` dataclass.
+
+**Step 2** — In `rag_chain.run()`, set the field based on routing path:
+- `"retrieval"`: standard retrieval generation (including suppress_memory path)
+- `"memory"`: memory-generation path
+- `"retrieval+memory"`: retrieval succeeded + has_backward_reference (hybrid)
+- `None`: generation skipped (BLOCK)
+
+**Step 3** — Include `generation_source` in the `RAGResponse` return.
 
 ---
 

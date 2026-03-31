@@ -2,6 +2,7 @@
  # Docling integration for ingestion parsing into markdown.
  # Exports: DoclingParseResult, warmup_docling_models, ensure_docling_ready, parse_with_docling
  # Deps: dataclasses, pathlib, typing
+ # vlm_mode="builtin" activates SmolVLM picture description at parse time via PdfPipelineOptions.
  # @end-summary
 """Docling integration for ingestion parsing.
 
@@ -12,9 +13,12 @@ and optional multimodal processing).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +31,10 @@ class DoclingParseResult:
         figures: Lightweight figure identifiers for telemetry/UI.
         headings: Extracted heading text in document order.
         parser_model: Parser model identifier used for telemetry/debugging.
+        docling_document: Native DoclingDocument object for HybridChunker.
+            When vlm_mode="builtin", figure descriptions are already embedded
+            in this document by Docling's picture description pipeline.
+            None only when produced by error recovery paths.
     """
 
     text_markdown: str
@@ -34,14 +42,17 @@ class DoclingParseResult:
     figures: list[str]
     headings: list[str]
     parser_model: str
+    docling_document: Any = None  # docling_core.types.doc.DoclingDocument
 
 
-def warmup_docling_models(*, artifacts_path: str = "") -> Path:
+def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = False) -> Path:
     """Download and validate core Docling models used by ingestion.
 
     Args:
         artifacts_path: Optional directory to store downloaded artifacts. When
             empty, Docling's default cache location is used.
+        with_smolvlm: If True, also download SmolVLM model artifacts.
+            Must be True when vlm_mode is "builtin".
 
     Returns:
         The resolved Docling model root directory.
@@ -73,7 +84,7 @@ def warmup_docling_models(*, artifacts_path: str = "") -> Path:
         with_tableformer_v2=False,
         with_code_formula=False,
         with_picture_classifier=False,
-        with_smolvlm=False,
+        with_smolvlm=with_smolvlm,
         with_granitedocling=False,
         with_granitedocling_mlx=False,
         with_smoldocling=False,
@@ -131,8 +142,7 @@ def ensure_docling_ready(
         artifacts = Path(prepared_artifacts_path)
         if not artifacts.exists() or not artifacts.is_dir():
             raise RuntimeError(f"Docling artifacts path is invalid: {prepared_artifacts_path}")
-        DocumentConverter(artifacts_path=str(artifacts))
-        return
+    # Smoke-test: verify DocumentConverter can be instantiated.
     DocumentConverter()
 
 
@@ -160,21 +170,35 @@ def parse_with_docling(
     *,
     parser_model: str,
     artifacts_path: str = "",
+    vlm_mode: str = "disabled",
 ) -> DoclingParseResult:
     """Parse a source document into markdown using local Docling runtime.
+
+    When vlm_mode="builtin", configures DocumentConverter to run SmolVLM on
+    figure images during conversion. Figure descriptions are baked into the
+    returned DoclingDocument — no post-chunking VLM step is required.
+
+    When vlm_mode="external" or vlm_mode="disabled", do_picture_description is
+    False (existing behavior). External VLM enrichment happens post-chunking via
+    vlm_enrichment_node.
 
     Args:
         source_path: Path to the source document to parse.
         parser_model: Parser model identifier used for telemetry/debugging.
         artifacts_path: Optional directory containing Docling artifacts.
+        vlm_mode: "builtin" activates Docling's SmolVLM picture description at
+            parse time. "external" and "disabled" leave do_picture_description=False.
 
     Returns:
-        A normalized `DoclingParseResult`.
+        A normalized `DoclingParseResult` with docling_document populated from
+        result.document.
 
     Raises:
         RuntimeError: If Docling is unavailable, conversion fails, or the output
             is empty/unsupported.
     """
+    import logging
+
     try:
         # Import lazily to keep module import cheap and explicit.
         from docling.document_converter import DocumentConverter
@@ -184,10 +208,41 @@ def parse_with_docling(
         ) from exc
 
     converter_kwargs: dict[str, Any] = {}
-    if artifacts_path:
-        converter_kwargs["artifacts_path"] = artifacts_path
+    # Note: artifacts_path is accepted for caller compat but no longer passed
+    # to DocumentConverter (removed in newer Docling versions). Model location
+    # is controlled by warmup_docling_models / HF cache.
 
-    converter = DocumentConverter(**converter_kwargs)
+    if vlm_mode == "builtin":
+        # Lazy import to keep module-level import cheap.
+        _builtin_vlm_configured = False
+        try:
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import (
+                PdfPipelineOptions,
+                PictureDescriptionVlmEngineOptions,
+            )
+            from docling.document_converter import PdfFormatOption
+
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.do_picture_description = True
+            pipeline_options.picture_description_options = (
+                PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
+            )
+            converter_kwargs["format_options"] = {
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+            _builtin_vlm_configured = True
+        except (ImportError, Exception) as exc:
+            logging.getLogger(__name__).warning(
+                "vlm_mode='builtin' requested but SmolVLM setup failed (%s); "
+                "proceeding without picture description.",
+                exc,
+            )
+        converter = DocumentConverter(**converter_kwargs)
+        _ = _builtin_vlm_configured  # noqa: F841 — reserved for telemetry
+    else:
+        converter = DocumentConverter(**converter_kwargs)
+
     try:
         result = converter.convert(str(source_path))
     except Exception as exc:
@@ -213,5 +268,6 @@ def parse_with_docling(
         figures=figures,
         headings=headings,
         parser_model=parser_model,
+        docling_document=document,
     )
 
