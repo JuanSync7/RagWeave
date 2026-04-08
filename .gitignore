@@ -54,3 +54,6 @@ models/
 certs/*
 !certs/.gitkeep
 !certs/README.md
+
+# Test runner ephemeral output
+.tmp-test-results/
