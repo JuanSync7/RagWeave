@@ -1,8 +1,10 @@
 # @summary
-# MinIO low-level helpers: bucket management, document put/get/delete/exists, presigned URLs, listing.
+# MinIO low-level helpers: bucket management, document put/get/delete/exists, presigned URLs, listing,
+# and page image storage/deletion for the visual embedding pipeline.
 # Exports: create_client, ensure_bucket, put_document, get_document,
-#          delete_document, document_exists, get_document_url, build_document_id, list_documents
-# Deps: minio, minio.error, json, io, uuid, datetime, config.settings, src.platform.observability
+#          delete_document, document_exists, get_document_url, build_document_id, list_documents,
+#          store_page_images, delete_page_images, get_page_image_url
+# Deps: minio, minio.error, json, io, uuid, datetime, config.settings, src.platform.observability, PIL
 # @end-summary
 """Low-level MinIO document store operations."""
 
@@ -229,3 +231,146 @@ def list_documents(
         })
     span.end(status="ok")
     return results[offset: offset + limit]
+
+
+def get_page_image_url(
+    client: Minio,
+    minio_key: str,
+    bucket: str = "",
+    expires_in_seconds: int = 0,
+) -> str:
+    """Generate a presigned GET URL for a page image object.
+
+    Unlike ``get_document_url()``, this function does NOT append any suffix
+    to the key. The ``minio_key`` is used as-is (e.g.,
+    ``pages/{document_id}/{page_number:04d}.jpg``).
+
+    If the object does not exist in MinIO, a presigned URL is still
+    generated (MinIO does not verify existence at signing time).
+
+    Args:
+        client: MinIO client handle.
+        minio_key: Full MinIO object key for the page image (FR-401).
+        bucket: Target bucket. Defaults to ``MINIO_BUCKET`` when empty
+            string or not provided (FR-403).
+        expires_in_seconds: URL expiry duration in seconds. Defaults to
+            ``RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS`` when 0 or not
+            provided (FR-403).
+
+    Returns:
+        Presigned GET URL string for the page image.
+    """
+    # FR-403: sentinel default resolution
+    if not bucket:
+        bucket = MINIO_BUCKET
+    if expires_in_seconds == 0:
+        from config.settings import RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS
+        expires_in_seconds = RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS
+
+    span = tracer.start_span(
+        "document_store.get_page_image_url",
+        {"minio_key": minio_key, "bucket": bucket},
+    )
+    # FR-401: raw key — no suffix appended
+    url = client.presigned_get_object(
+        bucket,
+        minio_key,
+        expires=timedelta(seconds=expires_in_seconds),
+    )
+    span.end(status="ok")
+    return url
+
+
+def store_page_images(
+    client: Minio,
+    document_id: str,
+    pages: list[tuple[int, object]],
+    quality: int = 85,
+    bucket: str = MINIO_BUCKET,
+) -> list[str]:
+    """Store page images as JPEG in MinIO.
+
+    Key pattern: pages/{document_id}/{page_number:04d}.jpg (FR-401)
+    JPEG compression at specified quality (FR-402).
+    Returns list of successfully stored MinIO keys (FR-403).
+
+    Per-page errors are isolated: one failed upload does not block the rest (FR-401).
+
+    Args:
+        client: MinIO client handle.
+        document_id: Unique document identifier.
+        pages: List of (1-indexed page_number, PIL.Image) tuples.
+        quality: JPEG compression quality 1-100. FR-402
+        bucket: Target bucket. Uses MINIO_BUCKET default if not provided.
+
+    Returns:
+        List of MinIO object keys that were successfully stored. FR-403
+    """
+    stored_keys: list[str] = []
+    for page_number, image in pages:
+        key = f"pages/{document_id}/{page_number:04d}.jpg"
+        try:
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=quality)  # type: ignore[union-attr]
+            # Determine buffer length then reset to start for upload
+            buffer.seek(0, 2)
+            length = buffer.tell()
+            buffer.seek(0)
+            client.put_object(
+                bucket,
+                key,
+                buffer,
+                length=length,
+                content_type="image/jpeg",
+            )
+            stored_keys.append(key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "store_page_images: failed to upload page %d for document %r: %s",
+                page_number,
+                document_id,
+                exc,
+            )
+    return stored_keys
+
+
+def delete_page_images(
+    client: Minio,
+    document_id: str,
+    bucket: str = MINIO_BUCKET,
+) -> int:
+    """Delete all page images for a document from MinIO.
+
+    Deletes all objects matching prefix pages/{document_id}/ (FR-404).
+    Used for pre-storage cleanup in update mode (FR-405).
+
+    Args:
+        client: MinIO client handle.
+        document_id: Unique document identifier.
+        bucket: Target bucket. Uses MINIO_BUCKET default if not provided.
+
+    Returns:
+        Number of objects deleted.
+    """
+    prefix = f"pages/{document_id}/"
+    deleted = 0
+    try:
+        for obj in client.list_objects(bucket, prefix=prefix, recursive=True):
+            try:
+                client.remove_object(bucket, obj.object_name)
+                deleted += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "delete_page_images: failed to delete %r for document %r: %s",
+                    obj.object_name,
+                    document_id,
+                    exc,
+                )
+                return deleted
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "delete_page_images: failed to list objects for document %r: %s",
+            document_id,
+            exc,
+        )
+    return deleted

@@ -1,12 +1,14 @@
 # @summary
 # Public API for the vector_db subsystem: config-driven backend dispatcher,
-# single-collection search, multi-collection fan-out, aggregation, and re-exported schemas.
+# single-collection search, multi-collection fan-out, aggregation, re-exported schemas,
+# and visual collection operations for the visual embedding pipeline.
 # Exports: create_persistent_client, get_client, close_client, ensure_collection,
 #          delete_collection, add_documents, delete_by_source, delete_by_source_key,
 #          search, multi_search, aggregate_by_source, get_collection_stats, list_collections,
-#          DocumentRecord, SearchResult, SearchFilter, build_chunk_id
+#          ensure_visual_collection, add_visual_documents, delete_visual_by_source_key,
+#          search_visual, DocumentRecord, SearchResult, SearchFilter, build_chunk_id
 # Deps: config.settings, src.vector_db.backend, src.vector_db.common.schemas,
-#       src.vector_db.weaviate.store
+#       src.vector_db.weaviate.store, src.vector_db.weaviate.visual_store
 # @end-summary
 """Public API for the vector_db subsystem used by the ingestion and retrieval pipelines.
 
@@ -30,6 +32,11 @@ from typing import Any, Generator, List, Optional
 from src.vector_db.backend import VectorBackend
 from src.vector_db.common.schemas import DocumentRecord, SearchResult, SearchFilter
 from src.vector_db.weaviate.store import build_chunk_id
+from src.vector_db.weaviate.visual_store import (
+    ensure_visual_collection as _vs_ensure_visual_collection,
+    add_visual_documents as _vs_add_visual_documents,
+    delete_visual_by_source_key as _vs_delete_visual_by_source_key,
+)
 
 logger = logging.getLogger("rag.vector_db")
 
@@ -311,6 +318,94 @@ def list_collections(client: Any) -> list[dict]:
     return _get_vector_backend().list_collections(client)
 
 
+# ---------------------------------------------------------------------------
+# Visual collection operations (FR-501, FR-502, FR-506, FR-507)
+# ---------------------------------------------------------------------------
+
+def ensure_visual_collection(
+    client: Any,
+    collection: Optional[str] = None,
+) -> None:
+    """Create the visual page collection if it does not exist (idempotent).
+
+    Delegates to the backend implementation. When ``collection`` is ``None``,
+    uses the backend default (``RAGVisualPages``).
+
+    Args:
+        client: Vector store client handle.
+        collection: Visual collection name. ``None`` uses the default.
+    """
+    _get_vector_backend().ensure_visual_collection(client, collection)
+
+
+def add_visual_documents(
+    client: Any,
+    documents: List[dict[str, Any]],
+    collection: Optional[str] = None,
+) -> int:
+    """Batch-insert visual page objects into the visual collection.
+
+    Args:
+        client: Vector store client handle.
+        documents: List of visual page object dicts, each containing all
+            FR-503 properties plus a ``mean_vector`` (128-dim list[float]).
+        collection: Visual collection name. ``None`` uses the default.
+
+    Returns:
+        Number of objects inserted.
+    """
+    return _get_vector_backend().add_visual_documents(client, documents, collection)
+
+
+def delete_visual_by_source_key(
+    client: Any,
+    source_key: str,
+    collection: Optional[str] = None,
+) -> int:
+    """Delete all visual page objects matching the given source_key.
+
+    Args:
+        client: Vector store client handle.
+        source_key: Stable source key to match.
+        collection: Visual collection name. ``None`` uses the default.
+
+    Returns:
+        Number of objects deleted.
+    """
+    return _get_vector_backend().delete_visual_by_source_key(
+        client, source_key, collection
+    )
+
+
+def search_visual(
+    client: Any,
+    query_vector: list[float],
+    limit: int,
+    score_threshold: float,
+    tenant_id: Optional[str] = None,
+    collection: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Search the visual page collection by near-vector similarity. FR-313
+
+    Delegates to the backend implementation. When ``collection`` is ``None``,
+    uses the backend default (``RAGVisualPages``).
+
+    Args:
+        client: Vector store client handle.
+        query_vector: 128-dim float query vector.
+        limit: Maximum number of results.
+        score_threshold: Minimum cosine similarity threshold.
+        tenant_id: Optional tenant filter.
+        collection: Visual collection name. ``None`` uses the default.
+
+    Returns:
+        List of visual page result dicts ordered by descending score.
+    """
+    return _get_vector_backend().search_visual(
+        client, query_vector, limit, score_threshold, tenant_id, collection
+    )
+
+
 __all__ = [
     # Client lifecycle
     "create_persistent_client",
@@ -330,6 +425,11 @@ __all__ = [
     "aggregate_by_source",
     "get_collection_stats",
     "list_collections",
+    # Visual collection operations (FR-502, FR-506, FR-507, FR-313)
+    "ensure_visual_collection",
+    "add_visual_documents",
+    "delete_visual_by_source_key",
+    "search_visual",
     # Re-exported schemas
     "DocumentRecord",
     "SearchResult",

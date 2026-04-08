@@ -31,7 +31,7 @@ from config.settings import (
     HYBRID_SEARCH_ALPHA,
     SEARCH_LIMIT,
 )
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.vector_db.weaviate.store")
 tracer = get_tracer()

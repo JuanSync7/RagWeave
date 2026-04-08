@@ -2,6 +2,8 @@
 # VectorBackend ABC: formal swappable backend contract for all vector store implementations.
 # Exports: VectorBackend
 # Deps: abc, contextlib, typing, src.vector_db.common.schemas
+# Visual collection methods: ensure_visual_collection, add_visual_documents,
+#   delete_visual_by_source_key, search_visual (FR-502, FR-506, FR-507, FR-313, NFR-909)
 # @end-summary
 """VectorBackend — abstract base class for all vector store backends.
 
@@ -148,6 +150,70 @@ class VectorBackend(ABC):
     @abstractmethod
     def list_collections(self, client: Any) -> list[dict]:
         """Return all collections with their chunk counts."""
+        ...
+
+    # -- Visual collection operations (FR-501, FR-502, FR-506, FR-507, NFR-909) --
+
+    @abstractmethod
+    def ensure_visual_collection(
+        self,
+        client: Any,
+        collection: Optional[str] = None,
+    ) -> None:
+        """Create the visual collection if it does not exist (idempotent). FR-502"""
+        ...
+
+    @abstractmethod
+    def add_visual_documents(
+        self,
+        client: Any,
+        documents: List[dict[str, Any]],
+        collection: Optional[str] = None,
+    ) -> int:
+        """Batch-insert visual page objects. FR-507
+
+        Returns:
+            Number of objects inserted.
+        """
+        ...
+
+    @abstractmethod
+    def delete_visual_by_source_key(
+        self,
+        client: Any,
+        source_key: str,
+        collection: Optional[str] = None,
+    ) -> int:
+        """Delete all visual page objects matching source_key. FR-506
+
+        Returns:
+            Number of objects deleted.
+        """
+        ...
+
+    @abstractmethod
+    def search_visual(
+        self,
+        client: Any,
+        query_vector: list[float],
+        limit: int,
+        score_threshold: float,
+        tenant_id: Optional[str] = None,
+        collection: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Search the visual page collection by near-vector similarity. FR-313
+
+        Args:
+            client: Backend client handle.
+            query_vector: 128-dim float query vector.
+            limit: Maximum number of results.
+            score_threshold: Minimum cosine similarity threshold.
+            tenant_id: Optional tenant filter.
+            collection: Visual collection name. None uses default.
+
+        Returns:
+            List of visual page result dicts ordered by descending score.
+        """
         ...
 
     def close_client(self, client: Any) -> None:

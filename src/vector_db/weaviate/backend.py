@@ -1,7 +1,11 @@
 # @summary
-# WeaviateBackend: VectorBackend implementation delegating to src.vector_db.weaviate.store.
+# WeaviateBackend: VectorBackend implementation delegating to src.vector_db.weaviate.store
+# and src.vector_db.weaviate.visual_store for visual collection operations.
 # Exports: WeaviateBackend
-# Deps: src.vector_db.backend, src.vector_db.common.schemas, src.vector_db.weaviate.store, weaviate
+# Deps: src.vector_db.backend, src.vector_db.common.schemas, src.vector_db.weaviate.store,
+#       src.vector_db.weaviate.visual_store, weaviate
+# Visual methods: ensure_visual_collection, add_visual_documents,
+#   delete_visual_by_source_key, search_visual (FR-502, FR-506, FR-507, FR-313)
 # @end-summary
 """Weaviate implementation of the VectorBackend contract.
 
@@ -30,6 +34,12 @@ from src.vector_db.weaviate.store import (
     aggregate_by_source as _wv_aggregate_by_source,
     get_collection_stats as _wv_get_collection_stats,
     list_collections as _wv_list_collections,
+)
+from src.vector_db.weaviate.visual_store import (
+    ensure_visual_collection as _wv_ensure_visual_collection,
+    add_visual_documents as _wv_add_visual_documents,
+    delete_visual_by_source_key as _wv_delete_visual_by_source_key,
+    visual_search as _wv_visual_search,
 )
 from config.settings import WEAVIATE_COLLECTION_NAME
 
@@ -133,6 +143,59 @@ class WeaviateBackend(VectorBackend):
 
     def list_collections(self, client: Any) -> list[dict]:
         return _wv_list_collections(client)
+
+    # ------------------------------------------------------------------
+    # Visual collection operations (FR-501, FR-502, FR-506, FR-507)
+    # ------------------------------------------------------------------
+
+    _VISUAL_COLLECTION_DEFAULT = "RAGVisualPages"
+
+    def ensure_visual_collection(
+        self,
+        client: Any,
+        collection: Optional[str] = None,
+    ) -> None:
+        _wv_ensure_visual_collection(
+            client, collection or self._VISUAL_COLLECTION_DEFAULT
+        )
+
+    def add_visual_documents(
+        self,
+        client: Any,
+        documents: List[dict[str, Any]],
+        collection: Optional[str] = None,
+    ) -> int:
+        return _wv_add_visual_documents(
+            client, documents, collection or self._VISUAL_COLLECTION_DEFAULT
+        )
+
+    def delete_visual_by_source_key(
+        self,
+        client: Any,
+        source_key: str,
+        collection: Optional[str] = None,
+    ) -> int:
+        return _wv_delete_visual_by_source_key(
+            client, source_key, collection or self._VISUAL_COLLECTION_DEFAULT
+        )
+
+    def search_visual(
+        self,
+        client: Any,
+        query_vector: list[float],
+        limit: int,
+        score_threshold: float,
+        tenant_id: Optional[str] = None,
+        collection: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        return _wv_visual_search(
+            client,
+            query_vector,
+            limit,
+            score_threshold,
+            tenant_id,
+            collection or self._VISUAL_COLLECTION_DEFAULT,
+        )
 
     def close_client(self, client: Any) -> None:
         if client is not None:
