@@ -435,7 +435,7 @@ Expected: `HTTP/1.1 301 Moved Permanently` with `Location: https://aion.local/`
 - [ ] **Step 7: Verify web console loads**
 
 Open `https://aion.local/console` in a browser.
-Expected: Aion Chat UI loads with no browser security warnings (if mkcert root CA is trusted).
+Expected: RagWeave UI loads with no browser security warnings (if mkcert root CA is trusted).
 
 - [ ] **Step 8: Verify nginx container health**
 

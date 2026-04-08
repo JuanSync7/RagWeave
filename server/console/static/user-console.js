@@ -1,5 +1,5 @@
 // @summary
-// User Console application logic for Aion Chat.
+// User Console application logic for RagWeave.
 // Handles sidebar navigation, chat thread interaction, real SSE streaming,
 // conversation management, dynamic slash commands, settings, and context indicator.
 // Deps: marked (ES module import), DOMPurify (ES module import), /query/stream, /console/* API endpoints
@@ -772,8 +772,8 @@ document.addEventListener("DOMContentLoaded", () => {
             await api("DELETE", `/console/conversations/${id}`);
             if (activeConversationId === id) {
                 setActiveConversation(null);
-                thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#9670;</div><div class="thread-empty-title">Aion Chat</div><div class="thread-empty-sub">Ask anything — I'll search your knowledge base and generate a response with sources.</div></div>`;
-                byId("convTitle").textContent = "Aion Chat";
+                thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#9670;</div><div class="thread-empty-title">RagWeave</div><div class="thread-empty-sub">Ask anything — I'll search your knowledge base and generate a response with sources.</div></div>`;
+                byId("convTitle").textContent = "RagWeave";
             }
             await loadConversations();
             showToast("Conversation deleted");
