@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rag"
+name = "ragweave"
 version = "0.1.0"
-description = "Local RAG pipeline with idempotent ingestion and swappable reliability/observability."
+description = "Multi-modal RAG platform with pipeline-first ingestion, visual+text embeddings, and graph-based orchestration."
 requires-python = ">=3.10"
 dependencies = [
   "weaviate-client",
@@ -40,6 +40,8 @@ dependencies = [
 dev = [
   "pytest",
   "pytest-mock",
+  "pytest-json-report>=1.5.0",
+  "pytest-timeout>=2.2.0",
   "deptry",
 ]
 pii = [
@@ -59,12 +61,17 @@ pinecone = [
 qdrant = [
   "qdrant-client",
 ]
+visual = [
+  "colpali-engine>=0.3.0",
+  "bitsandbytes>=0.43.0",
+]
 all = [
-  "rag[pii]",
-  "rag[gliner]",
-  "rag[chromadb]",
-  "rag[pinecone]",
-  "rag[qdrant]",
+  "ragweave[pii]",
+  "ragweave[gliner]",
+  "ragweave[chromadb]",
+  "ragweave[pinecone]",
+  "ragweave[qdrant]",
+  "ragweave[visual]",
 ]
 
 [tool.deptry]
