@@ -3,7 +3,8 @@
 # Exports: QueryRequest, QueryResponse, ChunkResult, HealthResponse,
 #          DocumentSummary, DocumentListResponse, DocumentDetailResponse,
 #          DocumentUrlResponse, SourceSummary, SourceListResponse,
-#          CollectionItem, CollectionStatsResponse, CollectionListResponse
+#          CollectionItem, CollectionStatsResponse, CollectionListResponse,
+#          VisualPageResultResponse
 # Deps: pydantic
 # @end-summary
 """Pydantic models for RAG API request/response serialization."""
@@ -79,6 +80,7 @@ class QueryRequest(BaseModel):
             "hybrid_search",
             "reranking",
             "generation",
+            "visual_retrieval",
         }
         for stage, budget_ms in self.stage_budget_overrides.items():
             if stage not in allowed:
@@ -97,6 +99,24 @@ class ChunkResult(BaseModel):
     text: str
     score: float
     metadata: dict
+
+
+class VisualPageResultResponse(BaseModel):
+    """A single visual page retrieval result for API serialization.
+
+    Maps 1:1 from the ``VisualPageResult`` dataclass in the retrieval
+    schemas module. Included in the OpenAPI schema.
+    """
+
+    document_id: str            # FR-701
+    page_number: int            # FR-701
+    source_key: str             # FR-701
+    source_name: str            # FR-701
+    score: float                # FR-701 -- cosine similarity 0.0-1.0
+    page_image_url: str         # FR-701 -- presigned MinIO URL
+    total_pages: int            # FR-701
+    page_width_px: int          # FR-701
+    page_height_px: int         # FR-701
 
 
 class TokenBudgetResponse(BaseModel):
@@ -132,6 +152,7 @@ class QueryResponse(BaseModel):
     timing_totals: dict = Field(default_factory=dict)
     budget_exhausted: bool = False
     budget_exhausted_stage: Optional[str] = None
+    visual_results: Optional[list[VisualPageResultResponse]] = None  # FR-703
     conversation_id: Optional[str] = None
     token_budget: Optional[TokenBudgetResponse] = None
 

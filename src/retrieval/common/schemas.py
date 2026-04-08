@@ -1,6 +1,6 @@
 # @summary
 # Pipeline boundary contracts: input/output schemas and the cross-cutting wire type.
-# Exports: RAGRequest, RAGResponse, RankedResult
+# Exports: RAGRequest, RAGResponse, RankedResult, VisualPageResult
 # Deps: dataclasses, typing
 # @end-summary
 """Pipeline-level schema contracts — what enters and exits the RAG pipeline."""
@@ -24,6 +24,25 @@ class RankedResult:
     text: str
     score: float
     metadata: dict
+
+
+@dataclass
+class VisualPageResult:
+    """A single visual page retrieval result with its similarity score.
+
+    Represents a document page matched by ColQwen2 visual embedding search,
+    with a presigned MinIO URL for direct image access.
+    """
+
+    document_id: str          # Document identifier (FR-501)
+    page_number: int          # 1-indexed page number (FR-501)
+    source_key: str           # Stable source key for traceability (FR-501)
+    source_name: str          # Human-readable source name (FR-501)
+    score: float              # Cosine similarity 0.0-1.0 (FR-501)
+    page_image_url: str       # Presigned MinIO URL (FR-501, FR-607)
+    total_pages: int          # Total pages in source document (FR-501)
+    page_width_px: int        # Page image width in pixels (FR-501)
+    page_height_px: int       # Page image height in pixels (FR-501)
 
 
 @dataclass
@@ -80,5 +99,6 @@ class RAGResponse:
     retrieval_quality_note: Optional[str] = None
     re_retrieval_suggested: bool = False
     re_retrieval_params: Optional[Dict[str, Any]] = None
+    visual_results: Optional[List["VisualPageResult"]] = None  # FR-503
     generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
     llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)

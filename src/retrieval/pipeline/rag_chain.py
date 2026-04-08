@@ -1,5 +1,6 @@
 # @summary
-# End-to-end RAG pipeline for query processing, KG expansion, hybrid search, reranking, and LLM generation.
+# End-to-end RAG pipeline for query processing, KG expansion, hybrid search, reranking,
+# visual retrieval, and LLM generation.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -31,7 +32,7 @@ from src.platform.validation import (
     validate_positive_int,
 )
 from src.retrieval.query.schemas import QueryAction, QueryResult
-from src.retrieval.common.schemas import RAGRequest, RAGResponse, RankedResult
+from src.retrieval.common.schemas import RAGRequest, RAGResponse, RankedResult, VisualPageResult
 from src.platform.token_budget import calculate_budget, get_capabilities, TokenBudgetSnapshot
 from src.retrieval.generation.nodes.generator import _get_system_prompt as _get_gen_system_prompt
 from config.settings import (
@@ -74,6 +75,8 @@ from config.settings import (
     RAG_CONFIDENCE_CITATION_WEIGHT,
     RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES,
     RAG_DOCUMENT_FORMATTING_ENABLED,
+    RAG_VISUAL_RETRIEVAL_ENABLED,
+    RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS,
 )
 
 logger = logging.getLogger("rag.rag_chain")
@@ -160,10 +163,19 @@ class RAGChain:
         if GUARDRAIL_BACKEND:
             self._init_guardrails()
 
+        # FR-603, FR-615: Visual retrieval lazy-loading attributes
+        self._visual_retrieval_enabled = RAG_VISUAL_RETRIEVAL_ENABLED
+        self._visual_model = None
+        self._visual_processor = None
+        if self._visual_retrieval_enabled:
+            from config.settings import validate_visual_retrieval_config
+            validate_visual_retrieval_config()  # FR-111: fail fast on bad config
+            logger.info("Visual retrieval enabled — model will be loaded on first visual query.")
+
         logger.info("RAG chain ready.")
 
     def close(self) -> None:
-        """Release persistent resources (database connection)."""
+        """Release persistent resources (database connection, visual model)."""
         if self._weaviate_client is not None:
             try:
                 close_client(self._weaviate_client)
@@ -172,12 +184,131 @@ class RAGChain:
             self._weaviate_client = None
             logger.info("Database connection closed.")
 
+        # FR-613: unload visual model if loaded
+        if self._visual_model is not None:
+            try:
+                from src.ingest.support.colqwen import unload_colqwen_model
+                unload_colqwen_model(self._visual_model)
+                logger.info("ColQwen2 visual model unloaded.")
+            except Exception as e:
+                logger.warning("Error unloading visual model: %s", e)
+            self._visual_model = None
+            self._visual_processor = None
+
     def _init_guardrails(self) -> None:
         """Initialize the guardrail backend and merge gate."""
         logger.info("Initializing guardrails backend (backend=%r)...", GUARDRAIL_BACKEND)
         self._guardrails_merge_gate = RailMergeGate()
         register_rag_chain(self)
         logger.info("Guardrails backend initialized.")
+
+    def _ensure_visual_model(self) -> None:
+        """Lazy-load ColQwen2 model on first visual query. FR-603
+
+        Imports are deferred to keep visual dependencies out of the text-only path.
+        """
+        if self._visual_model is not None:
+            return  # warm path
+
+        with self.tracer.span("visual_retrieval.model_load"):
+            from src.ingest.support.colqwen import (
+                ensure_colqwen_ready,
+                load_colqwen_model,
+            )
+            from config.settings import RAG_INGESTION_COLQWEN_MODEL
+
+            logger.info("Loading ColQwen2 model for visual retrieval (cold start)...")
+            ensure_colqwen_ready()
+            self._visual_model, self._visual_processor = load_colqwen_model(
+                RAG_INGESTION_COLQWEN_MODEL
+            )
+            logger.info("ColQwen2 model loaded for visual retrieval.")
+
+    def _run_visual_retrieval(
+        self, processed_query: str, tenant_id: Optional[str]
+    ) -> List[VisualPageResult]:
+        """Execute the visual retrieval track. FR-601, FR-605, FR-607, FR-609
+
+        Encodes the processed query via ColQwen2, searches the visual collection,
+        generates presigned URLs for matched pages, and returns visual results.
+
+        Args:
+            processed_query: The processed (reformulated) query text.
+            tenant_id: Optional tenant filter.
+
+        Returns:
+            List of VisualPageResult objects.
+        """
+        from config.settings import (
+            RAG_VISUAL_RETRIEVAL_LIMIT,
+            RAG_VISUAL_RETRIEVAL_MIN_SCORE,
+        )
+
+        # FR-603: ensure model is loaded
+        self._ensure_visual_model()
+
+        # FR-605: encode text query (uses processed query, not raw)
+        from src.ingest.support.colqwen import embed_text_query
+
+        with self.tracer.span("visual_retrieval.text_encode"):
+            query_vector = embed_text_query(
+                self._visual_model, self._visual_processor, processed_query
+            )
+        logger.debug(
+            "Visual query vector: %d dimensions", len(query_vector)
+        )
+
+        # FR-609: search visual collection
+        from src.vector_db import search_visual
+
+        with self.tracer.span("visual_retrieval.search") as vs_span:
+            page_records = search_visual(
+                client=self._weaviate_client,
+                query_vector=query_vector,
+                limit=RAG_VISUAL_RETRIEVAL_LIMIT,
+                score_threshold=RAG_VISUAL_RETRIEVAL_MIN_SCORE,
+                tenant_id=tenant_id,
+            )
+            vs_span.set_attribute("result_count", len(page_records))
+
+        # FR-607: generate presigned URLs per result (per-page isolation — NFR-905)
+        from src.db.minio.store import get_page_image_url, create_client as create_minio_client
+
+        results: List[VisualPageResult] = []
+        with self.tracer.span("visual_retrieval.presigned_urls"):
+            minio_client = create_minio_client()
+            for record in page_records:
+                try:
+                    url = get_page_image_url(
+                        minio_client,
+                        minio_key=record["minio_key"],
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to generate presigned URL for page %s/%d: %s — skipping page.",
+                        record.get("document_id", "?"),
+                        record.get("page_number", 0),
+                        exc,
+                    )
+                    continue
+
+                results.append(VisualPageResult(
+                    document_id=record["document_id"],
+                    page_number=record["page_number"],
+                    source_key=record["source_key"],
+                    source_name=record["source_name"],
+                    score=record["score"],
+                    page_image_url=url,
+                    total_pages=record["total_pages"],
+                    page_width_px=record["page_width_px"],
+                    page_height_px=record["page_height_px"],
+                ))
+
+        if results:
+            score_range = f"{results[-1].score:.3f}-{results[0].score:.3f}"
+            logger.debug("Visual results score range: %s", score_range)
+        logger.info("Visual retrieval returned %d results.", len(results))
+        return results
 
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
         """Run hybrid search against the database layer (persistent or transient client)."""
@@ -267,6 +398,7 @@ class RAGChain:
             "hybrid_search": int(stage_budget_overrides.get("hybrid_search", RAG_STAGE_BUDGET_HYBRID_SEARCH_MS)),
             "reranking": int(stage_budget_overrides.get("reranking", RAG_STAGE_BUDGET_RERANKING_MS)),
             "generation": int(stage_budget_overrides.get("generation", RAG_STAGE_BUDGET_GENERATION_MS)),
+            "visual_retrieval": int(stage_budget_overrides.get("visual_retrieval", RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS)),
         }
         tp = TimingPool(
             overall_budget_ms=float(overall_timeout_ms),
@@ -700,6 +832,25 @@ class RAGChain:
                                 )
                 tp.record("fallback_retrieval", "retrieval", started_at=t0)
 
+            # Stage 5.4: Visual retrieval (FR-601, FR-615, NFR-905)
+            visual_results = None  # None = disabled semantics
+            if self._visual_retrieval_enabled:
+                t0 = time.perf_counter()
+                with self.tracer.span("rag_chain.visual_retrieval", parent=root_span) as vr_span:
+                    try:
+                        visual_results = self._run_visual_retrieval(
+                            processed_query, tenant_id
+                        )
+                        vr_span.set_attribute("visual_result_count", len(visual_results))
+                    except Exception as exc:
+                        logger.warning(
+                            "Visual retrieval failed (non-fatal): %s — continuing without visual results.",
+                            exc,
+                        )
+                        visual_results = []  # enabled-but-failed semantics
+                        vr_span.set_attribute("visual_error", str(exc))
+                tp.record("visual_retrieval", "retrieval", started_at=t0)
+
             # Stage 5.5: Document formatting (REQ-501–REQ-503)
             version_conflicts = []
             formatted_context_str = None
@@ -1042,6 +1193,7 @@ class RAGChain:
                 retrieval_quality_note=retrieval_quality_note,
                 re_retrieval_suggested=re_retrieval_suggested if RAG_CONFIDENCE_ROUTING_ENABLED else False,
                 re_retrieval_params=re_retrieval_params,
+                visual_results=visual_results,
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
             )
