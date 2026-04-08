@@ -12,7 +12,7 @@ from langchain_core.embeddings import Embeddings
 from sentence_transformers import SentenceTransformer
 
 from config.settings import EMBEDDING_MODEL_PATH
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 
 
 class LocalBGEEmbeddings(Embeddings):

@@ -4,7 +4,8 @@
 # Deps: src.ingest.common.types, src.ingest.common.schemas
 # Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
 #   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
-#   stored_count, errors, processing_log, docling_document (Optional[Any])
+#   stored_count, errors, processing_log, docling_document (Optional[Any]),
+#   visual_stored_count (int, FR-602), page_images (Optional[List[Any]], FR-602)
 # @end-summary
 
 """State contract for the Embedding Pipeline (Phase 2, nodes 6–13)."""
@@ -96,3 +97,7 @@ class EmbeddingPipelineState(TypedDict, total=False):
     Phase 2 initialization. None if no .docling.json was stored (fallback
     path). Read by chunking_node to select HybridChunker vs markdown path.
     """
+
+    # -- Visual embedding extensions (FR-602) --
+    visual_stored_count: int  # FR-602: number of visual page objects stored; default 0
+    page_images: Optional[List[Any]]  # FR-602: PIL.Image objects; cleared after node (FR-606)

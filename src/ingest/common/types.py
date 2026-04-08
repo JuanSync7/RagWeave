@@ -2,8 +2,12 @@
 # Shared ingestion pipeline dataclasses, typed state schema, runtime container, and node-name registry.
 # Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, IngestState, PIPELINE_NODE_NAMES
 # Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
-# IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool)
+# IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool),
+#   enable_visual_embedding (bool), visual_target_collection (str), colqwen_model_name (str),
+#   colqwen_batch_size (int), page_image_quality (int), page_image_max_dimension (int)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
+# PIPELINE_NODE_NAMES includes "visual_embedding" between "embedding_storage" and "knowledge_graph_storage" (FR-604)
+# IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
 # @end-summary
 
 """Shared ingestion pipeline types, configuration, and state contracts.
@@ -59,6 +63,12 @@ from config.settings import (
     RAG_INGESTION_VLM_MODE,
     RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS,
     RAG_INGESTION_PERSIST_DOCLING_DOCUMENT,
+    RAG_INGESTION_ENABLE_VISUAL_EMBEDDING,
+    RAG_INGESTION_VISUAL_TARGET_COLLECTION,
+    RAG_INGESTION_COLQWEN_MODEL,
+    RAG_INGESTION_COLQWEN_BATCH_SIZE,
+    RAG_INGESTION_PAGE_IMAGE_QUALITY,
+    RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
 )
 from src.core.embeddings import LocalBGEEmbeddings
 from src.core.knowledge_graph import KnowledgeGraphBuilder
@@ -78,6 +88,7 @@ PIPELINE_NODE_NAMES = [
     "knowledge_graph_extraction",
     "quality_validation",
     "embedding_storage",
+    "visual_embedding",
     "knowledge_graph_storage",
 ]
 
@@ -156,6 +167,25 @@ class IngestionConfig:
     persist_docling_document: bool = RAG_INGESTION_PERSIST_DOCLING_DOCUMENT
     """If True, persist DoclingDocument JSON to CleanDocumentStore. Default: True."""
 
+    # -- Visual embedding pipeline (FR-101 through FR-109) --
+    enable_visual_embedding: bool = RAG_INGESTION_ENABLE_VISUAL_EMBEDDING
+    """Enable dual-track visual embedding pipeline. Default: False. FR-101"""
+    visual_target_collection: str = RAG_INGESTION_VISUAL_TARGET_COLLECTION
+    """Weaviate collection name for visual page objects. Default: 'RAGVisualPages'. FR-102"""
+    colqwen_model_name: str = RAG_INGESTION_COLQWEN_MODEL
+    """ColQwen2 model identifier for visual embedding. Default: 'vidore/colqwen2-v1.0'. FR-103"""
+    colqwen_batch_size: int = RAG_INGESTION_COLQWEN_BATCH_SIZE
+    """Batch size for ColQwen2 inference. Range: 1-32. Default: 4. FR-104"""
+    page_image_quality: int = RAG_INGESTION_PAGE_IMAGE_QUALITY
+    """JPEG compression quality for page images. Range: 1-100. Default: 85. FR-105"""
+    page_image_max_dimension: int = RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION
+    """Max pixel dimension (longer edge) for page images. Range: 256-4096. Default: 1024. FR-106"""
+
+    @property
+    def generate_page_images(self) -> bool:
+        """Derived flag: True when visual embedding is enabled. FR-107"""
+        return self.enable_visual_embedding
+
 
 @dataclass
 class IngestionDesignCheck:
@@ -191,6 +221,8 @@ class IngestFileResult:
     processing_log: list[str]
     source_hash: str
     clean_hash: str
+    # -- Visual embedding extension (FR-605) --
+    visual_stored_count: int = 0  # FR-605: number of visual page objects stored
 
 
 @dataclass

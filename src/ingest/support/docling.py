@@ -3,6 +3,8 @@
  # Exports: DoclingParseResult, warmup_docling_models, ensure_docling_ready, parse_with_docling
  # Deps: dataclasses, pathlib, typing
  # vlm_mode="builtin" activates SmolVLM picture description at parse time via PdfPipelineOptions.
+ # generate_page_images=True extracts PIL.Image (RGB) page images from the converted document.
+ # page_count reflects total pages in source; page_images is empty on extraction failure (no error raised).
  # @end-summary
 """Docling integration for ingestion parsing.
 
@@ -14,7 +16,7 @@ and optional multimodal processing).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,8 @@ class DoclingParseResult:
             When vlm_mode="builtin", figure descriptions are already embedded
             in this document by Docling's picture description pipeline.
             None only when produced by error recovery paths.
+        page_images: List of PIL.Image objects, one per extracted page. FR-201, FR-204
+        page_count: Total number of pages in the source document. FR-205
     """
 
     text_markdown: str
@@ -43,6 +47,10 @@ class DoclingParseResult:
     headings: list[str]
     parser_model: str
     docling_document: Any = None  # docling_core.types.doc.DoclingDocument
+    page_images: list[Any] = field(default_factory=list)
+    """List of PIL.Image objects, one per extracted page. FR-201, FR-204"""
+    page_count: int = 0
+    """Total number of pages in the source document. FR-205"""
 
 
 def warmup_docling_models(*, artifacts_path: str = "", with_smolvlm: bool = False) -> Path:
@@ -165,12 +173,92 @@ def _extract_headings_from_markdown(text: str) -> list[str]:
     return headings
 
 
+def _extract_page_images_from_result(conv_result: Any) -> tuple[list[Any], int]:
+    """Extract PIL.Image (RGB) page images from a Docling ConversionResult.
+
+    Tries multiple access patterns to accommodate different Docling versions:
+    1. ``conv_result.pages`` — ConversionResult page list with image attached.
+    2. ``conv_result.document.pages`` — DoclingDocument pages dict/list.
+
+    Each page image is converted to RGB to normalise colour space (FR-204).
+    ``page_count`` reflects total pages regardless of partial extraction
+    failures (FR-205).
+
+    Args:
+        conv_result: A Docling ``ConversionResult`` object returned by
+            ``DocumentConverter.convert()``.
+
+    Returns:
+        A ``(page_images, page_count)`` tuple.  ``page_images`` is an empty
+        list when extraction fails entirely; individual missing pages are
+        silently skipped.
+    """
+    page_images: list[Any] = []
+    page_count: int = 0
+
+    # --- Strategy 1: ConversionResult.pages (preferred, richer API) ----------
+    conv_pages = getattr(conv_result, "pages", None)
+    if conv_pages is not None:
+        pages_iter = conv_pages.values() if hasattr(conv_pages, "values") else conv_pages
+        pages_list = list(pages_iter)
+        page_count = len(pages_list)
+        for page in pages_list:
+            try:
+                img = None
+                # Try .image.pil_image (newer Docling page image API)
+                page_image_obj = getattr(page, "image", None)
+                if page_image_obj is not None:
+                    img = getattr(page_image_obj, "pil_image", None)
+                # Fallback: page.get_image() callable
+                if img is None and callable(getattr(page, "get_image", None)):
+                    img = page.get_image()
+                if img is not None:
+                    page_images.append(img.convert("RGB"))
+                else:
+                    logger.warning("Page has no extractable image; skipping.")
+            except Exception as exc:
+                # Skip individual page; do not block the pipeline.
+                logger.warning("Failed to extract image from page: %s — skipping.", exc)
+        if page_count > 0:
+            return page_images, page_count
+
+    # --- Strategy 2: DoclingDocument.pages -----------------------------------
+    document = getattr(conv_result, "document", None)
+    if document is None:
+        return page_images, page_count
+
+    doc_pages = getattr(document, "pages", None)
+    if doc_pages is None:
+        return page_images, page_count
+
+    pages_iter = doc_pages.values() if hasattr(doc_pages, "values") else doc_pages
+    pages_list = list(pages_iter)
+    page_count = len(pages_list)
+    for page in pages_list:
+        try:
+            img = None
+            page_image_obj = getattr(page, "image", None)
+            if page_image_obj is not None:
+                img = getattr(page_image_obj, "pil_image", None)
+            if img is None and callable(getattr(page, "get_image", None)):
+                img = page.get_image()
+            if img is not None:
+                page_images.append(img.convert("RGB"))
+            else:
+                logger.warning("Page has no extractable image; skipping.")
+        except Exception as exc:
+            logger.warning("Failed to extract image from page: %s — skipping.", exc)
+
+    return page_images, page_count
+
+
 def parse_with_docling(
     source_path: Path,
     *,
     parser_model: str,
     artifacts_path: str = "",
     vlm_mode: str = "disabled",
+    generate_page_images: bool = False,
 ) -> DoclingParseResult:
     """Parse a source document into markdown using local Docling runtime.
 
@@ -182,16 +270,24 @@ def parse_with_docling(
     False (existing behavior). External VLM enrichment happens post-chunking via
     vlm_enrichment_node.
 
+    When generate_page_images=True, page images are extracted from the
+    ConversionResult as PIL.Image (RGB) objects and stored in
+    ``DoclingParseResult.page_images``.  Extraction failures are logged as
+    warnings and never block the text-track pipeline (FR-107, FR-201).
+
     Args:
         source_path: Path to the source document to parse.
         parser_model: Parser model identifier used for telemetry/debugging.
         artifacts_path: Optional directory containing Docling artifacts.
         vlm_mode: "builtin" activates Docling's SmolVLM picture description at
             parse time. "external" and "disabled" leave do_picture_description=False.
+        generate_page_images: When True, extract per-page PIL.Image objects
+            (RGB) from the conversion result.  Defaults to False. FR-107.
 
     Returns:
         A normalized `DoclingParseResult` with docling_document populated from
-        result.document.
+        result.document.  When generate_page_images=True, page_images and
+        page_count are also populated.
 
     Raises:
         RuntimeError: If Docling is unavailable, conversion fails, or the output
@@ -262,6 +358,21 @@ def parse_with_docling(
     pictures = list(getattr(document, "pictures", []) or [])
     figures = [f"Figure {idx + 1}" for idx, _ in enumerate(pictures)]
     headings = _extract_headings_from_markdown(markdown)
+
+    # --- Page image extraction (FR-107, FR-201, FR-204, FR-205) --------------
+    page_images: list[Any] = []
+    page_count: int = 0
+    if generate_page_images:
+        try:
+            page_images, page_count = _extract_page_images_from_result(result)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Page image extraction failed for %s (%s); page_images will be empty.",
+                source_path,
+                exc,
+            )
+            page_images = []
+
     return DoclingParseResult(
         text_markdown=markdown,
         has_figures=bool(figures),
@@ -269,5 +380,6 @@ def parse_with_docling(
         headings=headings,
         parser_model=parser_model,
         docling_document=document,
+        page_images=page_images,
+        page_count=page_count,
     )
-

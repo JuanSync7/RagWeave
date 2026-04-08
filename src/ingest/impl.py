@@ -4,6 +4,9 @@
 # Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding, src.ingest.doc_processing
 # verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
 #   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
+# verify_core_design also calls _check_visual_embedding_config (Task 1.1) which validates
+#   enable_visual_embedding requires enable_docling_parser, colqwen_batch_size 1-32,
+#   page_image_quality 1-100, and page_image_max_dimension 256-4096.
 # @end-summary
 
 """Ingestion pipeline runtime orchestration and public implementation API.
@@ -293,6 +296,56 @@ def _check_docling_chunking_config(
     return errors, warnings
 
 
+def _check_visual_embedding_config(
+    config: IngestionConfig,
+) -> tuple[list[str], list[str]]:
+    """Validate visual embedding configuration.
+
+    Checks:
+    1. enable_visual_embedding=True requires enable_docling_parser=True (fatal)
+    2. colqwen_batch_size range 1-32 (fatal)
+    3. page_image_quality range 1-100 (fatal)
+    4. page_image_max_dimension range 256-4096 (fatal)
+
+    Args:
+        config: IngestionConfig to validate.
+
+    Returns:
+        Tuple of (errors, warnings). Errors block pipeline start.
+    """
+    if not config.enable_visual_embedding:
+        return [], []
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not config.enable_docling_parser:
+        errors.append(
+            "enable_visual_embedding=True requires enable_docling_parser=True;"
+            " Docling is needed to render page images for ColQwen2 embedding"
+        )
+
+    if not (1 <= config.colqwen_batch_size <= 32):
+        errors.append(
+            f"colqwen_batch_size={config.colqwen_batch_size} is out of range;"
+            " must be between 1 and 32 (inclusive)"
+        )
+
+    if not (1 <= config.page_image_quality <= 100):
+        errors.append(
+            f"page_image_quality={config.page_image_quality} is out of range;"
+            " must be between 1 and 100 (inclusive)"
+        )
+
+    if not (256 <= config.page_image_max_dimension <= 4096):
+        errors.append(
+            f"page_image_max_dimension={config.page_image_max_dimension} is out of range;"
+            " must be between 256 and 4096 (inclusive)"
+        )
+
+    return errors, warnings
+
+
 def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     """Validate ingestion configuration compatibility and return actionable feedback.
 
@@ -322,6 +375,11 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     dc_errors, dc_warnings = _check_docling_chunking_config(config)
     errors.extend(dc_errors)
     warnings.extend(dc_warnings)
+
+    # Visual embedding pipeline validation (Task 1.1).
+    ve_errors, ve_warnings = _check_visual_embedding_config(config)
+    errors.extend(ve_errors)
+    warnings.extend(ve_warnings)
 
     return IngestionDesignCheck(ok=not errors, errors=errors, warnings=warnings)
 
