@@ -1,79 +1,79 @@
-### `src/ingest/support/docling.py` — Docling Parse Adapter
+### `src/ingest/support/docling.py` — Docling Page Image Extraction (Visual Track Addition)
 
 **Purpose:**
 
-This module provides the ingestion pipeline's interface to the Docling document parser. It exports `DoclingParseResult` (the normalized output dataclass), `parse_with_docling` (the main parsing function), `ensure_docling_ready` (a pre-flight readiness check), and `warmup_docling_models` (model artifact download). The module decouples the rest of the ingestion pipeline from Docling's internal API — no other module imports from `docling` directly. After the Docling-Native Chunking redesign, `DoclingParseResult` carries the native `DoclingDocument` object alongside the existing markdown export, and `parse_with_docling` accepts a `vlm_mode` parameter to optionally activate Docling's integrated SmolVLM at parse time. (FR-2001, FR-2211)
+This module is an additive extension to the existing Docling parsing integration. The base module converts documents to markdown for ingestion; the visual track addition extends it to also extract per-page PIL images during the same parse pass.
+
+Two fields are added to `DoclingParseResult`: `page_images` (a list of `PIL.Image` objects, one per extracted page) and `page_count` (the total number of pages in the source document). A new `generate_page_images` boolean parameter gates this extraction in `parse_with_docling`.
+
+Page image extraction must happen at parse time — not afterward — because Docling's `generate_page_images` option must be set on `PdfPipelineOptions` **before** `convert()` is called. The rendered page images exist only in memory as part of the `ConversionResult` and are not persisted in the serialized `DoclingDocument` JSON. Re-running conversion purely to get images would be expensive and architecturally undesirable. By gating on `enable_visual_embedding` in `IngestionConfig` (FR-107), the cost (VRAM, compute) is incurred only when the visual track is active.
+
+After parse, the extracted images flow into `EmbeddingPipelineState["page_images"]` and are consumed by the downstream `visual_embedding_node`.
+
+---
 
 **How it works:**
 
-**`DoclingParseResult` dataclass** has six fields:
-- `text_markdown: str` — the full document as markdown, exported via `document.export_to_markdown()`
-- `has_figures: bool` — whether Docling detected any picture items
-- `figures: list[str]` — lightweight labels like `"Figure 1"`, `"Figure 2"` for telemetry
-- `headings: list[str]` — heading text extracted from the markdown via regex
-- `parser_model: str` — the parser model identifier, for logging
-- `docling_document: Any` — the native `DoclingDocument` object (type `Any` to avoid a hard `docling-core` import at module load time). `None` only in error recovery paths.
+1. **`generate_page_images` parameter added to `parse_with_docling`.**
+   The function signature gains a new keyword argument `generate_page_images: bool = False` (FR-107). When `False`, no page extraction logic runs; `page_images` stays empty and `page_count` stays 0.
 
-**`parse_with_docling` function** takes a file path, `parser_model`, optional `artifacts_path`, and `vlm_mode`. Its steps:
+2. **`PdfPipelineOptions` configured before conversion.**
+   When `generate_page_images=True`, `PdfPipelineOptions(generate_page_images=True)` is constructed and passed to the Docling converter before `convert()` is called. This is the only point at which page rendering can be activated — the option is consumed at converter construction time and cannot be injected post-hoc.
 
-1. Lazily import `DocumentConverter` from `docling` — this keeps module-level imports cheap and avoids crashing at import time when Docling is not installed.
-2. Build `converter_kwargs` — if `artifacts_path` is non-empty, pass it to the constructor.
-3. If `vlm_mode == "builtin"`: lazily import `PdfPipelineOptions`, `PictureDescriptionVlmEngineOptions`, and `PdfFormatOption`. Build a `PdfPipelineOptions` with `do_picture_description=True` and `picture_description_options=PictureDescriptionVlmEngineOptions.from_preset("smolvlm")`. Add this as `format_options={InputFormat.PDF: PdfFormatOption(...)}` to `converter_kwargs`. If this import fails (SmolVLM not installed), log a warning and proceed without picture description — the parse still succeeds, just without VLM enrichment. Construct `DocumentConverter(**converter_kwargs)`.
-4. If `vlm_mode != "builtin"`: construct `DocumentConverter(**converter_kwargs)` without picture description options (existing behavior).
-5. Call `converter.convert(str(source_path))`. On failure, raise `RuntimeError`.
-6. Extract `result.document` (the `DoclingDocument`). If `None` or missing `export_to_markdown`, raise `RuntimeError`.
-7. Call `document.export_to_markdown()`. If the result is empty, raise `RuntimeError`.
-8. Build `figures` list from `document.pictures`, `headings` list via `_extract_headings_from_markdown()`.
-9. Return `DoclingParseResult` with `docling_document=document`.
+3. **`_extract_page_images_from_result` tries two access strategies.**
+   After `convert()` returns, the private helper `_extract_page_images_from_result(conv_result)` attempts to locate page image data:
+   - **Strategy 1:** `conv_result.pages` — iterates the top-level pages list/dict on the `ConversionResult`, accessing `.image.pil_image` on each page item.
+   - **Strategy 2:** `conv_result.document.pages` — falls back to page items on the embedded `DoclingDocument` object, using the same `.image.pil_image` access pattern.
 
-**`warmup_docling_models` function** downloads Docling model artifacts (layout model, TableFormer). The `with_smolvlm: bool = False` parameter controls whether SmolVLM artifacts are also downloaded. Validates that the layout and tableformer directories exist after download.
+4. **Each image converted to RGB.**
+   For every successfully accessed page image, `image.convert("RGB")` is called to normalize the color space (FR-204). Individual page failures (missing image attribute, conversion error) are caught, a warning is logged, and that page is skipped without raising.
 
-**`_extract_headings_from_markdown`** is a private helper that scans markdown line-by-line for lines starting with `#` and returns the heading text.
+5. **`page_count` set regardless of extraction success.**
+   The helper returns a `(page_images_list, page_count)` tuple. `page_count` reflects the total pages found in the document structure, even if some or all individual page image conversions failed (FR-205). The caller assigns both into the `DoclingParseResult`.
+
+The `DoclingParseResult` field additions introduced by this extension are:
 
 ```python
-# The core conditional in parse_with_docling for builtin VLM:
-if vlm_mode == "builtin":
-    try:
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_picture_description = True
-        pipeline_options.picture_description_options = (
-            PictureDescriptionVlmEngineOptions.from_preset("smolvlm")
-        )
-        converter_kwargs["format_options"] = {
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-        }
-    except (ImportError, Exception) as exc:
-        logger.warning("vlm_mode='builtin' requested but SmolVLM setup failed (%s); "
-                       "proceeding without picture description.", exc)
+@dataclass
+class DoclingParseResult:
+    text_markdown: str
+    has_figures: bool
+    figures: list[str]
+    headings: list[str]
+    parser_model: str
+    docling_document: Any = None          # docling_core.types.doc.DoclingDocument
+    page_images: list[Any] = field(default_factory=list)  # FR-201, FR-204
+    page_count: int = 0                   # FR-205
 ```
+
+---
 
 **Key design decisions:**
 
 | Decision | Alternatives Considered | Why This Choice |
 |----------|------------------------|-----------------|
-| `docling_document: Any` type (not `Optional[DoclingDocument]`) | Import `DoclingDocument` from `docling-core` at module level | Using `Any` keeps `docling-core` as an optional runtime dependency. If Docling is not installed, the module still imports and the rest of the pipeline can run on the fallback path. A hard import would crash the entire system at startup. |
-| Lazy import of Docling inside function bodies | Top-level import | Same rationale as above — Docling is optional. Lazy import provides a clear error message at call time rather than an obscure import failure at startup. |
-| SmolVLM failure is non-fatal (warning, continues) | Fail with RuntimeError when SmolVLM cannot be configured | SmolVLM setup failure is an infrastructure issue, not a document issue. Falling back to a parse without picture description is better than failing the entire document. |
-| `warmup_docling_models` accepts `with_smolvlm: bool` | Separate `warmup_smolvlm()` function | One entry point for all Docling model warmup reduces callers' cognitive load. The `with_smolvlm` flag keeps the download selective — SmolVLM artifacts are large and should only download when needed. |
+| Gate extraction behind `generate_page_images=False` default | Always extract page images during every parse | VRAM and compute cost should only be paid when the visual track is active. Leaving the default `False` makes the visual track opt-in with zero regression for existing callers. |
+| Extract images during the Docling parse pass | Extract images in a separate post-parse step using a different renderer | Docling's `generate_page_images` flag must be set on `PdfPipelineOptions` before `convert()`. Page images are not persisted in the `DoclingDocument` JSON and cannot be reconstructed later without re-running the full conversion. |
+| Two-strategy fallback in `_extract_page_images_from_result` | Single access path only | Docling's internal API has varied across versions. `conv_result.pages` and `conv_result.document.pages` expose the same data through different object paths. Using both strategies improves robustness across Docling releases without requiring a strict version pin. |
+| Silent failure on image extraction (no exception raised) | Raise an exception when extraction fails | The text-track pipeline must not be blocked by image extraction failures. Page images are enrichment; the document's markdown content is the primary output. Logging a warning and returning `page_images=[]` lets the pipeline continue gracefully. |
+| `page_count` always set, even on partial failure | Set `page_count` only when all images extracted successfully | Callers may need `page_count` for telemetry, logging, or downstream routing regardless of whether images are available. Tying `page_count` to extraction success would silently lose document structure information on partial failures. |
+
+---
 
 **Configuration:**
 
-| Parameter | Type | Default | Valid Range / Options | Effect |
-|-----------|------|---------|----------------------|--------|
-| `vlm_mode` (in `parse_with_docling`) | `str` | `"disabled"` | `"disabled"`, `"builtin"`, `"external"` | `"builtin"` activates SmolVLM at parse time via `PdfPipelineOptions.do_picture_description=True`. `"external"` and `"disabled"` leave picture description off. |
-| `artifacts_path` (in `parse_with_docling`) | `str` | `""` | Filesystem path or empty string | When non-empty, passed as `DocumentConverter(artifacts_path=...)`. Controls where Docling looks for pre-downloaded model artifacts. |
-| `with_smolvlm` (in `warmup_docling_models`) | `bool` | `False` | `True` or `False` | When `True`, SmolVLM model artifacts are downloaded in addition to layout and TableFormer models. Must be `True` before calling `parse_with_docling` with `vlm_mode="builtin"`. |
+| Parameter | Type | Default | Effect |
+|-----------|------|---------|--------|
+| `generate_page_images` | `bool` | `False` | When `True`, sets `PdfPipelineOptions(generate_page_images=True)` before conversion and extracts `PIL.Image` (RGB) objects from each page of the `ConversionResult`. Derived from `IngestionConfig.enable_visual_embedding` (FR-107). When `False`, `page_images` is empty and `page_count` is 0. |
+
+---
 
 **Error behavior:**
 
-`parse_with_docling` raises `RuntimeError` in these cases:
-- Docling is not installed (`ImportError` wrapped in `RuntimeError`)
-- `converter.convert()` raises any exception (wrapped in `RuntimeError` with the source path)
-- `result.document` is `None` or lacks `export_to_markdown`
-- `export_to_markdown()` returns an empty string
+Extraction failure is silent and non-blocking:
 
-None of these are retried internally. Callers (`structure_detection_node`) catch `RuntimeError` and apply the non-strict fallback or propagate as a fatal error in strict mode.
+- **Full extraction failure** (neither access strategy yields images): `page_images=[]` is returned. `page_count` is still populated from the document structure. No exception is raised. The caller receives a fully valid `DoclingParseResult` with the complete markdown text intact.
+- **Individual page failure** (one page's `.image.pil_image` is missing, or `image.convert("RGB")` raises): that page is skipped with a warning log. Remaining pages continue to be processed. The final `page_images` list contains only the successfully extracted pages.
+- **`page_count` invariant**: `page_count` always reflects the total number of pages detected in the document, independent of how many images were successfully extracted. This ensures downstream telemetry and routing logic receives accurate document structure information even when image extraction is partial (FR-205).
 
-`warmup_docling_models` raises `RuntimeError` if the Docling downloader is unavailable or if required model directories are absent after download. It does not catch `OSError` from `download_models`.
-
-`ensure_docling_ready` raises `RuntimeError` if Docling is unavailable, if the artifacts path is non-empty and invalid, or if the test `DocumentConverter()` instantiation fails.
+This design ensures the text-track pipeline is never blocked or degraded by failures in the visual enrichment path.

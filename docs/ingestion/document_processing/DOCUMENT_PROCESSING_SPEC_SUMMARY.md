@@ -68,8 +68,8 @@ Source Document (filesystem path)
                     │ Docling │
                     │success? │
                     └─┬────┬──┘
-                 NO   │    │ YES (fast path)
-                      ▼    │
+                 NO   │    │ YES   (fast path)
+                      ▼    ▼
 ┌─────────────────────────────────┐    │
 │ [3] MULTIMODAL    [optional]    │    │
 │     VLM figure-to-text          │    │
