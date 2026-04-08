@@ -1,0 +1,590 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0c0a09"/>
+      <stop offset="100%" style="stop-color:#1c1917"/>
+    </linearGradient>
+    <filter id="hexGlow">
+      <feGaussianBlur stdDeviation="1" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="threadGlow4">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="titleGlow4">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="iconGlow">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="hexLit" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:0.25"/>
+      <stop offset="60%" style="stop-color:#f59e0b;stop-opacity:0.12"/>
+      <stop offset="100%" style="stop-color:#d97706;stop-opacity:0"/>
+    </radialGradient>
+
+    <!-- Hexagon shapes -->
+    <polygon id="hex" points="0,-28 24.25,-14 24.25,14 0,28 -24.25,14 -24.25,-14"/>
+    <polygon id="hexFill" points="0,-26 22.5,-13 22.5,13 0,26 -22.5,13 -22.5,-13"/>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="320" fill="url(#bg4)"/>
+
+  <!-- ============================================ -->
+  <!-- HEXAGONAL GRID (all rows)                    -->
+  <!-- ============================================ -->
+  <g filter="url(#hexGlow)" stroke="#78716c" stroke-width="0.4" fill="none" opacity="0.2">
+    <!-- Row 0 (y=-10) -->
+    <use href="#hex" transform="translate(24, -10)"/>
+    <use href="#hex" transform="translate(73, -10)"/>
+    <use href="#hex" transform="translate(122, -10)"/>
+    <use href="#hex" transform="translate(171, -10)"/>
+    <use href="#hex" transform="translate(220, -10)"/>
+    <use href="#hex" transform="translate(269, -10)"/>
+    <use href="#hex" transform="translate(318, -10)"/>
+    <use href="#hex" transform="translate(367, -10)"/>
+    <use href="#hex" transform="translate(416, -10)"/>
+    <use href="#hex" transform="translate(465, -10)"/>
+    <use href="#hex" transform="translate(514, -10)"/>
+    <use href="#hex" transform="translate(563, -10)"/>
+    <use href="#hex" transform="translate(612, -10)"/>
+    <use href="#hex" transform="translate(661, -10)"/>
+    <use href="#hex" transform="translate(710, -10)"/>
+    <use href="#hex" transform="translate(759, -10)"/>
+    <use href="#hex" transform="translate(808, -10)"/>
+    <use href="#hex" transform="translate(857, -10)"/>
+    <use href="#hex" transform="translate(906, -10)"/>
+    <use href="#hex" transform="translate(955, -10)"/>
+    <use href="#hex" transform="translate(1004, -10)"/>
+    <use href="#hex" transform="translate(1053, -10)"/>
+    <use href="#hex" transform="translate(1102, -10)"/>
+    <use href="#hex" transform="translate(1151, -10)"/>
+    <use href="#hex" transform="translate(1200, -10)"/>
+    <use href="#hex" transform="translate(1249, -10)"/>
+
+    <!-- Row 1 (y=32, offset) -->
+    <use href="#hex" transform="translate(48.5, 32)"/>
+    <use href="#hex" transform="translate(97.5, 32)"/>
+    <use href="#hex" transform="translate(146.5, 32)"/>
+    <use href="#hex" transform="translate(195.5, 32)"/>
+    <use href="#hex" transform="translate(244.5, 32)"/>
+    <use href="#hex" transform="translate(293.5, 32)"/>
+    <use href="#hex" transform="translate(342.5, 32)"/>
+    <use href="#hex" transform="translate(391.5, 32)"/>
+    <use href="#hex" transform="translate(440.5, 32)"/>
+    <use href="#hex" transform="translate(489.5, 32)"/>
+    <use href="#hex" transform="translate(538.5, 32)"/>
+    <use href="#hex" transform="translate(587.5, 32)"/>
+    <use href="#hex" transform="translate(636.5, 32)"/>
+    <use href="#hex" transform="translate(685.5, 32)"/>
+    <use href="#hex" transform="translate(734.5, 32)"/>
+    <use href="#hex" transform="translate(783.5, 32)"/>
+    <use href="#hex" transform="translate(832.5, 32)"/>
+    <use href="#hex" transform="translate(881.5, 32)"/>
+    <use href="#hex" transform="translate(930.5, 32)"/>
+    <use href="#hex" transform="translate(979.5, 32)"/>
+    <use href="#hex" transform="translate(1028.5, 32)"/>
+    <use href="#hex" transform="translate(1077.5, 32)"/>
+    <use href="#hex" transform="translate(1126.5, 32)"/>
+    <use href="#hex" transform="translate(1175.5, 32)"/>
+    <use href="#hex" transform="translate(1224.5, 32)"/>
+
+    <!-- Row 2 (y=74) -->
+    <use href="#hex" transform="translate(24, 74)"/>
+    <use href="#hex" transform="translate(73, 74)"/>
+    <use href="#hex" transform="translate(122, 74)"/>
+    <use href="#hex" transform="translate(171, 74)"/>
+    <use href="#hex" transform="translate(220, 74)"/>
+    <use href="#hex" transform="translate(269, 74)"/>
+    <use href="#hex" transform="translate(318, 74)"/>
+    <use href="#hex" transform="translate(367, 74)"/>
+    <use href="#hex" transform="translate(416, 74)"/>
+    <use href="#hex" transform="translate(465, 74)"/>
+    <use href="#hex" transform="translate(514, 74)"/>
+    <use href="#hex" transform="translate(563, 74)"/>
+    <use href="#hex" transform="translate(612, 74)"/>
+    <use href="#hex" transform="translate(661, 74)"/>
+    <use href="#hex" transform="translate(710, 74)"/>
+    <use href="#hex" transform="translate(759, 74)"/>
+    <use href="#hex" transform="translate(808, 74)"/>
+    <use href="#hex" transform="translate(857, 74)"/>
+    <use href="#hex" transform="translate(906, 74)"/>
+    <use href="#hex" transform="translate(955, 74)"/>
+    <use href="#hex" transform="translate(1004, 74)"/>
+    <use href="#hex" transform="translate(1053, 74)"/>
+    <use href="#hex" transform="translate(1102, 74)"/>
+    <use href="#hex" transform="translate(1151, 74)"/>
+    <use href="#hex" transform="translate(1200, 74)"/>
+    <use href="#hex" transform="translate(1249, 74)"/>
+
+    <!-- Row 3 (y=116, offset) -->
+    <use href="#hex" transform="translate(48.5, 116)"/>
+    <use href="#hex" transform="translate(97.5, 116)"/>
+    <use href="#hex" transform="translate(146.5, 116)"/>
+    <use href="#hex" transform="translate(195.5, 116)"/>
+    <use href="#hex" transform="translate(244.5, 116)"/>
+    <use href="#hex" transform="translate(293.5, 116)"/>
+    <use href="#hex" transform="translate(342.5, 116)"/>
+    <use href="#hex" transform="translate(391.5, 116)"/>
+    <use href="#hex" transform="translate(440.5, 116)"/>
+    <use href="#hex" transform="translate(489.5, 116)"/>
+    <use href="#hex" transform="translate(538.5, 116)"/>
+    <use href="#hex" transform="translate(587.5, 116)"/>
+    <use href="#hex" transform="translate(636.5, 116)"/>
+    <use href="#hex" transform="translate(685.5, 116)"/>
+    <use href="#hex" transform="translate(734.5, 116)"/>
+    <use href="#hex" transform="translate(783.5, 116)"/>
+    <use href="#hex" transform="translate(832.5, 116)"/>
+    <use href="#hex" transform="translate(881.5, 116)"/>
+    <use href="#hex" transform="translate(930.5, 116)"/>
+    <use href="#hex" transform="translate(979.5, 116)"/>
+    <use href="#hex" transform="translate(1028.5, 116)"/>
+    <use href="#hex" transform="translate(1077.5, 116)"/>
+    <use href="#hex" transform="translate(1126.5, 116)"/>
+    <use href="#hex" transform="translate(1175.5, 116)"/>
+    <use href="#hex" transform="translate(1224.5, 116)"/>
+
+    <!-- Row 4 (y=158) -->
+    <use href="#hex" transform="translate(24, 158)"/>
+    <use href="#hex" transform="translate(73, 158)"/>
+    <use href="#hex" transform="translate(122, 158)"/>
+    <use href="#hex" transform="translate(171, 158)"/>
+    <use href="#hex" transform="translate(220, 158)"/>
+    <use href="#hex" transform="translate(269, 158)"/>
+    <use href="#hex" transform="translate(318, 158)"/>
+    <use href="#hex" transform="translate(367, 158)"/>
+    <use href="#hex" transform="translate(416, 158)"/>
+    <use href="#hex" transform="translate(465, 158)"/>
+    <use href="#hex" transform="translate(514, 158)"/>
+    <use href="#hex" transform="translate(563, 158)"/>
+    <use href="#hex" transform="translate(612, 158)"/>
+    <use href="#hex" transform="translate(661, 158)"/>
+    <use href="#hex" transform="translate(710, 158)"/>
+    <use href="#hex" transform="translate(759, 158)"/>
+    <use href="#hex" transform="translate(808, 158)"/>
+    <use href="#hex" transform="translate(857, 158)"/>
+    <use href="#hex" transform="translate(906, 158)"/>
+    <use href="#hex" transform="translate(955, 158)"/>
+    <use href="#hex" transform="translate(1004, 158)"/>
+    <use href="#hex" transform="translate(1053, 158)"/>
+    <use href="#hex" transform="translate(1102, 158)"/>
+    <use href="#hex" transform="translate(1151, 158)"/>
+    <use href="#hex" transform="translate(1200, 158)"/>
+    <use href="#hex" transform="translate(1249, 158)"/>
+
+    <!-- Row 5 (y=200, offset) -->
+    <use href="#hex" transform="translate(48.5, 200)"/>
+    <use href="#hex" transform="translate(97.5, 200)"/>
+    <use href="#hex" transform="translate(146.5, 200)"/>
+    <use href="#hex" transform="translate(195.5, 200)"/>
+    <use href="#hex" transform="translate(244.5, 200)"/>
+    <use href="#hex" transform="translate(293.5, 200)"/>
+    <use href="#hex" transform="translate(342.5, 200)"/>
+    <use href="#hex" transform="translate(391.5, 200)"/>
+    <use href="#hex" transform="translate(440.5, 200)"/>
+    <use href="#hex" transform="translate(489.5, 200)"/>
+    <use href="#hex" transform="translate(538.5, 200)"/>
+    <use href="#hex" transform="translate(587.5, 200)"/>
+    <use href="#hex" transform="translate(636.5, 200)"/>
+    <use href="#hex" transform="translate(685.5, 200)"/>
+    <use href="#hex" transform="translate(734.5, 200)"/>
+    <use href="#hex" transform="translate(783.5, 200)"/>
+    <use href="#hex" transform="translate(832.5, 200)"/>
+    <use href="#hex" transform="translate(881.5, 200)"/>
+    <use href="#hex" transform="translate(930.5, 200)"/>
+    <use href="#hex" transform="translate(979.5, 200)"/>
+    <use href="#hex" transform="translate(1028.5, 200)"/>
+    <use href="#hex" transform="translate(1077.5, 200)"/>
+    <use href="#hex" transform="translate(1126.5, 200)"/>
+    <use href="#hex" transform="translate(1175.5, 200)"/>
+    <use href="#hex" transform="translate(1224.5, 200)"/>
+
+    <!-- Row 6 (y=242) -->
+    <use href="#hex" transform="translate(24, 242)"/>
+    <use href="#hex" transform="translate(73, 242)"/>
+    <use href="#hex" transform="translate(122, 242)"/>
+    <use href="#hex" transform="translate(171, 242)"/>
+    <use href="#hex" transform="translate(220, 242)"/>
+    <use href="#hex" transform="translate(269, 242)"/>
+    <use href="#hex" transform="translate(318, 242)"/>
+    <use href="#hex" transform="translate(367, 242)"/>
+    <use href="#hex" transform="translate(416, 242)"/>
+    <use href="#hex" transform="translate(465, 242)"/>
+    <use href="#hex" transform="translate(514, 242)"/>
+    <use href="#hex" transform="translate(563, 242)"/>
+    <use href="#hex" transform="translate(612, 242)"/>
+    <use href="#hex" transform="translate(661, 242)"/>
+    <use href="#hex" transform="translate(710, 242)"/>
+    <use href="#hex" transform="translate(759, 242)"/>
+    <use href="#hex" transform="translate(808, 242)"/>
+    <use href="#hex" transform="translate(857, 242)"/>
+    <use href="#hex" transform="translate(906, 242)"/>
+    <use href="#hex" transform="translate(955, 242)"/>
+    <use href="#hex" transform="translate(1004, 242)"/>
+    <use href="#hex" transform="translate(1053, 242)"/>
+    <use href="#hex" transform="translate(1102, 242)"/>
+    <use href="#hex" transform="translate(1151, 242)"/>
+    <use href="#hex" transform="translate(1200, 242)"/>
+    <use href="#hex" transform="translate(1249, 242)"/>
+
+    <!-- Row 7 (y=284, offset) -->
+    <use href="#hex" transform="translate(48.5, 284)"/>
+    <use href="#hex" transform="translate(97.5, 284)"/>
+    <use href="#hex" transform="translate(146.5, 284)"/>
+    <use href="#hex" transform="translate(195.5, 284)"/>
+    <use href="#hex" transform="translate(244.5, 284)"/>
+    <use href="#hex" transform="translate(293.5, 284)"/>
+    <use href="#hex" transform="translate(342.5, 284)"/>
+    <use href="#hex" transform="translate(391.5, 284)"/>
+    <use href="#hex" transform="translate(440.5, 284)"/>
+    <use href="#hex" transform="translate(489.5, 284)"/>
+    <use href="#hex" transform="translate(538.5, 284)"/>
+    <use href="#hex" transform="translate(587.5, 284)"/>
+    <use href="#hex" transform="translate(636.5, 284)"/>
+    <use href="#hex" transform="translate(685.5, 284)"/>
+    <use href="#hex" transform="translate(734.5, 284)"/>
+    <use href="#hex" transform="translate(783.5, 284)"/>
+    <use href="#hex" transform="translate(832.5, 284)"/>
+    <use href="#hex" transform="translate(881.5, 284)"/>
+    <use href="#hex" transform="translate(930.5, 284)"/>
+    <use href="#hex" transform="translate(979.5, 284)"/>
+    <use href="#hex" transform="translate(1028.5, 284)"/>
+    <use href="#hex" transform="translate(1077.5, 284)"/>
+    <use href="#hex" transform="translate(1126.5, 284)"/>
+    <use href="#hex" transform="translate(1175.5, 284)"/>
+    <use href="#hex" transform="translate(1224.5, 284)"/>
+
+    <!-- Row 8 (y=326) -->
+    <use href="#hex" transform="translate(24, 326)"/>
+    <use href="#hex" transform="translate(73, 326)"/>
+    <use href="#hex" transform="translate(122, 326)"/>
+    <use href="#hex" transform="translate(171, 326)"/>
+    <use href="#hex" transform="translate(220, 326)"/>
+    <use href="#hex" transform="translate(269, 326)"/>
+    <use href="#hex" transform="translate(318, 326)"/>
+    <use href="#hex" transform="translate(367, 326)"/>
+    <use href="#hex" transform="translate(416, 326)"/>
+    <use href="#hex" transform="translate(465, 326)"/>
+    <use href="#hex" transform="translate(514, 326)"/>
+    <use href="#hex" transform="translate(563, 326)"/>
+    <use href="#hex" transform="translate(612, 326)"/>
+    <use href="#hex" transform="translate(661, 326)"/>
+    <use href="#hex" transform="translate(710, 326)"/>
+    <use href="#hex" transform="translate(759, 326)"/>
+    <use href="#hex" transform="translate(808, 326)"/>
+    <use href="#hex" transform="translate(857, 326)"/>
+    <use href="#hex" transform="translate(906, 326)"/>
+    <use href="#hex" transform="translate(955, 326)"/>
+    <use href="#hex" transform="translate(1004, 326)"/>
+    <use href="#hex" transform="translate(1053, 326)"/>
+    <use href="#hex" transform="translate(1102, 326)"/>
+    <use href="#hex" transform="translate(1151, 326)"/>
+    <use href="#hex" transform="translate(1200, 326)"/>
+    <use href="#hex" transform="translate(1249, 326)"/>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- HIGHLIGHTED ICON HEXAGONS                    -->
+  <!-- Each has a filled hex bg + border + icon     -->
+  <!-- ============================================ -->
+
+  <!-- 1) PDF Document — upper left -->
+  <g transform="translate(171, 74)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d">
+      <rect x="-8" y="-12" width="16" height="21" rx="2" stroke-width="1"/>
+      <path d="M4,-12 L4,-7 L8,-7" stroke-width="0.8"/>
+      <line x1="-5" y1="-4" x2="5" y2="-4" stroke-width="0.7"/>
+      <line x1="-5" y1="0" x2="5" y2="0" stroke-width="0.7"/>
+      <line x1="-5" y1="4" x2="2" y2="4" stroke-width="0.7"/>
+    </g>
+  </g>
+
+  <!-- 2) Image / Photo — right, mid -->
+  <g transform="translate(1126.5, 200)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d">
+      <rect x="-11" y="-9" width="22" height="18" rx="2" stroke-width="1"/>
+      <circle cx="-5" cy="-3" r="3" stroke-width="0.8"/>
+      <polyline points="-10,7 -4,0 1,4 5,-2 10,4" stroke-width="0.8"/>
+    </g>
+  </g>
+
+  <!-- 3) Database / Vector Store — bottom far-left -->
+  <g transform="translate(73, 242)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="1">
+      <ellipse cx="0" cy="-9" rx="10" ry="4"/>
+      <path d="M-10,-9 L-10,9 C-10,11.2 -5.5,13 0,13 C5.5,13 10,11.2 10,9 L10,-9"/>
+      <path d="M-10,-1 C-10,1.2 -5.5,3 0,3 C5.5,3 10,1.2 10,-1"/>
+      <path d="M-10,5 C-10,7.2 -5.5,9 0,9 C5.5,9 10,7.2 10,5"/>
+    </g>
+  </g>
+
+  <!-- 4) Shield / Guardrails — upper right -->
+  <g transform="translate(1151, 74)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="1">
+      <path d="M0,-13 L-10,-7 L-10,2 C-10,8 -3,13 0,14 C3,13 10,8 10,2 L10,-7 Z"/>
+      <polyline points="-4,1 -1,5 5,-3" stroke-width="1.4"/>
+    </g>
+  </g>
+
+  <!-- 5) Neural Network / LLM — left, mid-lower -->
+  <g transform="translate(244.5, 200)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="0.8">
+      <!-- Input layer -->
+      <circle cx="-10" cy="-8" r="2.5"/><circle cx="-10" cy="0" r="2.5"/><circle cx="-10" cy="8" r="2.5"/>
+      <!-- Hidden layer -->
+      <circle cx="0" cy="-10" r="2.5"/><circle cx="0" cy="-2" r="2.5"/><circle cx="0" cy="6" r="2.5"/><circle cx="0" cy="14" r="2.5"/>
+      <!-- Output layer -->
+      <circle cx="10" cy="-4" r="2.5"/><circle cx="10" cy="4" r="2.5"/>
+      <!-- Connections input->hidden -->
+      <line x1="-7.5" y1="-8" x2="-2.5" y2="-10" opacity="0.5"/>
+      <line x1="-7.5" y1="-8" x2="-2.5" y2="-2" opacity="0.5"/>
+      <line x1="-7.5" y1="0" x2="-2.5" y2="-2" opacity="0.5"/>
+      <line x1="-7.5" y1="0" x2="-2.5" y2="6" opacity="0.5"/>
+      <line x1="-7.5" y1="8" x2="-2.5" y2="6" opacity="0.5"/>
+      <line x1="-7.5" y1="8" x2="-2.5" y2="14" opacity="0.5"/>
+      <!-- Connections hidden->output -->
+      <line x1="2.5" y1="-10" x2="7.5" y2="-4" opacity="0.5"/>
+      <line x1="2.5" y1="-2" x2="7.5" y2="-4" opacity="0.5"/>
+      <line x1="2.5" y1="6" x2="7.5" y2="4" opacity="0.5"/>
+      <line x1="2.5" y1="14" x2="7.5" y2="4" opacity="0.5"/>
+    </g>
+  </g>
+
+  <!-- 6) Knowledge Graph — upper right -->
+  <g transform="translate(979.5, 32)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="0.8">
+      <!-- Graph nodes -->
+      <circle cx="0" cy="-8" r="3" fill="#fbbf24" fill-opacity="0.2"/>
+      <circle cx="-9" cy="4" r="3" fill="#fbbf24" fill-opacity="0.2"/>
+      <circle cx="9" cy="4" r="3" fill="#fbbf24" fill-opacity="0.2"/>
+      <circle cx="0" cy="10" r="2.5" fill="#fbbf24" fill-opacity="0.15"/>
+      <circle cx="-6" cy="-4" r="2" fill="#fbbf24" fill-opacity="0.15"/>
+      <!-- Edges -->
+      <line x1="0" y1="-5" x2="-7" y2="2" stroke-width="0.9"/>
+      <line x1="0" y1="-5" x2="7" y2="2" stroke-width="0.9"/>
+      <line x1="-6" y1="4" x2="6" y2="4" stroke-width="0.9"/>
+      <line x1="0" y1="7.5" x2="-7" y2="5" stroke-width="0.7"/>
+      <line x1="0" y1="7.5" x2="7" y2="5" stroke-width="0.7"/>
+    </g>
+  </g>
+
+  <!-- 7) Magnifying Glass / Search — left mid -->
+  <g transform="translate(244.5, 116)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d">
+      <circle cx="-2" cy="-2" r="8" stroke-width="1.1"/>
+      <line x1="4" y1="4" x2="11" y2="11" stroke-width="1.8" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- 8) Chunking / Blocks — bottom right -->
+  <g transform="translate(955, 242)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="0.9">
+      <!-- Stacked chunk blocks -->
+      <rect x="-10" y="-12" width="20" height="7" rx="1.5"/>
+      <rect x="-10" y="-3" width="20" height="7" rx="1.5"/>
+      <rect x="-10" y="6" width="20" height="7" rx="1.5"/>
+      <!-- Content lines inside blocks -->
+      <line x1="-7" y1="-8.5" x2="4" y2="-8.5" stroke-width="0.5" opacity="0.6"/>
+      <line x1="-7" y1="0.5" x2="6" y2="0.5" stroke-width="0.5" opacity="0.6"/>
+      <line x1="-7" y1="9.5" x2="3" y2="9.5" stroke-width="0.5" opacity="0.6"/>
+    </g>
+  </g>
+
+  <!-- 9) Eye / VLM Vision — upper left -->
+  <g transform="translate(97.5, 32)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="1">
+      <!-- Eye outline -->
+      <path d="M-12,0 C-6,-9 6,-9 12,0 C6,9 -6,9 -12,0 Z"/>
+      <!-- Iris -->
+      <circle cx="0" cy="0" r="5"/>
+      <!-- Pupil -->
+      <circle cx="0" cy="0" r="2.5" fill="#fcd34d" fill-opacity="0.35"/>
+    </g>
+  </g>
+
+  <!-- 10) Bar Chart / Observability — right mid -->
+  <g transform="translate(1028.5, 116)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="#fcd34d" fill-opacity="0.35" stroke="#fcd34d" stroke-width="0.6">
+      <rect x="-10" y="2" width="5" height="10" rx="1"/>
+      <rect x="-3.5" y="-6" width="5" height="18" rx="1"/>
+      <rect x="3" y="-2" width="5" height="14" rx="1"/>
+      <!-- Trend line -->
+      <polyline points="-7.5,-2 -1,-8 5.5,-4" fill="none" stroke="#fcd34d" stroke-width="1.1" opacity="0.7"/>
+    </g>
+  </g>
+
+  <!-- 11) Code </> — upper left-center -->
+  <g transform="translate(318, 74)" filter="url(#iconGlow)">
+    <circle r="32" fill="url(#hexLit)"/>
+    <use href="#hexFill" fill="#f59e0b" opacity="0.18"/>
+    <use href="#hex" fill="none" stroke="#fbbf24" stroke-width="1.2" opacity="0.7"/>
+    <g opacity="0.85" fill="none" stroke="#fcd34d" stroke-width="1.2" stroke-linecap="round">
+      <!-- Left angle bracket -->
+      <polyline points="-3,-10 -10,0 -3,10"/>
+      <!-- Right angle bracket -->
+      <polyline points="3,-10 10,0 3,10"/>
+      <!-- Slash -->
+      <line x1="3" y1="-8" x2="-3" y2="8" stroke-width="0.9" opacity="0.6"/>
+    </g>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- GOLDEN DIAGONAL WEAVE THREADS                -->
+  <!-- ============================================ -->
+  <g filter="url(#threadGlow4)">
+    <!-- NW-SE diagonals -->
+    <path d="M40,0 L400,320" stroke="#f59e0b" stroke-width="0.8" opacity="0.25" fill="none"/>
+    <path d="M200,0 L560,320" stroke="#f59e0b" stroke-width="0.8" opacity="0.25" fill="none"/>
+    <path d="M360,0 L720,320" stroke="#f59e0b" stroke-width="1" opacity="0.3" fill="none"/>
+    <path d="M520,0 L880,320" stroke="#fbbf24" stroke-width="1.2" opacity="0.35" fill="none"/>
+    <path d="M680,0 L1040,320" stroke="#fbbf24" stroke-width="1" opacity="0.3" fill="none"/>
+    <path d="M840,0 L1200,320" stroke="#f59e0b" stroke-width="0.8" opacity="0.25" fill="none"/>
+    <path d="M1000,0 L1280,250" stroke="#f59e0b" stroke-width="0.8" opacity="0.2" fill="none"/>
+
+    <!-- NE-SW diagonals -->
+    <path d="M1240,0 L880,320" stroke="#f59e0b" stroke-width="0.8" opacity="0.25" fill="none"/>
+    <path d="M1080,0 L720,320" stroke="#f59e0b" stroke-width="0.8" opacity="0.25" fill="none"/>
+    <path d="M920,0 L560,320" stroke="#f59e0b" stroke-width="1" opacity="0.3" fill="none"/>
+    <path d="M760,0 L400,320" stroke="#fbbf24" stroke-width="1.2" opacity="0.35" fill="none"/>
+    <path d="M600,0 L240,320" stroke="#fbbf24" stroke-width="1" opacity="0.3" fill="none"/>
+    <path d="M440,0 L80,320" stroke="#f59e0b" stroke-width="0.8" opacity="0.25" fill="none"/>
+    <path d="M280,0 L0,250" stroke="#f59e0b" stroke-width="0.8" opacity="0.2" fill="none"/>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- GLOW NODES at thread intersections           -->
+  <!-- ============================================ -->
+  <g filter="url(#threadGlow4)">
+    <circle cx="440.5" cy="116" r="3" fill="#fbbf24" opacity="0.6"/>
+    <circle cx="636.5" cy="116" r="3.5" fill="#fbbf24" opacity="0.7"/>
+    <circle cx="538.5" cy="200" r="3" fill="#fbbf24" opacity="0.6"/>
+    <circle cx="734.5" cy="200" r="3.5" fill="#fbbf24" opacity="0.7"/>
+    <circle cx="587.5" cy="32" r="2.5" fill="#fbbf24" opacity="0.5"/>
+    <circle cx="685.5" cy="200" r="2.5" fill="#fbbf24" opacity="0.5"/>
+    <circle cx="342.5" cy="200" r="2.5" fill="#f59e0b" opacity="0.45"/>
+    <circle cx="832.5" cy="200" r="2.5" fill="#f59e0b" opacity="0.45"/>
+    <circle cx="489.5" cy="32" r="2" fill="#f59e0b" opacity="0.35"/>
+    <circle cx="881.5" cy="116" r="2" fill="#f59e0b" opacity="0.35"/>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- BEE (flying toward the honeycomb)            -->
+  <!-- ============================================ -->
+  <g transform="translate(838, 58) rotate(-15)" filter="url(#iconGlow)">
+    <!-- Flight trail -->
+    <path d="M38,2 C30,8 22,-4 14,2 C6,8 -2,-2 -8,3" fill="none" stroke="#fbbf24" stroke-width="0.6" opacity="0.3" stroke-dasharray="2 2"/>
+
+    <!-- Body -->
+    <ellipse cx="0" cy="0" rx="4" ry="6.5" fill="#f59e0b" opacity="0.85"/>
+
+    <!-- Stripes -->
+    <line x1="-3.5" y1="-2" x2="3.5" y2="-2" stroke="#1c1917" stroke-width="1.2" opacity="0.6"/>
+    <line x1="-3.8" y1="1" x2="3.8" y2="1" stroke="#1c1917" stroke-width="1.2" opacity="0.6"/>
+    <line x1="-3.2" y1="4" x2="3.2" y2="4" stroke="#1c1917" stroke-width="1" opacity="0.5"/>
+
+    <!-- Wings (on top, spreading outward from mid-body) -->
+    <ellipse cx="-5.5" cy="0" rx="7" ry="4" fill="#fef3c7" fill-opacity="0.22" stroke="#fcd34d" stroke-width="0.5" opacity="0.7" transform="rotate(-30 -5.5 0)"/>
+    <ellipse cx="5.5" cy="0" rx="7" ry="4" fill="#fef3c7" fill-opacity="0.18" stroke="#fcd34d" stroke-width="0.5" opacity="0.6" transform="rotate(30 5.5 0)"/>
+
+    <!-- Head -->
+    <ellipse cx="0" cy="-7.5" rx="3" ry="2.5" fill="#d97706" opacity="0.8"/>
+
+    <!-- Antennae -->
+    <path d="M-1.5,-9.5 C-3,-13 -5,-14 -6,-13" fill="none" stroke="#d97706" stroke-width="0.6" opacity="0.7"/>
+    <path d="M1.5,-9.5 C3,-13 5,-14 6,-13" fill="none" stroke="#d97706" stroke-width="0.6" opacity="0.7"/>
+    <circle cx="-6" cy="-13" r="0.8" fill="#fbbf24" opacity="0.6"/>
+    <circle cx="6" cy="-13" r="0.8" fill="#fbbf24" opacity="0.6"/>
+
+    <!-- Stinger -->
+    <path d="M0,6.5 L0,9" stroke="#d97706" stroke-width="0.5" opacity="0.5"/>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- CENTER TITLE BOX (bigger)                    -->
+  <!-- ============================================ -->
+  <rect x="370" y="95" width="540" height="140" rx="16" fill="#0c0a09" opacity="0.78"/>
+  <rect x="370" y="95" width="540" height="140" rx="16" fill="none" stroke="#f59e0b" stroke-width="0.5" opacity="0.15"/>
+
+  <!-- Title -->
+  <g filter="url(#titleGlow4)">
+    <text x="640" y="162" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="62" font-weight="700" fill="#fef3c7" letter-spacing="6">RagWeave</text>
+  </g>
+
+  <!-- Subtitle -->
+  <text x="640" y="198" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="15" fill="#d97706" letter-spacing="5" font-weight="300" opacity="0.8">MULTI-MODAL RAG PLATFORM</text>
+
+  <!-- Gold accent line under subtitle -->
+  <line x1="480" y1="210" x2="800" y2="210" stroke="#f59e0b" stroke-width="0.8" opacity="0.25"/>
+
+  <!-- ============================================ -->
+  <!-- BOTTOM PIPELINE CHAIN                        -->
+  <!-- INGEST -> EMBED -> RETRIEVE -> GENERATE      -->
+  <!-- ============================================ -->
+  <g transform="translate(640, 302)">
+    <!-- Dark backdrop strip for readability -->
+    <rect x="-290" y="-14" width="580" height="22" rx="11" fill="#0c0a09" opacity="0.6"/>
+
+    <!-- Chain labels (vertically centered in pill: y=0 for visual mid) -->
+    <g font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="11" fill="#fbbf24" letter-spacing="3" font-weight="600" text-anchor="middle" opacity="0.75">
+      <text x="-165" y="1">INGEST</text>
+      <text x="-58" y="1">EMBED</text>
+      <text x="62" y="1">RETRIEVE</text>
+      <text x="185" y="1">GENERATE</text>
+    </g>
+
+    <!-- Connecting arrows between labels -->
+    <g stroke="#f59e0b" stroke-width="1" opacity="0.5" fill="none" stroke-linecap="round">
+      <!-- INGEST -> EMBED -->
+      <line x1="-124" y1="-3" x2="-96" y2="-3"/>
+      <polyline points="-100,-6 -96,-3 -100,0"/>
+      <!-- EMBED -> RETRIEVE -->
+      <line x1="-18" y1="-3" x2="18" y2="-3"/>
+      <polyline points="14,-6 18,-3 14,0"/>
+      <!-- RETRIEVE -> GENERATE -->
+      <line x1="108" y1="-3" x2="140" y2="-3"/>
+      <polyline points="136,-6 140,-3 136,0"/>
+    </g>
+
+    <!-- Decorative diamond bookends on the sides -->
+    <g fill="#fbbf24" opacity="0.6">
+      <rect x="-248" y="-6" width="6" height="6" rx="1" transform="rotate(45 -245 -3)"/>
+      <rect x="-235" y="-5" width="4" height="4" rx="0.5" transform="rotate(45 -233 -3)"/>
+      <rect x="249" y="-6" width="6" height="6" rx="1" transform="rotate(45 252 -3)"/>
+      <rect x="238" y="-5" width="4" height="4" rx="0.5" transform="rotate(45 240 -3)"/>
+    </g>
+  </g>
+</svg>

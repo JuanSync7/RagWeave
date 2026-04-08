@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fafafa"/>
+      <stop offset="100%" style="stop-color:#f1f5f9"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:0"/>
+      <stop offset="50%" style="stop-color:#0ea5e9;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#0ea5e9;stop-opacity:0"/>
+    </linearGradient>
+    <linearGradient id="warpFade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#334155;stop-opacity:0.1"/>
+      <stop offset="50%" style="stop-color:#334155;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#334155;stop-opacity:0.1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="320" fill="url(#bg2)"/>
+
+  <!-- Left side: Warp threads (vertical - representing documents) -->
+  <!-- Document page representations as warp -->
+  <g opacity="0.15">
+    <!-- Warp thread group 1 - text document -->
+    <line x1="80" y1="20" x2="80" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <rect x="68" y="60" width="24" height="32" rx="3" fill="none" stroke="#334155" stroke-width="1"/>
+    <line x1="74" y1="68" x2="86" y2="68" stroke="#334155" stroke-width="0.7"/>
+    <line x1="74" y1="73" x2="86" y2="73" stroke="#334155" stroke-width="0.7"/>
+    <line x1="74" y1="78" x2="82" y2="78" stroke="#334155" stroke-width="0.7"/>
+
+    <!-- Warp 2 - PDF -->
+    <line x1="140" y1="20" x2="140" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <rect x="128" y="130" width="24" height="32" rx="3" fill="none" stroke="#334155" stroke-width="1"/>
+    <text x="140" y="150" text-anchor="middle" font-family="monospace" font-size="8" fill="#334155">PDF</text>
+
+    <!-- Warp 3 - image -->
+    <line x1="200" y1="20" x2="200" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <rect x="188" y="200" width="24" height="20" rx="3" fill="none" stroke="#334155" stroke-width="1"/>
+    <circle cx="195" cy="207" r="3" fill="none" stroke="#334155" stroke-width="0.7"/>
+    <polyline points="189,218 196,212 202,216 210,210" fill="none" stroke="#334155" stroke-width="0.7"/>
+
+    <!-- Warp 4 -->
+    <line x1="260" y1="20" x2="260" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <rect x="248" y="80" width="24" height="32" rx="3" fill="none" stroke="#334155" stroke-width="1"/>
+    <line x1="254" y1="88" x2="266" y2="88" stroke="#334155" stroke-width="0.7"/>
+    <line x1="254" y1="93" x2="266" y2="93" stroke="#334155" stroke-width="0.7"/>
+    <line x1="254" y1="98" x2="260" y2="98" stroke="#334155" stroke-width="0.7"/>
+
+    <!-- Warp 5 - code -->
+    <line x1="320" y1="20" x2="320" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <rect x="308" y="180" width="24" height="28" rx="3" fill="none" stroke="#334155" stroke-width="1"/>
+    <text x="320" y="198" text-anchor="middle" font-family="monospace" font-size="7" fill="#334155">&lt;/&gt;</text>
+  </g>
+
+  <!-- Right side: Warp threads converging into fabric -->
+  <g opacity="0.15">
+    <line x1="960" y1="20" x2="960" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <line x1="1020" y1="20" x2="1020" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <line x1="1080" y1="20" x2="1080" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <line x1="1140" y1="20" x2="1140" y2="300" stroke="#334155" stroke-width="1.5"/>
+    <line x1="1200" y1="20" x2="1200" y2="300" stroke="#334155" stroke-width="1.5"/>
+  </g>
+
+  <!-- Weft threads (horizontal - representing vector connections) -->
+  <!-- These weave through creating the fabric effect -->
+  <g opacity="0.25">
+    <!-- Weft going through left warp -->
+    <path d="M40,50 C80,45 80,55 140,50 C200,45 200,55 260,50 C320,45 380,50 440,48" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+    <path d="M40,90 C80,95 80,85 140,90 C200,95 200,85 260,90 C320,95 380,88 440,92" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+    <path d="M40,130 C80,125 80,135 140,130 C200,125 200,135 260,130 C320,125 380,132 440,128" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+    <path d="M40,170 C80,175 80,165 140,170 C200,175 200,165 260,170 C320,175 380,168 440,172" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+    <path d="M40,210 C80,205 80,215 140,210 C200,205 200,215 260,210 C320,205 380,212 440,208" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+    <path d="M40,250 C80,255 80,245 140,250 C200,255 200,245 260,250 C320,255 380,248 440,252" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+
+    <!-- Central transition zone - threads becoming denser -->
+    <path d="M440,48 Q540,50 640,60 Q740,70 840,55 C920,48 960,52 1020,48 C1080,44 1140,52 1240,50" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+    <path d="M440,92 Q540,88 640,95 Q740,102 840,90 C920,85 960,92 1020,88 C1080,84 1140,92 1240,90" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+    <path d="M440,128 Q540,132 640,125 Q740,118 840,130 C920,135 960,128 1020,132 C1080,136 1140,128 1240,130" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+    <path d="M440,172 Q540,168 640,175 Q740,182 840,170 C920,165 960,172 1020,168 C1080,164 1140,172 1240,170" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+    <path d="M440,208 Q540,212 640,205 Q740,198 840,210 C920,215 960,208 1020,212 C1080,216 1140,208 1240,210" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+    <path d="M440,252 Q540,248 640,255 Q740,262 840,250 C920,245 960,252 1020,248 C1080,244 1140,252 1240,250" fill="none" stroke="#0ea5e9" stroke-width="1"/>
+  </g>
+
+  <!-- Fabric density overlay on the right -->
+  <rect x="900" y="30" width="340" height="260" rx="8" fill="#0ea5e9" opacity="0.03"/>
+
+  <!-- Right side: woven fabric texture (denser cross-hatching) -->
+  <g opacity="0.08">
+    <line x1="960" y1="50" x2="1200" y2="50" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="60" x2="1200" y2="60" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="70" x2="1200" y2="70" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="80" x2="1200" y2="80" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="220" x2="1200" y2="220" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="230" x2="1200" y2="230" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="240" x2="1200" y2="240" stroke="#0ea5e9" stroke-width="0.5"/>
+    <line x1="960" y1="250" x2="1200" y2="250" stroke="#0ea5e9" stroke-width="0.5"/>
+  </g>
+
+  <!-- Arrow showing transformation flow -->
+  <g opacity="0.12">
+    <path d="M380,160 L440,160 L430,155 M440,160 L430,165" fill="none" stroke="#334155" stroke-width="1.5"/>
+    <path d="M840,160 L900,160 L890,155 M900,160 L890,165" fill="none" stroke="#334155" stroke-width="1.5"/>
+  </g>
+
+  <!-- Title -->
+  <text x="640" y="140" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="64" font-weight="700" fill="#0f172a" letter-spacing="4">RagWeave</text>
+
+  <!-- Subtitle -->
+  <text x="640" y="178" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="15" fill="#64748b" letter-spacing="5" font-weight="300">MULTI-MODAL RAG PLATFORM</text>
+
+  <!-- Accent underline -->
+  <line x1="530" y1="192" x2="750" y2="192" stroke="url(#accentGrad)" stroke-width="2"/>
+</svg>

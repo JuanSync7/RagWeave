@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320">
+  <defs>
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0e1a"/>
+      <stop offset="100%" style="stop-color:#111827"/>
+    </linearGradient>
+    <linearGradient id="threadCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#06b6d4;stop-opacity:0"/>
+      <stop offset="30%" style="stop-color:#06b6d4;stop-opacity:0.8"/>
+      <stop offset="70%" style="stop-color:#06b6d4;stop-opacity:0.8"/>
+      <stop offset="100%" style="stop-color:#06b6d4;stop-opacity:0"/>
+    </linearGradient>
+    <linearGradient id="threadAmber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f59e0b;stop-opacity:0"/>
+      <stop offset="30%" style="stop-color:#f59e0b;stop-opacity:0.7"/>
+      <stop offset="70%" style="stop-color:#f59e0b;stop-opacity:0.7"/>
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0"/>
+    </linearGradient>
+    <linearGradient id="threadVert" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#06b6d4;stop-opacity:0"/>
+      <stop offset="30%" style="stop-color:#06b6d4;stop-opacity:0.5"/>
+      <stop offset="70%" style="stop-color:#06b6d4;stop-opacity:0.5"/>
+      <stop offset="100%" style="stop-color:#06b6d4;stop-opacity:0"/>
+    </linearGradient>
+    <linearGradient id="threadVertAmber" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b;stop-opacity:0"/>
+      <stop offset="30%" style="stop-color:#f59e0b;stop-opacity:0.4"/>
+      <stop offset="70%" style="stop-color:#f59e0b;stop-opacity:0.4"/>
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0"/>
+    </linearGradient>
+    <filter id="glow1">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowText">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <radialGradient id="nodeGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#22d3ee;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:0"/>
+    </radialGradient>
+    <radialGradient id="nodeGlowAmber" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#fbbf24;stop-opacity:0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="320" fill="url(#bg1)"/>
+
+  <!-- Subtle grid -->
+  <g opacity="0.06" stroke="#94a3b8" stroke-width="0.5">
+    <line x1="0" y1="40" x2="1280" y2="40"/><line x1="0" y1="80" x2="1280" y2="80"/>
+    <line x1="0" y1="120" x2="1280" y2="120"/><line x1="0" y1="160" x2="1280" y2="160"/>
+    <line x1="0" y1="200" x2="1280" y2="200"/><line x1="0" y1="240" x2="1280" y2="240"/>
+    <line x1="0" y1="280" x2="1280" y2="280"/>
+    <line x1="80" y1="0" x2="80" y2="320"/><line x1="160" y1="0" x2="160" y2="320"/>
+    <line x1="240" y1="0" x2="240" y2="320"/><line x1="320" y1="0" x2="320" y2="320"/>
+    <line x1="400" y1="0" x2="400" y2="320"/><line x1="480" y1="0" x2="480" y2="320"/>
+    <line x1="560" y1="0" x2="560" y2="320"/><line x1="640" y1="0" x2="640" y2="320"/>
+    <line x1="720" y1="0" x2="720" y2="320"/><line x1="800" y1="0" x2="800" y2="320"/>
+    <line x1="880" y1="0" x2="880" y2="320"/><line x1="960" y1="0" x2="960" y2="320"/>
+    <line x1="1040" y1="0" x2="1040" y2="320"/><line x1="1120" y1="0" x2="1120" y2="320"/>
+    <line x1="1200" y1="0" x2="1200" y2="320"/>
+  </g>
+
+  <!-- Horizontal weave threads (cyan) -->
+  <g filter="url(#glow1)">
+    <path d="M0,60 Q160,40 320,70 Q480,100 640,55 Q800,10 960,65 Q1120,120 1280,50" fill="none" stroke="url(#threadCyan)" stroke-width="1.5"/>
+    <path d="M0,130 Q200,110 400,140 Q600,170 800,125 Q1000,80 1280,135" fill="none" stroke="url(#threadCyan)" stroke-width="1.8"/>
+    <path d="M0,200 Q180,220 360,195 Q540,170 720,210 Q900,250 1080,190 Q1200,160 1280,205" fill="none" stroke="url(#threadCyan)" stroke-width="1.5"/>
+    <path d="M0,265 Q240,245 480,275 Q720,305 960,260 Q1100,230 1280,270" fill="none" stroke="url(#threadCyan)" stroke-width="1.2"/>
+  </g>
+
+  <!-- Horizontal weave threads (amber) -->
+  <g filter="url(#glow1)">
+    <path d="M0,90 Q200,110 400,85 Q600,60 800,95 Q1000,130 1280,80" fill="none" stroke="url(#threadAmber)" stroke-width="1.2"/>
+    <path d="M0,165 Q160,185 320,160 Q480,135 640,170 Q800,205 960,155 Q1120,110 1280,165" fill="none" stroke="url(#threadAmber)" stroke-width="1.5"/>
+    <path d="M0,235 Q200,215 400,240 Q600,265 800,230 Q1000,195 1280,240" fill="none" stroke="url(#threadAmber)" stroke-width="1.2"/>
+  </g>
+
+  <!-- Diagonal weave threads -->
+  <g filter="url(#glow1)" opacity="0.4">
+    <path d="M100,-20 Q200,80 180,160 Q160,240 220,340" fill="none" stroke="#06b6d4" stroke-width="0.8"/>
+    <path d="M300,-20 Q350,60 330,160 Q310,260 370,340" fill="none" stroke="#f59e0b" stroke-width="0.8"/>
+    <path d="M500,-20 Q480,80 510,160 Q540,240 490,340" fill="none" stroke="#06b6d4" stroke-width="0.8"/>
+    <path d="M750,-20 Q770,60 740,160 Q710,260 760,340" fill="none" stroke="#f59e0b" stroke-width="0.8"/>
+    <path d="M950,-20 Q920,80 960,160 Q1000,240 940,340" fill="none" stroke="#06b6d4" stroke-width="0.8"/>
+    <path d="M1150,-20 Q1170,60 1140,160 Q1110,260 1160,340" fill="none" stroke="#f59e0b" stroke-width="0.8"/>
+  </g>
+
+  <!-- Intersection glow nodes -->
+  <g filter="url(#softGlow)">
+    <!-- Cyan nodes -->
+    <circle cx="160" cy="65" r="4" fill="#22d3ee" opacity="0.9"/>
+    <circle cx="320" cy="70" r="3" fill="#22d3ee" opacity="0.8"/>
+    <circle cx="640" cy="55" r="5" fill="#22d3ee" opacity="1"/>
+    <circle cx="960" cy="65" r="3.5" fill="#22d3ee" opacity="0.85"/>
+    <circle cx="400" cy="140" r="4" fill="#22d3ee" opacity="0.9"/>
+    <circle cx="800" cy="125" r="3" fill="#22d3ee" opacity="0.8"/>
+    <circle cx="360" cy="195" r="4.5" fill="#22d3ee" opacity="0.9"/>
+    <circle cx="720" cy="210" r="3.5" fill="#22d3ee" opacity="0.85"/>
+    <circle cx="1080" cy="190" r="4" fill="#22d3ee" opacity="0.9"/>
+    <circle cx="480" cy="275" r="3" fill="#22d3ee" opacity="0.8"/>
+    <circle cx="960" cy="260" r="4" fill="#22d3ee" opacity="0.9"/>
+
+    <!-- Amber nodes -->
+    <circle cx="200" cy="110" r="3.5" fill="#fbbf24" opacity="0.9"/>
+    <circle cx="600" cy="60" r="3" fill="#fbbf24" opacity="0.8"/>
+    <circle cx="1000" cy="130" r="4" fill="#fbbf24" opacity="0.9"/>
+    <circle cx="160" cy="185" r="3" fill="#fbbf24" opacity="0.8"/>
+    <circle cx="480" cy="135" r="4.5" fill="#fbbf24" opacity="0.95"/>
+    <circle cx="800" cy="205" r="3.5" fill="#fbbf24" opacity="0.85"/>
+    <circle cx="200" cy="215" r="3" fill="#fbbf24" opacity="0.8"/>
+    <circle cx="600" cy="265" r="4" fill="#fbbf24" opacity="0.9"/>
+    <circle cx="1000" cy="195" r="3" fill="#fbbf24" opacity="0.8"/>
+  </g>
+
+  <!-- Document/node icons scattered in grid cells -->
+  <g opacity="0.12" fill="#94a3b8">
+    <!-- PDF icon -->
+    <rect x="92" y="92" width="16" height="20" rx="2"/>
+    <path d="M100,96 L104,96 M100,100 L104,100 M100,104 L102,104" stroke="#0a0e1a" stroke-width="1" fill="none"/>
+    <!-- Image icon -->
+    <rect x="252" y="212" width="16" height="14" rx="2"/>
+    <circle cx="258" cy="218" r="2"/>
+    <path d="M253,224 L258,220 L262,223 L266,219" stroke="#0a0e1a" stroke-width="1" fill="none"/>
+    <!-- Code icon -->
+    <path d="M892,92 L886,100 L892,108 M908,92 L914,100 L908,108" stroke="#94a3b8" stroke-width="1.5" fill="none" opacity="0.12"/>
+    <!-- Table icon -->
+    <rect x="1052" y="252" width="16" height="14" rx="2"/>
+    <line x1="1052" y1="258" x2="1068" y2="258" stroke="#0a0e1a" stroke-width="0.8"/>
+    <line x1="1060" y1="252" x2="1060" y2="266" stroke="#0a0e1a" stroke-width="0.8"/>
+  </g>
+
+  <!-- Title -->
+  <g filter="url(#glowText)">
+    <text x="640" y="145" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="64" font-weight="700" fill="#f0f9ff" letter-spacing="6">RagWeave</text>
+  </g>
+
+  <!-- Subtitle -->
+  <text x="640" y="185" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="16" fill="#94a3b8" letter-spacing="4" font-weight="300">MULTI-MODAL RAG PLATFORM</text>
+
+  <!-- Accent line under subtitle -->
+  <line x1="510" y1="200" x2="770" y2="200" stroke="url(#threadCyan)" stroke-width="1" opacity="0.5"/>
+</svg>
