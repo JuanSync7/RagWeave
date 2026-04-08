@@ -57,3 +57,7 @@ certs/*
 
 # Test runner ephemeral output
 .tmp-test-results/
+
+# Autonomous run artifacts
+.autonomous/
+.parallel-dispatch-tmp/
