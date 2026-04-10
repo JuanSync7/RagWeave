@@ -14,3 +14,5 @@ pyyaml
 orjson
 mcp>=1.26.0
 langdetect
+# server/routes/documents.py → src.vector_db → weaviate (needed at import time)
+weaviate-client
