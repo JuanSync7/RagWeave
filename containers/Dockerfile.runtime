@@ -24,8 +24,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# No apt packages needed in runtime — Temporal worker has no HTTP healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder (no build tools come along)
