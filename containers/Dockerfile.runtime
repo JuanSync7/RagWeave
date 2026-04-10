@@ -1,4 +1,21 @@
-FROM python:3.11-slim
+# --- Builder stage: installs ML deps with gcc available ---
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY containers/requirements-worker.txt /app/requirements-worker.txt
+RUN pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-worker.txt
+
+# --- Runtime stage: no build tools ---
+FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -9,16 +26,12 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install only worker/ML dependencies (torch, docling, sentence-transformers, etc.).
-# Source is on PYTHONPATH=/app so no package install needed.
-COPY containers/requirements-worker.txt /app/requirements-worker.txt
-RUN pip install --upgrade pip && pip install -r /app/requirements-worker.txt
+# Copy installed packages from builder (no build tools come along)
+COPY --from=builder /install /usr/local
 
-# Copy source code needed by server/api + worker.
-# Create non-root user (mirrors Dockerfile.api pattern).
+# Create non-root user
 RUN groupadd --system app && useradd --system --gid app --create-home app
 
 COPY --chown=app:app config /app/config

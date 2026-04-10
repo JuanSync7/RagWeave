@@ -1,24 +1,39 @@
-FROM python:3.11-slim-bookworm
+# --- Builder stage: installs deps with gcc available ---
+FROM python:3.11-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install only API-facing dependencies (no torch/docling/ML deps).
-# Source is on PYTHONPATH=/app so no package install needed.
 COPY containers/requirements-api.txt /app/requirements-api.txt
-RUN pip install --upgrade pip && pip install -r /app/requirements-api.txt
+RUN pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-api.txt
+
+# --- Runtime stage: no build tools, no gcc ---
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app \
+    PYTHONUSERBASE=/install
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder (no build tools come along)
+COPY --from=builder /install /usr/local
 
 RUN groupadd --system app && useradd --system --gid app --create-home app \
     && mkdir -p /home/app/.litellm /app/logs \
@@ -37,4 +52,4 @@ ENV RAG_API_PORT=${RAG_API_PORT}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:${RAG_API_PORT}/health >/dev/null || exit 1
 
-CMD uvicorn server.api:app --host 0.0.0.0 --port ${RAG_API_PORT}
+CMD ["uvicorn", "server.api:app", "--host", "0.0.0.0", "--port", "${RAG_API_PORT}"]
