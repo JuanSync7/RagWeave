@@ -1,9 +1,11 @@
+# syntax=docker/dockerfile:1
 # --- Builder stage: installs ML deps with gcc available ---
 FROM python:3.11-slim AS builder
 
+# PIP_NO_CACHE_DIR intentionally omitted — the BuildKit cache mount below
+# persists pip's wheel cache across rebuilds (critical for torch re-downloads)
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
@@ -12,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY containers/requirements-worker.txt /app/requirements-worker.txt
-RUN pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-worker.txt \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-worker.txt \
     && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /install -type d -name tests -prune -exec rm -rf {} + \
     && find /install -type d -name test -prune -exec rm -rf {} + \

@@ -1,9 +1,11 @@
+# syntax=docker/dockerfile:1
 # --- Builder stage: installs deps with gcc available ---
 FROM python:3.11-slim-bookworm AS builder
 
+# PIP_NO_CACHE_DIR intentionally omitted — the BuildKit cache mount below
+# persists pip's wheel cache across rebuilds (speeds up dep-change rebuilds)
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
@@ -13,7 +15,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY containers/requirements-api.txt /app/requirements-api.txt
-RUN pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-api.txt \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-api.txt \
     && find /install -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /install -type d -name tests -prune -exec rm -rf {} + \
     && find /install -type d -name test -prune -exec rm -rf {} + \
