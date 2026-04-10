@@ -189,6 +189,60 @@ pytest tests/ingest/ -v   # ingestion tests only
 ./scripts/compose.sh --profile app --profile workers --profile monitoring up -d
 ```
 
+## Container Images
+
+The stack uses two images with strict dependency isolation:
+
+| Image | Size (podman) | Contents |
+|---|---|---|
+| `rag-api` | **~390 MB** | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
+| `rag-worker` | **~5.8 GB** | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
+
+Dependencies live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would install every dep listed under `[project.dependencies]`, which undoes the isolation. Local dev still uses `pyproject.toml` via `make install`; containers bypass it.
+
+**Adding a new dependency:**
+- If the API server imports it → add to `pyproject.toml` AND `containers/requirements-api.txt`
+- If only the worker uses it → add to `pyproject.toml` AND `containers/requirements-worker.txt`
+- Dev-only (pytest, deptry, etc.) → `pyproject.toml` only
+
+### Build the images
+
+**With make (recommended):**
+
+```bash
+make container-build          # build both with docker (BuildKit)
+make container-build-podman   # build both with podman (preferred for production)
+make container-probe          # run API import probe — catches transitive ML leakage
+make container-sizes          # show current image sizes
+make container-clean          # remove local rag-api / rag-worker images
+```
+
+**Manual Docker:**
+
+```bash
+DOCKER_BUILDKIT=1 docker build -t rag-api    -f containers/Dockerfile.api .
+DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
+```
+
+**Manual Podman:**
+
+```bash
+# --format docker preserves HEALTHCHECK directives if ever re-added to the Dockerfile
+podman build --format docker -t rag-api    -f containers/Dockerfile.api .
+podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
+```
+
+### Architecture notes
+
+- **Multi-stage builds** — `build-essential` (gcc et al) lives in the builder stage only; the runtime stage copies just the installed `site-packages`. Saves ~170 MB per image.
+- **BuildKit pip cache mounts** — `RUN --mount=type=cache,target=/root/.cache/pip` persists pip's wheel cache across rebuilds. Does not affect final image size but dramatically speeds up dep-change rebuilds (e.g. bumping torch version).
+- **`.dockerignore`** — excludes `.venv/`, `tests/`, `evals/`, `docs/`, `node_modules/`, etc. Fully-cached rebuilds take ~1.5 seconds.
+- **HEALTHCHECK lives in `docker-compose.yml`**, not in the Dockerfile — podman's default OCI image format drops `HEALTHCHECK` directives, and compose-level healthchecks work identically under both docker-compose and podman-compose.
+- **Source code is on `PYTHONPATH=/app`**, so there's no `pip install .` step. Changing source doesn't invalidate the dep layer.
+- **GPU inference is supported** in the worker image — full torch with bundled CUDA libs. To enable on the host: set `gpus: all` under `rag-worker` in `docker-compose.yml` and ensure the NVIDIA container runtime is installed.
+
+Full optimization history (9-iteration auto-research run): [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md)
+
 ## HTTPS Gateway (nginx)
 
 Add HTTPS support in front of the API server using nginx:

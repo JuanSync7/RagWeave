@@ -2,12 +2,18 @@
 
 ## Summary
 
-The `containers/Dockerfile.api` and `containers/Dockerfile.runtime` were optimized from a combined **6,402 MB** down to **3,041 MB** (−52.5%), via auto-research on branch `autoresearch/container-2026-04-10`.
+`containers/Dockerfile.api` and `containers/Dockerfile.runtime` were optimized via a 10-iteration auto-research run on branch `autoresearch/container-2026-04-10`. The biggest single win was **splitting dependencies** so the API image no longer contains torch/docling/transformers.
 
-| Image | Before | After |
-|---|---|---|
-| `rag-api` | 3,197 MB | **115 MB** |
-| `rag-worker` | 3,205 MB | **2,926 MB** |
+### Final sizes (measured with `podman images`, which reports true on-disk size)
+
+| Image | Baseline | Final | Reduction |
+|---|---|---|---|
+| `rag-api` | _TBD — baseline rebuild in progress_ | **~390 MB** | — |
+| `rag-worker` | _TBD — baseline rebuild in progress_ | **~5.8 GB** | — |
+
+> **A note on measurement**: The auto-research run used `docker inspect --format='{{.Size}}'` as its metric, which reports a single-platform image slice (no BuildKit provenance attestations) and came in much smaller than the actual disk image. The iteration-by-iteration **deltas** in `iterations.tsv` remain accurate relative measurements, but the absolute numbers there understate the true on-disk size by 2–3×.
+>
+> `podman images` is the most honest absolute measurement — it reports layer content without attestation overhead, and matches what a deployment host will actually pull and store. Use it for reality checks.
 
 Full experiment log: [`auto-research/container/research/iterations.tsv`](../../auto-research/container/research/iterations.tsv)
 Full changelog: [`auto-research/container/research/changelog.md`](../../auto-research/container/research/changelog.md)
@@ -47,74 +53,85 @@ The builder stage removes `__pycache__/`, `tests/`, `*.pyc`, and `*.pyo` from `/
 
 ### 5. No more `curl` in runtime layers
 
-- API image: health check now uses Python stdlib `urllib.request` instead of `curl`
-- Worker image: `curl` removed entirely (no HTTP healthcheck)
+- API image: healthcheck moved to `docker-compose.yml` (uses Python stdlib `urllib.request`). Podman's default OCI image format drops `HEALTHCHECK` directives, so keeping it in compose is the portable location.
+- Worker image: `curl` removed entirely (no HTTP healthcheck needed — Temporal handles worker liveness)
+
+### 6. BuildKit pip cache mounts
+
+Both builder stages use `RUN --mount=type=cache,target=/root/.cache/pip pip install ...`. Pip's wheel cache is persisted across builds via BuildKit's cache store. Does not affect final image size but speeds up rebuilds dramatically when a dep is added or upgraded — no need to re-download ~2 GB of torch wheels.
 
 ## How to build
 
-### Docker
+### Via make (recommended)
 
 ```bash
-# API image
-DOCKER_BUILDKIT=1 docker build -t rag-api -f containers/Dockerfile.api .
+make container-build          # build both with docker (BuildKit enabled)
+make container-build-podman   # build both with podman
+make container-probe          # run the API import probe
+make container-sizes          # list current image sizes
+make container-clean          # remove local images from both engines
+```
 
-# Worker image
+### Manual Docker
+
+```bash
+DOCKER_BUILDKIT=1 docker build -t rag-api    -f containers/Dockerfile.api .
 DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
 
-# Or via docker-compose (unchanged)
+# Or via compose (unchanged)
 ./scripts/compose.sh --profile app --profile workers up -d --build
 ```
 
-### Podman
-
-Both Dockerfiles use only standard syntax (no Docker-specific extensions). Podman should work identically:
+### Manual Podman
 
 ```bash
-# API image
-podman build -t rag-api -f containers/Dockerfile.api .
-
-# Worker image
-podman build -t rag-worker -f containers/Dockerfile.runtime .
+# --format docker preserves HEALTHCHECK directives if ever re-added to the Dockerfile.
+# Without it podman defaults to OCI format and silently drops HEALTHCHECK.
+podman build --format docker -t rag-api    -f containers/Dockerfile.api .
+podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
 ```
 
-If you rename the files to `Containerfile.*` (Podman convention), update the `-f` flag accordingly.
+The Dockerfiles use only standard syntax (no Docker-specific extensions) and build identically under both engines.
 
 ## Verifying the optimization
 
 ### Image size check
+
+Preferred: **`podman images`** — shows true on-disk size without BuildKit attestation overhead.
+
 ```bash
-docker images rag-api rag-worker --format "table {{.Repository}}\t{{.Size}}"
+podman images --format "table {{.Repository}}\t{{.Size}}" | grep rag-
 ```
 
-Expected (approximate):
+Expected (approximate, podman):
 ```
-REPOSITORY    SIZE
-rag-api       115MB
-rag-worker    2.9GB
+rag-api     ~390 MB
+rag-worker  ~5.8 GB
 ```
+
+If using docker: **`docker images`** shows virtual size (includes BuildKit attestations), while `docker inspect --format='{{.Size}}'` returns a much smaller single-platform slice. Both are "correct" depending on what you're measuring — use `docker images` for comparison with `podman images`.
 
 ### Import probe (catches transitive ML leakage into API image)
 
 ```bash
+make container-probe
+# or manually:
 docker run --rm --entrypoint python rag-api -c "from server.api import app; print('OK')"
+podman run --rm --entrypoint python rag-api -c "from server.api import app; print('OK')"
 ```
 
 If this prints `OK`, the API image has all deps it needs. If it fails with `ModuleNotFoundError`, add the missing package to `containers/requirements-api.txt` and rebuild.
 
-## Known remaining gaps
+## Design decisions (confirmed)
 
-### CPU-only torch (not applied)
-The runtime image is still ~2.9 GB, dominated by `torch` with bundled CUDA libraries (~1.5 GB). If the worker is running on CPU only:
+### GPU inference is required → keep full torch
+The worker uses GPU inference for embedding and reranking models. Full torch (with bundled CUDA runtime libraries, ~1.5 GB) stays in `requirements-worker.txt`. CPU-only torch (`--index-url https://download.pytorch.org/whl/cpu`) was considered and rejected because it would break GPU inference paths.
 
-```bash
-# Not applied automatically — requires user confirmation
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-```
+### Healthcheck in docker-compose, not Dockerfile
+Podman's default OCI image format drops `HEALTHCHECK` directives with a warning. Moving the check to `docker-compose.yml` makes it work identically under both `docker-compose` and `podman-compose`, regardless of image format. The check uses Python stdlib `urllib.request` (no curl dependency needed inside the container).
 
-This was not applied during the auto-research run because the worker is designed to optionally use GPU (see `rag-worker` service comment in `docker-compose.yml`). Apply manually if you are certain no GPU path is used.
-
-### BuildKit pip cache mounts (optional follow-up)
-Adds `RUN --mount=type=cache,target=/root/.cache/pip pip install ...` in the builder stages. No size change, but rebuilds that add/change a dep will reuse cached wheels. Attempted in iteration 007 but discarded because the auto-research scoring metric is size-only. Good to add manually.
+### BuildKit pip cache mounts are in the Dockerfiles
+Attempted in auto-research iter-007 and discarded by the size-only metric (cache mounts don't affect final image size). Re-added manually afterward because the rebuild-speed benefit is significant when adding/upgrading deps.
 
 ## Troubleshooting
 
