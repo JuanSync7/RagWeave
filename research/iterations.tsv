@@ -1,0 +1,2 @@
+iteration	commit	retrieval_p95_ms	retrieval_p50_ms	drift_count	lint_failures	status	summary
+001	d0449957	3163.5	1780.2	0	13	baseline	baseline captured — heuristic-path mode, warmup queries enabled, harness monkey-patches LLM off. Reranking dominates (~85% of latency); embedding has cold-start outliers up to 1382ms p95; kg_expansion is 0ms (dead surface for parallelization).

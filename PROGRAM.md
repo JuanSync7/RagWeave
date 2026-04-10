@@ -32,7 +32,7 @@ Before measuring latency, the harness re-runs the benchmark queries and compares
 - **Action match**: `RAGResponse.action.value` must equal the baseline action for that query.
 - **Top-K set match**: the unordered set of `RankedResult.metadata['doc_id']` (or equivalent stable identifier) for the top-`RERANK_TOP_K` reranked results must equal the baseline set.
 - **Drift tolerance**: at most 1 of 20 queries (5%) may diverge on either dimension. The diverging query must be logged but does not fail the iteration.
-- **LLM determinism**: the harness sets `temperature=0` for all LLM calls during benchmarks (does NOT modify production config — passed via `process_query()` arguments). Baseline is captured under the same setting.
+- **Stage 1 determinism**: the harness monkey-patches `query_processor._check_llm_available` to return `False` for the duration of the benchmark run, forcing the LLM-free heuristic path in stage 1. The heuristic is a pure function of word count → fully deterministic. This is a benchmark-only override; the production code is never modified. See `scripts/benchmark_retrieval_query.py::_patch_settings_for_determinism` for the rationale: strategy 4 (LLM call structure) is deferred, so iterations cannot fix LLM latency anyway, and running 60 samples × N iterations with live LLM (~15s per call observed) would make the loop impractically slow.
 
 ## Logging / error-handling / duration lint check
 
@@ -133,14 +133,15 @@ User-provided strategies, in priority order. The loop picks one per iteration. *
 
 ## Pre-flight requirements (for `auto-research run`)
 
-The harness `scripts/benchmark_retrieval_query.py` requires these services running before the loop starts:
+**Important**: this project uses **embedded Weaviate** (`weaviate.connect_to_embedded`). There is no separate Weaviate container — the Java process is spawned in-process by `RAGChain.__init__` from the `WEAVIATE_DATA_DIR` seed directory. The harness verifies filesystem paths, not HTTP endpoints, for Weaviate.
 
-1. **Weaviate**: `curl http://localhost:8080/v1/.well-known/ready` returns 200.
-2. **Ollama** (or LiteLLM proxy backing the `query` and `generation` model aliases): `curl http://localhost:11434/api/tags` returns 200.
-3. **Local BGE embedding model**: `LocalBGEEmbeddings` constructable.
-4. **Local BGE reranker model**: `LocalBGEReranker` constructable from `RERANKER_MODEL_PATH`.
-5. **A populated Weaviate collection** with documents matching the benchmark queries — otherwise hybrid_search returns 0 results and reranking is a no-op.
+The harness `scripts/benchmark_retrieval_query.py` requires these before the loop starts:
 
-To start services: `./scripts/compose.sh --profile app up -d` (per `scripts/compose.sh`).
+1. **Weaviate seed data dir**: `config.settings.WEAVIATE_DATA_DIR` (default `<PROJECT_ROOT>/.weaviate_data`) exists AND is writable. Embedded Weaviate mutates this directory on startup. If the worktree was just created, copy it from a populated main checkout: `cp -a /path/to/main_repo/.weaviate_data ./.weaviate_data`.
+2. **Ollama** (or LiteLLM proxy backing the `query` model alias): `curl http://localhost:11434/api/tags` returns 200. Override with `OLLAMA_HEALTH_URL` env var.
+3. **Local BGE embedding model**: `EMBEDDING_MODEL_PATH` (default `~/models/baai/bge-m3`) exists.
+4. **Local BGE reranker model**: `RERANKER_MODEL_PATH` (default `~/models/baai/bge-reranker-v2-m3`) exists.
+5. **A populated Weaviate collection**: the seed data must include the `RAGDocuments` (or `VECTOR_COLLECTION_DEFAULT`) collection with documents. Otherwise `hybrid_search` returns 0 results and reranking is a no-op — the output contract would become trivially satisfied (all empty sets match all empty sets) and any iteration would "pass" the guard.
+6. **Python environment**: the main repo's existing venv at `/home/juansync7/RagWeave/.venv` has all the required deps. Run the harness with `/home/juansync7/RagWeave/.venv/bin/python scripts/benchmark_retrieval_query.py ...`.
 
 If pre-flight fails, the run loop refuses to start and prints clear error messages — it does not silently continue with mocks.

@@ -38,17 +38,30 @@ What it guards
    ``TimingPool.record``, ``tracer.span``, etc.). Iterations that touch a
    guarded function and leave it lint-failing are reported as
    ``lint_check_passed: false``.
-3. **Pre-flight**: Weaviate, the LLM provider, and the local BGE models must be
-   reachable before the loop starts. Pre-flight failure produces a ``crash``
-   record and exits non-zero.
+3. **Pre-flight**: embedded Weaviate seed data directory, local BGE model
+   checkpoints (embedding + reranker), and the Ollama/LLM HTTP endpoint
+   must all be present before the loop starts. Pre-flight failure produces
+   a ``crash`` record and exits non-zero.
 
 Determinism
 -----------
-At startup the harness monkey-patches ``config.settings.QUERY_PROCESSING_TEMPERATURE``
-to 0 and ``config.settings.GENERATION_ENABLED`` to ``False``. These are
-benchmark-only overrides — the production settings file is never written.
-This ensures stages 1-5 see the same LLM temperature on every iteration and
-that ``skip_generation=True`` actually short-circuits stage 6.
+At startup the harness forces the LLM-free "heuristic" path in the query
+processor by monkey-patching ``query_processor._check_llm_available`` to
+return ``False``. Rationale:
+
+- PROGRAM.md scopes the exploration strategies to stages 2-5 (embedding,
+  kg_expansion, hybrid_search, reranking). Stage-1 LLM round-trips are
+  explicitly out of scope (strategy 4 deferred).
+- The heuristic confidence function is purely a function of word count and
+  therefore deterministic — the output contract becomes crisp.
+- Ollama LLM calls dominate stage 1 latency (~15s each observed); running
+  60 samples × 3 reps with the LLM path would take ~15 minutes per iteration,
+  making a 30-iteration loop impractically slow.
+
+``config.settings.GENERATION_ENABLED`` is also set to ``False`` — stage 6
+is out of scope for the retrieval-only metric and disabling it removes
+unnecessary LLM cost on every benchmark run. These are benchmark-only
+overrides; the production settings file is never written.
 
 This file is IMMUTABLE during the auto-research loop. Do not edit it from
 within an iteration. If the contract is wrong, stop the loop, edit it
@@ -178,21 +191,34 @@ logging.basicConfig(
 
 
 def _patch_settings_for_determinism() -> None:
-    """Force LLM temperature=0 and disable generation for benchmark runs.
+    """Force the LLM-free heuristic path in stage 1 and disable stage 6.
 
-    This monkey-patches ``config.settings`` after import; we never write the
-    file. Production behavior is unchanged outside this process.
+    This monkey-patches ``config.settings`` and ``query_processor`` after import;
+    we never write either file. Production behavior is unchanged outside this
+    process. See the module docstring for full rationale.
     """
     sys.path.insert(0, str(REPO_ROOT))
     from config import settings as _settings  # noqa: E402
+    from src.retrieval.query.nodes import query_processor as _qp  # noqa: E402
 
-    _settings.QUERY_PROCESSING_TEMPERATURE = 0.0
-    # Generation is excluded from the retrieval-only metric, but disabling it
-    # also avoids unnecessary LLM cost on every benchmark run.
+    # Stage 1: force heuristic path. The pipeline reads
+    # ``ollama_available = _check_llm_available()`` once at the top of
+    # ``process_query``; overriding the symbol on the module makes subsequent
+    # calls return False, which flips ``reformulate_and_evaluate_node`` to the
+    # heuristic branch.
+    _qp._check_llm_available = lambda: False
+    _qp._check_ollama_available = lambda: False
+
+    # Stage 6: disabled for the retrieval-only metric.
     _settings.GENERATION_ENABLED = False
+
+    # Harmless legacy override — kept in case any code path still reads
+    # temperature directly.
+    _settings.QUERY_PROCESSING_TEMPERATURE = 0.0
+
     logger.info(
-        "Determinism overrides applied: QUERY_PROCESSING_TEMPERATURE=0.0, "
-        "GENERATION_ENABLED=False"
+        "Determinism overrides applied: query_processor._check_llm_available=False "
+        "(heuristic path forced), GENERATION_ENABLED=False"
     )
 
 
@@ -210,22 +236,61 @@ def _http_ready(url: str, timeout: float = 2.0) -> bool:
 
 
 def run_pre_flight() -> Tuple[bool, List[str]]:
-    """Verify external services are reachable. Returns (ok, error_messages)."""
+    """Verify external dependencies are reachable. Returns (ok, error_messages).
+
+    This project uses **embedded Weaviate** (``weaviate.connect_to_embedded``),
+    not a separate service on :8080. The "service" for Weaviate is just the
+    presence of the seed data directory on disk — the Java process is spawned
+    in-process by the RAGChain constructor.
+    """
     errors: List[str] = []
 
-    weaviate_url = os.environ.get(
-        "WEAVIATE_HEALTH_URL", "http://localhost:8080/v1/.well-known/ready"
-    )
-    if not _http_ready(weaviate_url):
+    # 1. Embedded Weaviate seed data directory must exist and be writable.
+    # Import the settings lazily so the pre-flight respects any overrides
+    # applied via environment variables.
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from config import settings as _settings  # noqa: E402
+    except Exception as exc:
+        errors.append(f"Failed to import config.settings: {exc}")
+        return False, errors
+
+    weaviate_data_dir = Path(_settings.WEAVIATE_DATA_DIR)
+    if not weaviate_data_dir.exists():
         errors.append(
-            f"Weaviate not reachable at {weaviate_url}. "
-            "Start it with: ./scripts/compose.sh --profile app up -d"
+            f"Weaviate seed data missing: {weaviate_data_dir}. "
+            "Copy it from a populated main checkout: "
+            f"cp -a /path/to/main_repo/.weaviate_data {weaviate_data_dir}"
+        )
+    elif not os.access(weaviate_data_dir, os.W_OK):
+        errors.append(
+            f"Weaviate seed data dir exists but is not writable: {weaviate_data_dir}. "
+            "Embedded Weaviate mutates the directory at startup, so it must be writable."
         )
 
+    # 2. Local BGE models (embedding + reranker) must exist.
+    embedding_model_path = Path(_settings.EMBEDDING_MODEL_PATH)
+    if not embedding_model_path.exists():
+        errors.append(
+            f"Embedding model missing: {embedding_model_path}. "
+            "Set RAG_EMBEDDING_MODEL or place the BAAI/bge-m3 checkpoint there."
+        )
+    reranker_model_path = Path(_settings.RERANKER_MODEL_PATH)
+    if not reranker_model_path.exists():
+        errors.append(
+            f"Reranker model missing: {reranker_model_path}. "
+            "Set RAG_RERANKER_MODEL or place the BAAI/bge-reranker-v2-m3 checkpoint there."
+        )
+
+    # 3. Ollama / LLM provider must be reachable (actual HTTP service).
     ollama_url = os.environ.get("OLLAMA_HEALTH_URL", "http://localhost:11434/api/tags")
     if not _http_ready(ollama_url):
-        errors.append(f"Ollama / LLM provider not reachable at {ollama_url}")
+        errors.append(
+            f"Ollama / LLM provider not reachable at {ollama_url}. "
+            "Start Ollama (`ollama serve`) or set OLLAMA_HEALTH_URL."
+        )
 
+    # 4. Benchmark query set must exist.
     if not BENCHMARK_QUERIES_PATH.exists():
         errors.append(
             f"Benchmark queries missing: {BENCHMARK_QUERIES_PATH}. "
@@ -302,6 +367,20 @@ def run_benchmark(reps: int = REPS_PER_QUERY) -> Dict[str, Any]:
     chain_t0 = time.perf_counter()
     chain = RAGChain(persistent_weaviate=True)
     logger.info("RAGChain ready in %.0fms.", (time.perf_counter() - chain_t0) * 1000)
+
+    # Warm-up pass: run 2 discard-me queries so the first *timed* query is
+    # not inflated by cold embedding/reranker forward passes. Without this,
+    # query 0's retrieval-ms is ~2x the warm steady-state and p99 becomes
+    # noisy in small samples.
+    logger.info("Warming up models with 2 discard queries...")
+    try:
+        chain.run(query="warmup query for embedding and reranker cold start",
+                  skip_generation=True, fast_path=False)
+        chain.run(query="a second warmup query to steady throughput",
+                  skip_generation=True, fast_path=False)
+    except Exception as exc:
+        logger.warning("Warm-up query failed (continuing): %s", exc)
+    logger.info("Warm-up complete. Starting timed benchmark.")
 
     per_query: List[Dict[str, Any]] = []
     all_retrieval_ms: List[float] = []
