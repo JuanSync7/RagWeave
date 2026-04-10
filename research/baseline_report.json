@@ -3,41 +3,41 @@
   "queries_total": 20,
   "reps_per_query": 3,
   "aggregate": {
-    "retrieval_p50_ms": 1780.2,
-    "retrieval_p95_ms": 3163.5,
-    "retrieval_p99_ms": 3477.5,
-    "retrieval_mean_ms": 1877.4,
+    "retrieval_p50_ms": 1671.5,
+    "retrieval_p95_ms": 3030.8,
+    "retrieval_p99_ms": 3090.0,
+    "retrieval_mean_ms": 1805.5,
     "samples_total": 60
   },
   "per_stage": {
-    "query_processing": {
-      "p50_ms": 37.1,
-      "p95_ms": 76.9,
-      "mean_ms": 43.9,
+    "embedding": {
+      "p50_ms": 0.1,
+      "p95_ms": 1642.3,
+      "mean_ms": 363.2,
       "samples": 60
     },
-    "hybrid_search": {
-      "p50_ms": 67.3,
-      "p95_ms": 187.8,
-      "mean_ms": 96.1,
-      "samples": 59
-    },
-    "embedding": {
-      "p50_ms": 0.0,
-      "p95_ms": 1381.9,
-      "mean_ms": 269.3,
+    "kg_expansion": {
+      "p50_ms": 0.5,
+      "p95_ms": 1.4,
+      "mean_ms": 0.6,
       "samples": 60
     },
     "reranking": {
-      "p50_ms": 1588.5,
-      "p95_ms": 1774.0,
-      "mean_ms": 1494.6,
-      "samples": 59
+      "p50_ms": 1447.5,
+      "p95_ms": 1943.5,
+      "mean_ms": 1409.2,
+      "samples": 56
     },
-    "kg_expansion": {
-      "p50_ms": 0.0,
-      "p95_ms": 0.1,
-      "mean_ms": 0.0,
+    "hybrid_search": {
+      "p50_ms": 89.5,
+      "p95_ms": 160.1,
+      "mean_ms": 82.1,
+      "samples": 56
+    },
+    "query_processing": {
+      "p50_ms": 54.9,
+      "p95_ms": 102.0,
+      "mean_ms": 49.7,
       "samples": 60
     }
   },
@@ -47,17 +47,17 @@
       "kind": "kg",
       "text": "What is Retrieval-Augmented Generation and how does it work?",
       "samples_ms": [
-        1091.9,
-        1049.3,
-        1056.8
+        1044.8,
+        1015.4,
+        1015.6
       ],
-      "median_ms": 1056.8,
+      "median_ms": 1015.6,
       "per_stage_median_ms": {
-        "query_processing": 2.2,
-        "hybrid_search": 5.9,
         "embedding": 0.0,
-        "reranking": 1041.5,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.1,
+        "reranking": 999.9,
+        "hybrid_search": 7.1,
+        "query_processing": 3.3
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -74,17 +74,17 @@
       "kind": "kg",
       "text": "Explain machine learning in the context of this knowledge base.",
       "samples_ms": [
-        1116.6,
-        1067.3,
-        1068.5
+        1079.3,
+        1021.2,
+        1031.6
       ],
-      "median_ms": 1068.5,
+      "median_ms": 1031.6,
       "per_stage_median_ms": {
-        "query_processing": 2.6,
-        "hybrid_search": 7.7,
-        "embedding": 0.0,
-        "reranking": 1057.0,
-        "kg_expansion": 0.0
+        "embedding": 0.1,
+        "kg_expansion": 0.1,
+        "reranking": 1012.3,
+        "hybrid_search": 6.9,
+        "query_processing": 3.3
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -101,17 +101,17 @@
       "kind": "kg",
       "text": "How is deep learning used by ACME?",
       "samples_ms": [
-        1103.5,
-        1070.3,
-        1087.2
+        1131.6,
+        1073.0,
+        1061.9
       ],
-      "median_ms": 1087.2,
+      "median_ms": 1073.0,
       "per_stage_median_ms": {
-        "query_processing": 2.4,
-        "hybrid_search": 6.3,
         "embedding": 0.0,
-        "reranking": 1061.1,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.2,
+        "reranking": 1043.8,
+        "hybrid_search": 12.1,
+        "query_processing": 6.8
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -128,17 +128,17 @@
       "kind": "kg",
       "text": "What does BAAI provide for embeddings?",
       "samples_ms": [
-        1160.5,
-        1097.7,
-        1115.6
+        1323.7,
+        1111.4,
+        1096.3
       ],
-      "median_ms": 1115.6,
+      "median_ms": 1111.4,
       "per_stage_median_ms": {
-        "query_processing": 3.3,
-        "hybrid_search": 8.5,
         "embedding": 0.0,
-        "reranking": 1086.1,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.2,
+        "reranking": 1073.3,
+        "hybrid_search": 20.6,
+        "query_processing": 10.0
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -155,17 +155,17 @@
       "kind": "kg",
       "text": "Tell me about web development practices documented here.",
       "samples_ms": [
-        1206.5,
-        1162.6,
-        1289.8
+        1905.2,
+        1304.5,
+        1208.2
       ],
-      "median_ms": 1206.5,
+      "median_ms": 1304.5,
       "per_stage_median_ms": {
-        "query_processing": 8.0,
-        "hybrid_search": 21.9,
         "embedding": 0.0,
-        "reranking": 1128.3,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.4,
+        "reranking": 1152.6,
+        "hybrid_search": 69.6,
+        "query_processing": 20.3
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -182,17 +182,17 @@
       "kind": "kg",
       "text": "What are vector embeddings and where are they used?",
       "samples_ms": [
-        1714.1,
-        1388.1,
-        1542.3
+        2291.4,
+        1534.0,
+        1380.9
       ],
-      "median_ms": 1542.3,
+      "median_ms": 1534.0,
       "per_stage_median_ms": {
-        "query_processing": 18.3,
-        "hybrid_search": 51.7,
-        "embedding": 0.0,
-        "reranking": 1335.4,
-        "kg_expansion": 0.0
+        "embedding": 0.1,
+        "kg_expansion": 0.9,
+        "reranking": 1264.1,
+        "hybrid_search": 109.3,
+        "query_processing": 41.3
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -209,17 +209,17 @@
       "kind": "kg",
       "text": "How does unsupervised learning differ from supervised learning?",
       "samples_ms": [
-        2310.3,
-        1744.2,
-        1721.7
+        2611.5,
+        1658.6,
+        1507.3
       ],
-      "median_ms": 1744.2,
+      "median_ms": 1658.6,
       "per_stage_median_ms": {
-        "query_processing": 64.5,
-        "hybrid_search": 95.6,
-        "embedding": 0.0,
-        "reranking": 1513.5,
-        "kg_expansion": 0.0
+        "embedding": 1.0,
+        "kg_expansion": 0.5,
+        "reranking": 1407.8,
+        "hybrid_search": 130.7,
+        "query_processing": 69.2
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -236,17 +236,17 @@
       "kind": "kg",
       "text": "Describe TensorFlow's role in this stack.",
       "samples_ms": [
-        3153.4,
-        1666.4,
-        1597.8
+        3097.6,
+        1739.1,
+        1750.4
       ],
-      "median_ms": 1666.4,
+      "median_ms": 1750.4,
       "per_stage_median_ms": {
-        "query_processing": 30.5,
-        "hybrid_search": 100.5,
-        "embedding": 0.0,
-        "reranking": 1593.9,
-        "kg_expansion": 0.1
+        "embedding": 0.2,
+        "kg_expansion": 0.6,
+        "reranking": 1588.0,
+        "hybrid_search": 113.2,
+        "query_processing": 57.2
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -263,17 +263,17 @@
       "kind": "kg",
       "text": "What is the Technical Architecture Team responsible for?",
       "samples_ms": [
-        3113.5,
-        1888.8,
-        1868.1
+        2742.4,
+        1423.7,
+        1645.0
       ],
-      "median_ms": 1888.8,
+      "median_ms": 1645.0,
       "per_stage_median_ms": {
-        "query_processing": 58.1,
-        "hybrid_search": 119.6,
-        "embedding": 0.1,
-        "reranking": 1669.0,
-        "kg_expansion": 0.0
+        "embedding": 0.0,
+        "kg_expansion": 0.7,
+        "reranking": 1349.9,
+        "hybrid_search": 91.8,
+        "query_processing": 47.6
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -290,17 +290,17 @@
       "kind": "kg",
       "text": "Give me an overview of the Tech Knowledge Base.",
       "samples_ms": [
-        2727.1,
-        1811.8,
-        1807.4
+        3084.7,
+        1512.6,
+        1775.0
       ],
-      "median_ms": 1811.8,
+      "median_ms": 1775.0,
       "per_stage_median_ms": {
-        "query_processing": 36.2,
-        "hybrid_search": 104.3,
-        "embedding": 0.2,
-        "reranking": 1600.5,
-        "kg_expansion": 0.0
+        "embedding": 0.0,
+        "kg_expansion": 0.6,
+        "reranking": 1446.3,
+        "hybrid_search": 114.2,
+        "query_processing": 61.5
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -317,17 +317,17 @@
       "kind": "kg",
       "text": "What does Technologies Inc do?",
       "samples_ms": [
-        2623.0,
-        1789.0,
-        1822.5
+        2877.9,
+        1795.1,
+        1485.1
       ],
-      "median_ms": 1822.5,
+      "median_ms": 1795.1,
       "per_stage_median_ms": {
-        "query_processing": 53.9,
-        "hybrid_search": 64.5,
         "embedding": 0.0,
-        "reranking": 1670.6,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.6,
+        "reranking": 1449.7,
+        "hybrid_search": 84.9,
+        "query_processing": 55.2
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -344,17 +344,17 @@
       "kind": "kg",
       "text": "Explain the technical overview document.",
       "samples_ms": [
-        2817.1,
-        1687.4,
-        1624.6
+        2835.7,
+        1664.6,
+        1548.2
       ],
-      "median_ms": 1687.4,
+      "median_ms": 1664.6,
       "per_stage_median_ms": {
-        "query_processing": 41.9,
-        "hybrid_search": 67.9,
-        "embedding": 0.0,
-        "reranking": 1575.9,
-        "kg_expansion": 0.0
+        "embedding": 0.2,
+        "kg_expansion": 0.8,
+        "reranking": 1414.1,
+        "hybrid_search": 90.1,
+        "query_processing": 49.9
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -371,17 +371,17 @@
       "kind": "kg",
       "text": "Where is team documentation kept and what does it contain?",
       "samples_ms": [
-        3650.8,
-        1756.0,
-        1771.5
+        2842.5,
+        1649.5,
+        2315.0
       ],
-      "median_ms": 1771.5,
+      "median_ms": 2315.0,
       "per_stage_median_ms": {
-        "query_processing": 47.5,
-        "hybrid_search": 67.3,
-        "embedding": 0.0,
-        "reranking": 1641.2,
-        "kg_expansion": 0.1
+        "embedding": 0.1,
+        "kg_expansion": 0.7,
+        "reranking": 1503.5,
+        "hybrid_search": 91.7,
+        "query_processing": 51.3
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -396,26 +396,26 @@
     {
       "id": "kg-14",
       "kind": "kg",
-      "text": "What is artificial intelligence according to this corpus?",
+      "text": "What is Python Programming and how does NumPy relate to it?",
       "samples_ms": [
-        3070.8,
-        1755.8,
-        1678.6
+        1868.0,
+        1621.5,
+        1806.1
       ],
-      "median_ms": 1755.8,
+      "median_ms": 1806.1,
       "per_stage_median_ms": {
-        "query_processing": 37.3,
-        "hybrid_search": 57.5,
-        "embedding": 0.1,
-        "reranking": 1678.4,
-        "kg_expansion": 0.1
+        "embedding": 0.0,
+        "kg_expansion": 1.0,
+        "reranking": 1505.6,
+        "hybrid_search": 125.2,
+        "query_processing": 101.9
       },
       "action": "search",
       "top_k_doc_ids": [
-        "4ed7fd5096667761",
-        "53e01890b3cec209",
-        "55528e742e871fbc",
-        "80a3cf917f202445",
+        "58c26b0705577f1a",
+        "dad13002217ad917",
+        "dbdf5eceefb7ae39",
+        "e3b4b0a19e276cbe",
         "eb68c068cf726729"
       ],
       "error": null
@@ -425,17 +425,17 @@
       "kind": "kg",
       "text": "How does ACME use machine learning and deep learning together?",
       "samples_ms": [
-        2956.4,
-        1726.6,
-        1818.6
+        1678.5,
+        2215.8,
+        2144.9
       ],
-      "median_ms": 1818.6,
+      "median_ms": 2144.9,
       "per_stage_median_ms": {
-        "query_processing": 45.5,
-        "hybrid_search": 66.1,
         "embedding": 0.0,
-        "reranking": 1718.3,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.9,
+        "reranking": 1970.0,
+        "hybrid_search": 119.5,
+        "query_processing": 80.5
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -452,17 +452,17 @@
       "kind": "cold",
       "text": "How do I bake sourdough bread at high altitude?",
       "samples_ms": [
-        3357.1,
-        1931.1,
-        1839.7
+        1821.1,
+        2315.1,
+        2043.4
       ],
-      "median_ms": 1931.1,
+      "median_ms": 2043.4,
       "per_stage_median_ms": {
-        "query_processing": 67.4,
-        "hybrid_search": 102.1,
-        "embedding": 0.0,
-        "reranking": 1695.9,
-        "kg_expansion": 0.0
+        "embedding": 0.2,
+        "kg_expansion": 0.3,
+        "reranking": 1929.3,
+        "hybrid_search": 157.0,
+        "query_processing": 101.5
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -479,17 +479,17 @@
       "kind": "cold",
       "text": "What is the migration pattern of monarch butterflies?",
       "samples_ms": [
-        2980.1,
-        2003.9,
-        1938.8
+        2303.4,
+        1735.7,
+        1803.3
       ],
-      "median_ms": 2003.9,
+      "median_ms": 1803.3,
       "per_stage_median_ms": {
-        "query_processing": 75.0,
-        "hybrid_search": 84.3,
-        "embedding": 0.0,
-        "reranking": 1765.0,
-        "kg_expansion": 0.0
+        "embedding": 0.1,
+        "kg_expansion": 0.5,
+        "reranking": 1585.8,
+        "hybrid_search": 110.8,
+        "query_processing": 84.8
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -506,17 +506,17 @@
       "kind": "cold",
       "text": "Explain the rules of a chess endgame with king and pawn.",
       "samples_ms": [
-        2703.7,
-        1894.7,
-        1822.7
+        3030.7,
+        1588.6,
+        1585.4
       ],
-      "median_ms": 1894.7,
+      "median_ms": 1588.6,
       "per_stage_median_ms": {
-        "query_processing": 45.2,
-        "hybrid_search": 81.4,
-        "embedding": 0.6,
-        "reranking": 1696.1,
-        "kg_expansion": 0.0
+        "embedding": 0.0,
+        "kg_expansion": 0.4,
+        "reranking": 1449.2,
+        "hybrid_search": 77.9,
+        "query_processing": 56.1
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -533,17 +533,17 @@
       "kind": "cold",
       "text": "What's a good recipe for vegetarian chili?",
       "samples_ms": [
-        3356.4,
-        1911.0,
-        2036.8
+        2832.8,
+        1707.4,
+        1632.4
       ],
-      "median_ms": 2036.8,
+      "median_ms": 1707.4,
       "per_stage_median_ms": {
-        "query_processing": 71.3,
-        "hybrid_search": 108.1,
         "embedding": 0.0,
-        "reranking": 1773.0,
-        "kg_expansion": 0.0
+        "kg_expansion": 0.3,
+        "reranking": 1503.3,
+        "hybrid_search": 82.7,
+        "query_processing": 57.9
       },
       "action": "search",
       "top_k_doc_ids": [
@@ -560,17 +560,17 @@
       "kind": "cold",
       "text": "How does plate tectonics produce mountain ranges?",
       "samples_ms": [
-        1673.6,
-        1923.8,
-        1922.5
+        3033.2,
+        1650.9,
+        1718.3
       ],
-      "median_ms": 1922.5,
+      "median_ms": 1718.3,
       "per_stage_median_ms": {
-        "query_processing": 63.0,
-        "hybrid_search": 97.2,
-        "embedding": 0.0,
-        "reranking": 1773.5,
-        "kg_expansion": 0.0
+        "embedding": 0.1,
+        "kg_expansion": 0.4,
+        "reranking": 1627.5,
+        "hybrid_search": 89.9,
+        "query_processing": 61.1
       },
       "action": "search",
       "top_k_doc_ids": [

@@ -526,14 +526,28 @@ def check_regression_guard(
 ) -> Dict[str, Any]:
     """Diff the current report against the baseline snapshot.
 
-    Returns a guard summary with ``passed: bool``, ``drift_count``, and
-    per-query divergence details.
+    The guard only asserts top-K stability on **KG queries** (``kind == "kg"``).
+    Cold queries (``kind == "cold"``) contribute latency samples but no
+    ordering assertion — their reranker scores are all near-tied on an
+    off-topic corpus, and tiny numerical shifts would cause spurious drift
+    failures without signaling any real quality regression. See PROGRAM.md's
+    "Regression guard" section for the rationale.
+
+    Returns a guard summary with ``passed: bool``, ``drift_count``,
+    ``guarded_count``, and per-query divergence details.
     """
     baseline_queries = baseline.get("queries", {})
     drifts: List[Dict[str, Any]] = []
+    guarded_count = 0
 
     for q in report["per_query"]:
         qid = q["id"]
+        kind = q.get("kind", "")
+        # Cold queries: latency-only, no top-K assertion.
+        if kind != "kg":
+            continue
+        guarded_count += 1
+
         base = baseline_queries.get(qid)
         if base is None:
             drifts.append({"id": qid, "reason": "missing from baseline"})
@@ -558,15 +572,17 @@ def check_regression_guard(
             )
 
     drift_count = len(drifts)
-    drift_fraction = drift_count / max(len(baseline_queries), 1)
+    drift_fraction = drift_count / max(guarded_count, 1)
     passed = drift_fraction <= DRIFT_TOLERANCE
 
     return {
         "passed": passed,
         "drift_count": drift_count,
+        "guarded_count": guarded_count,
         "drift_fraction": round(drift_fraction, 3),
         "tolerance": DRIFT_TOLERANCE,
         "drifts": drifts,
+        "_note": "Only kg-kind queries are asserted; cold queries contribute latency only.",
     }
 
 

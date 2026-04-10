@@ -29,10 +29,11 @@ The harness emits a JSON report; the loop reads `retrieval_p95_ms` from it. Scor
 
 Before measuring latency, the harness re-runs the benchmark queries and compares each query's `(action, top_k_doc_id_set)` against `research/baseline_outputs.json`:
 
+- **Scope**: only **KG queries** (`kind == "kg"`, 15 of 20) are asserted. Cold queries (`kind == "cold"`, 5 of 20) contribute latency samples but NO top-K assertion. Rationale: on an off-topic corpus, reranker scores for cold queries are all near-tied (0.03-0.05 range), and microscopic numerical shifts from legitimate optimizations (e.g. FP16 inference) would cause spurious drift without signaling any real quality regression. The 15 KG queries, by contrast, have clearly separated scores and are a meaningful correctness oracle.
 - **Action match**: `RAGResponse.action.value` must equal the baseline action for that query.
-- **Top-K set match**: the unordered set of `RankedResult.metadata['doc_id']` (or equivalent stable identifier) for the top-`RERANK_TOP_K` reranked results must equal the baseline set.
-- **Drift tolerance**: at most 1 of 20 queries (5%) may diverge on either dimension. The diverging query must be logged but does not fail the iteration.
-- **Stage 1 determinism**: the harness monkey-patches `query_processor._check_llm_available` to return `False` for the duration of the benchmark run, forcing the LLM-free heuristic path in stage 1. The heuristic is a pure function of word count → fully deterministic. This is a benchmark-only override; the production code is never modified. See `scripts/benchmark_retrieval_query.py::_patch_settings_for_determinism` for the rationale: strategy 4 (LLM call structure) is deferred, so iterations cannot fix LLM latency anyway, and running 60 samples × N iterations with live LLM (~15s per call observed) would make the loop impractically slow.
+- **Top-K set match**: the unordered set of `RankedResult.text → SHA1` (stable content hash — metadata-schema-independent) for the top-`RERANK_TOP_K` reranked results must equal the baseline set.
+- **Drift tolerance**: at most 5% of the **guarded (KG) subset** may diverge = at most 1 of 15 queries. The diverging query is logged.
+- **Stage 1 determinism**: the harness monkey-patches `query_processor._check_llm_available` to return `False` for the duration of the benchmark run, forcing the LLM-free heuristic path in stage 1. The heuristic is a pure function of word count → fully deterministic. This is a benchmark-only override; the production code is never modified. Rationale: strategy 4 (LLM call structure) is deferred, so iterations cannot fix LLM latency anyway, and running 60 samples × N iterations with live LLM (~15s per call observed) would make the loop impractically slow.
 
 ## Logging / error-handling / duration lint check
 

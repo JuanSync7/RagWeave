@@ -16,7 +16,7 @@
     {"id": "kg-11", "kind": "kg", "text": "What does Technologies Inc do?"},
     {"id": "kg-12", "kind": "kg", "text": "Explain the technical overview document."},
     {"id": "kg-13", "kind": "kg", "text": "Where is team documentation kept and what does it contain?"},
-    {"id": "kg-14", "kind": "kg", "text": "What is artificial intelligence according to this corpus?"},
+    {"id": "kg-14", "kind": "kg", "text": "What is Python Programming and how does NumPy relate to it?"},
     {"id": "kg-15", "kind": "kg", "text": "How does ACME use machine learning and deep learning together?"},
     {"id": "cold-01", "kind": "cold", "text": "How do I bake sourdough bread at high altitude?"},
     {"id": "cold-02", "kind": "cold", "text": "What is the migration pattern of monarch butterflies?"},
