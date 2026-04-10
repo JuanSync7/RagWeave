@@ -1,0 +1,27 @@
+{
+  "_comment": "IMMUTABLE benchmark query set for retrieval query pipeline auto-research. 15 KG-derived queries (entities sourced from .knowledge_graph.json, top by mention_count) + 5 cold queries (no KG entity match expected). DO NOT MODIFY during the auto-research loop.",
+  "_generated": "2026-04-10",
+  "_count": 20,
+  "queries": [
+    {"id": "kg-01", "kind": "kg", "text": "What is Retrieval-Augmented Generation and how does it work?"},
+    {"id": "kg-02", "kind": "kg", "text": "Explain machine learning in the context of this knowledge base."},
+    {"id": "kg-03", "kind": "kg", "text": "How is deep learning used by ACME?"},
+    {"id": "kg-04", "kind": "kg", "text": "What does BAAI provide for embeddings?"},
+    {"id": "kg-05", "kind": "kg", "text": "Tell me about web development practices documented here."},
+    {"id": "kg-06", "kind": "kg", "text": "What are vector embeddings and where are they used?"},
+    {"id": "kg-07", "kind": "kg", "text": "How does unsupervised learning differ from supervised learning?"},
+    {"id": "kg-08", "kind": "kg", "text": "Describe TensorFlow's role in this stack."},
+    {"id": "kg-09", "kind": "kg", "text": "What is the Technical Architecture Team responsible for?"},
+    {"id": "kg-10", "kind": "kg", "text": "Give me an overview of the Tech Knowledge Base."},
+    {"id": "kg-11", "kind": "kg", "text": "What does Technologies Inc do?"},
+    {"id": "kg-12", "kind": "kg", "text": "Explain the technical overview document."},
+    {"id": "kg-13", "kind": "kg", "text": "Where is team documentation kept and what does it contain?"},
+    {"id": "kg-14", "kind": "kg", "text": "What is artificial intelligence according to this corpus?"},
+    {"id": "kg-15", "kind": "kg", "text": "How does ACME use machine learning and deep learning together?"},
+    {"id": "cold-01", "kind": "cold", "text": "How do I bake sourdough bread at high altitude?"},
+    {"id": "cold-02", "kind": "cold", "text": "What is the migration pattern of monarch butterflies?"},
+    {"id": "cold-03", "kind": "cold", "text": "Explain the rules of a chess endgame with king and pawn."},
+    {"id": "cold-04", "kind": "cold", "text": "What's a good recipe for vegetarian chili?"},
+    {"id": "cold-05", "kind": "cold", "text": "How does plate tectonics produce mountain ranges?"}
+  ]
+}
