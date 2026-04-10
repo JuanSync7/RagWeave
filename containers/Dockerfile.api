@@ -15,9 +15,10 @@ RUN apt-get update \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install all project dependencies from pyproject.toml.
-COPY pyproject.toml /app/pyproject.toml
-RUN pip install --upgrade pip && pip install .
+# Install only API-facing dependencies (no torch/docling/ML deps).
+# Source is on PYTHONPATH=/app so no package install needed.
+COPY containers/requirements-api.txt /app/requirements-api.txt
+RUN pip install --upgrade pip && pip install -r /app/requirements-api.txt
 
 RUN groupadd --system app && useradd --system --gid app --create-home app \
     && mkdir -p /home/app/.litellm /app/logs \
