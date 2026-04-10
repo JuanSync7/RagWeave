@@ -56,8 +56,9 @@ USER app
 ARG RAG_API_PORT=8000
 ENV RAG_API_PORT=${RAG_API_PORT}
 
-# Health check uses Python stdlib — no curl dependency needed
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('RAG_API_PORT','8000') + '/health')" || exit 1
+# Health check is defined in docker-compose.yml so it works with both
+# docker and podman (podman drops HEALTHCHECK directives when building in
+# the default OCI image format — compose-level healthcheck is respected by
+# both docker-compose and podman-compose regardless of image format).
 
 CMD ["uvicorn", "server.api:app", "--host", "0.0.0.0", "--port", "${RAG_API_PORT}"]

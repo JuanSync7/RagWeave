@@ -148,7 +148,9 @@ services:
     volumes:
       - ./.runtime:/app/.runtime
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:${RAG_API_PORT:-8000}/health >/dev/null || exit 1"]
+      # Uses Python stdlib (curl was removed from the image in the 2026-04-10 optimization).
+      # Works identically under docker-compose and podman-compose.
+      test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('RAG_API_PORT','8000') + '/health')"]
       interval: 10s
       timeout: 3s
       retries: 10
