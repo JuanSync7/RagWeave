@@ -124,7 +124,6 @@ class LocalBGEReranker:
             RERANKER_BATCH_SIZE,
         )
 
-    @torch.inference_mode()
     def rerank(
         self,
         query: str,
@@ -145,7 +144,15 @@ class LocalBGEReranker:
             RuntimeError: If the model inference step fails (e.g., CUDA OOM,
                 tokenizer version mismatch, unexpected output shape).
         """
-        with get_tracer().span(
+        # NOTE: torch.inference_mode is applied as a context manager rather
+        # than a @torch.inference_mode() decorator on the method. The
+        # decorator form runs `torch.inference_mode()` at class-body
+        # definition time, which is import time — and CI's torch install
+        # intermittently lacks attributes at that point, breaking pytest
+        # collection (see history on _TORCH_DTYPE_NAME_BY_PRECISION above).
+        # The context-manager form defers the call to invocation time,
+        # which is functionally equivalent.
+        with torch.inference_mode(), get_tracer().span(
             "reranker.rerank",
             {"input_count": len(documents), "top_k": top_k},
         ) as span:
