@@ -2,7 +2,7 @@
 # bench_multirun.sh — Run the retrieval-query benchmark N times and aggregate.
 #
 # Purpose: single-sample p95 on a shared GPU has ~80% variance between runs
-#          (see research/iterations.tsv iter 002 discard + iter 003 reruns).
+#          (see research/retrieval/iterations.tsv iter 002 discard + iter 003 reruns).
 #          The auto-research keep rule needs a noise-resistant score, so every
 #          iteration from 004 onward reports `max(p95)` across N samples.
 #
@@ -30,7 +30,9 @@ set -euo pipefail
 
 N="${1:-3}"
 LABEL="${2:-iter_$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-OUTDIR="research"
+# Per-sample reports live alongside the loop's other artifacts.
+# See research/README.md for the research/ layout convention.
+OUTDIR="research/retrieval"
 PY="/home/juansync7/RagWeave/.venv/bin/python"
 HARNESS="scripts/benchmark_retrieval_query.py"
 
