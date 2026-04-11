@@ -65,6 +65,13 @@ class LocalBGEReranker:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.precision = precision
         torch_dtype = _TORCH_DTYPE_BY_PRECISION.get(precision)
+        # SDPA = torch.nn.functional.scaled_dot_product_attention. On transformers
+        # >=4.38 with XLM-RoBERTa this routes attention ops through PyTorch's
+        # fused Flash / Memory-Efficient / math backends, bypassing the eager
+        # 4-matmul attention path. Numerical outputs differ within float
+        # tolerance from the eager kernel — drift-guarded by the regression
+        # check on KG-query top-K doc IDs.
+        attn_impl = "sdpa"
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
             if torch_dtype is not None and torch_dtype != torch.float32:
@@ -73,13 +80,15 @@ class LocalBGEReranker:
                 self.model = AutoModelForSequenceClassification.from_pretrained(
                     model_path,
                     torch_dtype=torch_dtype,
+                    attn_implementation=attn_impl,
                 ).to(self.device)
                 logger.info(
-                    "Reranker loaded in %s precision on %s", precision, self.device
+                    "Reranker loaded in %s precision on %s (attn=%s)",
+                    precision, self.device, attn_impl,
                 )
             else:
-                # fp32 path — unchanged from baseline. int8/int4 also land here
-                # until a future iteration wires bitsandbytes.
+                # fp32 path. int8/int4 also land here until a future iteration
+                # wires bitsandbytes.
                 if precision not in ("fp32", None) and precision not in _TORCH_DTYPE_BY_PRECISION:
                     logger.warning(
                         "Reranker precision=%r is declared but not yet wired "
@@ -88,9 +97,11 @@ class LocalBGEReranker:
                     )
                 self.model = AutoModelForSequenceClassification.from_pretrained(
                     model_path,
+                    attn_implementation=attn_impl,
                 ).to(self.device)
                 logger.info(
-                    "Reranker loaded in fp32 precision on %s", self.device
+                    "Reranker loaded in fp32 precision on %s (attn=%s)",
+                    self.device, attn_impl,
                 )
         except Exception as exc:
             logger.error("Failed to load reranker from %r: %s", model_path, exc)
@@ -108,7 +119,7 @@ class LocalBGEReranker:
             RERANKER_BATCH_SIZE,
         )
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def rerank(
         self,
         query: str,
