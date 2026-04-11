@@ -45,17 +45,17 @@ operations tooling for observability, backup/restore, and scaling.
 > **Podman users**: Podman is supported as a drop-in replacement for Docker.
 > See [Podman Setup](#podman-setup) below for one-time configuration.
 
-### 1. Clone and install Python dependencies
+### 1. Clone and set up the project
 
 ```bash
 git clone <repo-url> && cd RAG
-uv venv
-uv pip install -e ".[dev]"
+make setup
 ```
 
-This creates a `.venv/`, installs all runtime dependencies plus dev tools (pytest, etc.).
+`make setup` runs the full one-shot: creates `.venv/`, installs all runtime + dev dependencies via `uv`, installs web-console npm deps, and compiles the TypeScript console. Run once per clone.
 
-> **Alternative** (pip only): `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`
+> Prefer explicit steps? `make install` does just the Python deps; `make console-install && make console-build` handles the console. Or skip `make` entirely:
+> `uv venv && uv pip install -e ".[dev]"`, or `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`.
 
 #### Optional dependency groups
 
@@ -70,18 +70,14 @@ uv pip install -e ".[qdrant]"       # Qdrant vector store
 uv pip install -e ".[all]"          # All optional dependencies
 ```
 
-### 2. Build the web console
+### 2. Web console (already built by `make setup`)
+
+`make setup` already installs and compiles the web console. You only need these targets when iterating on the TypeScript source:
 
 ```bash
-make console-install   # npm install for TypeScript deps
-make console-build     # compiles src/main.ts → static/main.js
-```
-
-Or directly:
-
-```bash
-npm --prefix server/console/web install
-npm --prefix server/console/web run build
+make console-watch   # rebuild on change (live dev)
+make console-check   # type-check only, no emit
+make console-build   # one-shot production build
 ```
 
 ### 3. Start infrastructure services
@@ -153,6 +149,10 @@ Or use Docker/Podman profiles for a fully containerized stack:
 ```bash
 ./scripts/compose.sh --profile app --profile workers up -d
 # Scale workers: ./scripts/compose.sh --profile workers up -d --scale rag-worker=3
+
+# After code changes, rebuild + restart:
+make restart        # app + workers
+make restart-all    # all profiles (monitoring, gateway, etc.)
 ```
 
 Then use the CLI client or web console:
@@ -168,10 +168,17 @@ python -m server.cli_client
 ## Running Tests
 
 ```bash
+make test                          # full suite (uv run pytest)
+make dep-check                     # deptry — unused / missing deps
+make import-check                  # custom import_check module
+make all-check                     # pre-commit bundle: npm ci + py-compile + TS check (NO tests)
+
+# Targeted pytest invocations still work directly:
 source .venv/bin/activate
-pytest                    # full suite
-pytest tests/ingest/ -v   # ingestion tests only
+pytest tests/ingest/ -v            # ingestion tests only
 ```
+
+> `make all-check` intentionally does **not** run the pytest suite — it's the fast "will this compile?" gate. Run `make test` separately for the full suite.
 
 ## Container Profiles
 
@@ -383,14 +390,37 @@ The ingestion pipeline uses stable source identity metadata instead of filename-
 | `python -m server.cli_client` | Interactive client targeting the API server |
 | `python -m server.mcp_adapter` | MCP tooling adapter over the API (`stdio` transport) |
 
-## Console UI Dev Shortcuts
+## Make Targets
 
-```bash
-make console-install    # npm install
-make console-check      # TypeScript type-check (no emit)
-make console-build      # compile TS → JS
-make all-check          # full check (npm ci + py-compile + TS check)
-```
+Run `make help` for this list in the terminal. All targets are also documented in comments in the [Makefile](Makefile) itself.
+
+| Target | Purpose |
+|---|---|
+| **Setup & install** | |
+| `make setup` | **First-time setup.** Creates venv, installs Python deps, runs `npm install`, builds the web console |
+| `make install` | (Re)install Python deps into the active env (`uv pip install -e ".[dev]"`) |
+| **Web console (TypeScript)** | |
+| `make console-install` | `npm install` for the web console |
+| `make console-check` | TypeScript type-check (no emit) |
+| `make console-build` | Compile TS → `static/main.js` |
+| `make console-watch` | Watch mode — rebuild on TS change |
+| **Checks & tests** | |
+| `make test` | Run the pytest suite |
+| `make py-compile-check` | Smoke compile check on entry-point Python modules |
+| `make dep-check` | Run `deptry` — detect unused / missing deps |
+| `make import-check` | Run the custom `import_check` module |
+| `make all-check` | Pre-commit bundle: `npm ci` + py-compile + console-check (does **not** run tests) |
+| **Container images** (see [Container Images](#container-images) for details) | |
+| `make container-build` | Build `rag-api` + `rag-worker` with docker (BuildKit) |
+| `make container-build-api` | Build only `rag-api` |
+| `make container-build-worker` | Build only `rag-worker` |
+| `make container-build-podman` | Build both with podman (`--format docker`) |
+| `make container-probe` | Run the API import probe inside `rag-api` — catches transitive ML leakage |
+| `make container-sizes` | Print current `rag-api` / `rag-worker` image sizes |
+| `make container-clean` | Remove local `rag-api` / `rag-worker` images |
+| **Stack restart** (uses `scripts/restart_stack.sh` — auto-detects docker/podman) | |
+| `make restart` | Restart `app` + `workers` profiles with rebuild |
+| `make restart-all` | Restart all profiles with rebuild |
 
 ## Engineering Docs
 

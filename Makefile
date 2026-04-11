@@ -4,10 +4,54 @@
 # Deps: npm, uv, server/console/web package scripts
 # @end-summary
 
-.PHONY: install console-install console-check console-build console-watch \
+.PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check all-check setup restart restart-all \
         container-build container-build-api container-build-worker \
         container-build-podman container-probe container-sizes container-clean
+
+# Default target: print the help menu when `make` is run with no arguments.
+.DEFAULT_GOAL := help
+
+# ---------------------------------------------------------------------------
+# Help
+#
+# Grouped listing of targets. Keep this in sync with README.md's
+# "Make Targets" section — both derive from the same Makefile.
+# ---------------------------------------------------------------------------
+help:
+	@echo ""
+	@echo "RagWeave — developer make targets"
+	@echo ""
+	@echo "Setup & install"
+	@echo "  setup              Full one-shot setup: venv + deps + console install + build"
+	@echo "  install            (Re)install Python deps into the active env (editable + dev extras)"
+	@echo ""
+	@echo "Web console (TypeScript)"
+	@echo "  console-install    npm install for the web console"
+	@echo "  console-check      TypeScript type-check (no emit)"
+	@echo "  console-build      Compile TS -> static/main.js"
+	@echo "  console-watch      Watch mode — rebuild on TS change"
+	@echo ""
+	@echo "Checks & tests"
+	@echo "  test               Run the pytest suite"
+	@echo "  py-compile-check   Smoke compile check on entry-point Python modules"
+	@echo "  dep-check          Run deptry (unused / missing deps)"
+	@echo "  import-check       Run the custom import_check module"
+	@echo "  all-check          Pre-commit bundle: npm ci + py-compile + console-check (NO tests)"
+	@echo ""
+	@echo "Container lifecycle (docker or podman — auto-detected)"
+	@echo "  container-build         Build rag-api + rag-worker with docker (BuildKit)"
+	@echo "  container-build-api     Build only rag-api"
+	@echo "  container-build-worker  Build only rag-worker"
+	@echo "  container-build-podman  Build both with podman (--format docker)"
+	@echo "  container-probe         Run the API import probe inside rag-api"
+	@echo "  container-sizes         Print current rag-api / rag-worker image sizes"
+	@echo "  container-clean         Remove local rag-api / rag-worker images"
+	@echo ""
+	@echo "Stack restart (uses scripts/restart_stack.sh — auto-detects docker/podman)"
+	@echo "  restart            Restart app + workers with rebuild"
+	@echo "  restart-all        Restart all profiles with rebuild"
+	@echo ""
 
 # Full project setup (Python + TypeScript)
 setup:
