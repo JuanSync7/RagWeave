@@ -157,7 +157,7 @@ def fix(root: str | Path | None = None, **config_overrides: object) -> FixResult
     Returns:
         :class:`FixResult` summarising files modified and fixes applied.
     """
-    from . import differ, fixer, inventory  # import_check: ignore (submodule imports)
+    from . import differ, fixer, inventory
 
     # 1. Resolve root.
     resolved_root = Path(root).resolve() if root is not None else Path.cwd().resolve()
@@ -221,7 +221,7 @@ def check(
     Returns:
         List of :class:`ImportError` records. Empty if all imports are clean.
     """
-    from . import checker, inventory  # import_check: ignore (submodule imports)
+    from . import checker, inventory
 
     # 1. Resolve root.
     resolved_root = Path(root).resolve() if root is not None else Path.cwd().resolve()
