@@ -169,16 +169,23 @@ python -m server.cli_client
 
 ```bash
 make test                          # full suite (uv run pytest)
-make dep-check                     # deptry — unused / missing deps
-make import-check                  # custom import_check module
-make all-check                     # pre-commit bundle: npm ci + py-compile + TS check (NO tests)
+
+# Fast static gates (no test execution). Pick one depending on scope:
+make precommit-check               # runs L1+L2+L3+TS on git-tracked files (skips WIP)
+make all-check                     # same, but over the full tree including untracked
+
+# Individual layers:
+make py-compile-check              # L1: compileall across source tree
+make import-check-tracked          # L2 (tracked files only)
+make import-check                  # L2 (full tree)
+make dep-check                     # L3: deptry
 
 # Targeted pytest invocations still work directly:
 source .venv/bin/activate
 pytest tests/ingest/ -v            # ingestion tests only
 ```
 
-> `make all-check` intentionally does **not** run the pytest suite — it's the fast "will this compile?" gate. Run `make test` separately for the full suite.
+> Neither `precommit-check` nor `all-check` runs the pytest suite — they're fast static gates. Run `make test` separately. **Use `precommit-check` before every `git commit`** so in-progress untracked work doesn't block your commit. **Use `all-check` before releases or as a periodic hygiene sweep** to catch issues in WIP code you haven't committed yet.
 
 ## Container Profiles
 
@@ -406,10 +413,12 @@ Run `make help` for this list in the terminal. All targets are also documented i
 | `make console-watch` | Watch mode — rebuild on TS change |
 | **Checks & tests** | |
 | `make test` | Run the pytest suite |
-| `make py-compile-check` | Smoke compile check on entry-point Python modules |
-| `make dep-check` | Run `deptry` — detect unused / missing deps |
-| `make import-check` | Run the custom `import_check` module |
-| `make all-check` | Pre-commit bundle: `npm ci` + py-compile + console-check (does **not** run tests) |
+| `make py-compile-check` | L1 syntax: `compileall` across `src/`, `server/`, `config/`, `import_check/` |
+| `make import-check` | L2 internal: resolve imports + encapsulation, **whole tree** (includes untracked) |
+| `make import-check-tracked` | L2 internal but only for **git-tracked** files (for `precommit-check`) |
+| `make dep-check` | L3 external: `deptry` — `pyproject.toml` vs actual imports |
+| `make precommit-check` | **Compound gate for `git commit`**: L1 + L2(tracked) + L3 + `npm ci` + console-check. Excludes untracked WIP. |
+| `make all-check` | **Compound gate for release**: same checks but over the entire tree including untracked. |
 | **Container images** (see [Container Images](#container-images) for details) | |
 | `make container-build` | Build `rag-api` + `rag-worker` with docker (BuildKit) |
 | `make container-build-api` | Build only `rag-api` |

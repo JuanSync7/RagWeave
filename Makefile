@@ -5,7 +5,8 @@
 # @end-summary
 
 .PHONY: help install console-install console-check console-build console-watch \
-        py-compile-check test dep-check import-check all-check setup restart restart-all \
+        py-compile-check test dep-check import-check import-check-tracked \
+        all-check precommit-check setup restart restart-all \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
         container-build-podman container-probe container-sizes container-clean
@@ -35,10 +36,14 @@ help:
 	@echo "  console-watch      Watch mode — rebuild on TS change"
 	@echo ""
 	@echo "Static checks (3 layers — each catches a distinct bug class)"
-	@echo "  py-compile-check   L1 syntax: compileall across src/ server/ config/ import_check/"
-	@echo "  import-check       L2 internal: do 'from X import Y' resolve to real symbols?"
-	@echo "  dep-check          L3 external: is pyproject.toml in sync with actual imports? (deptry)"
-	@echo "  all-check          Pre-commit gate: L1 + L2 + L3 + npm ci + console-check (NO pytest)"
+	@echo "  py-compile-check       L1 syntax: compileall across src/ server/ config/ import_check/"
+	@echo "  import-check           L2 internal: resolve imports + encapsulation (whole tree)"
+	@echo "  import-check-tracked   L2 internal but only for git-tracked files (for precommit)"
+	@echo "  dep-check              L3 external: pyproject.toml vs imports (deptry)"
+	@echo ""
+	@echo "Compound gates"
+	@echo "  precommit-check    L1 + L2(tracked) + L3 + npm ci + console-check (excludes WIP)"
+	@echo "  all-check          L1 + L2(all)     + L3 + npm ci + console-check (full sweep)"
 	@echo ""
 	@echo "Tests"
 	@echo "  test               Run the pytest suite (not included in all-check)"
@@ -155,9 +160,22 @@ console-watch:
 #   dep-check         Layer 3: is pyproject.toml in sync with actual third-party
 #                     imports? (deptry — unused/missing/misplaced deps)
 #
-# `all-check` is the pre-commit gate that runs all of the above plus the web
-# console type-check. It does NOT run the pytest suite — use `make test` for
-# that (intentional split: pre-commit should stay fast).
+# Two compound gates use these layers in different scopes:
+#
+#   precommit-check   Runs L1+L2+L3+TS over files git ALREADY knows about.
+#                     L2 uses the `import-check-tracked` variant which reads
+#                     `git ls-files` so untracked WIP (e.g. feature branches
+#                     with new modules you haven't committed yet) doesn't
+#                     block the commit gate. Use before every commit.
+#
+#   all-check         Runs the same checks over the ENTIRE tree, including
+#                     untracked files. Use before a release, on CI, or as
+#                     a periodic hygiene sweep. This is the one that will
+#                     catch issues in the work-in-progress you're about to
+#                     commit.
+#
+# Neither gate runs the pytest suite — run `make test` separately. Keeping
+# the gates fast is intentional: devs skip slow gates.
 # ---------------------------------------------------------------------------
 
 # Layer 1: syntax-only check on the whole source tree. compileall is fast
@@ -174,12 +192,27 @@ test:
 dep-check:
 	uv run python -m deptry .
 
-# Layer 2: internal import resolution + encapsulation violations.
+# Layer 2 (all files): internal import resolution + encapsulation violations.
+# Scans every .py file in the source directories, including untracked WIP.
 import-check:
 	uv run python -m import_check
 
-# Pre-commit gate. Every fast static check, NO pytest.
+# Layer 2 (tracked only): same check but limited to git-tracked files.
+# Used by `precommit-check` so untracked WIP doesn't block commits.
+import-check-tracked:
+	uv run python scripts/import_check_tracked.py
+
+# Pre-commit gate. Runs the fast static checks against TRACKED files only.
 # Order: cheap -> expensive so failures surface the lowest-level issue first.
+precommit-check:
+	$(MAKE) py-compile-check
+	$(MAKE) import-check-tracked
+	$(MAKE) dep-check
+	npm --prefix server/console/web ci
+	$(MAKE) console-check
+
+# Full hygiene sweep. Same checks but over the entire tree including
+# untracked WIP. Use before releases, in CI, or periodically.
 all-check:
 	$(MAKE) py-compile-check
 	$(MAKE) import-check

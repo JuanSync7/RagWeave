@@ -506,7 +506,7 @@ def create_console_router(
     ):
         require_role(principal, "admin")
         from config.settings import DOCUMENTS_DIR, PROJECT_ROOT
-        from src.ingest.pipeline.impl import IngestionConfig, ingest_directory
+        from src.ingest import IngestionConfig, ingest_directory
         from src.platform import validate_documents_dir
 
         selected_file = None

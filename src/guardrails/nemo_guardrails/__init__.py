@@ -4,3 +4,7 @@
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.guardrails.nemo_guardrails.backend import NemoBackend
+from src.guardrails.nemo_guardrails.executor import (
+    InputRailExecutor,
+    OutputRailExecutor,
+)
