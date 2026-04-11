@@ -120,39 +120,61 @@ class RAGChain:
         # GPU models must load sequentially (parallel .to(cuda) causes meta
         # tensor errors), but KG + generator can load concurrently with them.
         def _load_kg() -> Optional[GraphQueryExpander]:
-            if KG_ENABLED and KG_PATH.exists():
-                try:
-                    builder = KnowledgeGraphBuilder.load(KG_PATH)
-                    stats = builder.stats()
-                    logger.info("Knowledge graph loaded: %s nodes, %s edges", stats["nodes"], stats["edges"])
-                    return GraphQueryExpander(builder.graph)
-                except Exception as e:
-                    logger.warning("Could not load knowledge graph: %s", e)
-            elif not KG_ENABLED:
-                logger.info("Knowledge graph disabled (set RAG_KG_ENABLED=true to enable).")
-            else:
-                logger.info("No knowledge graph found (run ingest.py first to build it).")
-            return None
+            _t0 = time.perf_counter()
+            result: Optional[GraphQueryExpander] = None
+            try:
+                if KG_ENABLED and KG_PATH.exists():
+                    try:
+                        builder = KnowledgeGraphBuilder.load(KG_PATH)
+                        stats = builder.stats()
+                        logger.info("Knowledge graph loaded: %s nodes, %s edges", stats["nodes"], stats["edges"])
+                        result = GraphQueryExpander(builder.graph)
+                    except Exception as e:
+                        logger.warning("Could not load knowledge graph: %s", e)
+                elif not KG_ENABLED:
+                    logger.info("Knowledge graph disabled (set RAG_KG_ENABLED=true to enable).")
+                else:
+                    logger.info("No knowledge graph found (run ingest.py first to build it).")
+                return result
+            finally:
+                logger.info("_load_kg elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
 
         def _load_generator() -> Optional[OllamaGenerator]:
-            if GENERATION_ENABLED:
-                gen = OllamaGenerator()
-                if gen.is_available():
-                    logger.info("Ollama generator ready (model: %s).", gen.model)
-                    return gen
+            _t0 = time.perf_counter()
+            result: Optional[OllamaGenerator] = None
+            try:
+                if GENERATION_ENABLED:
+                    try:
+                        gen = OllamaGenerator()
+                        if gen.is_available():
+                            logger.info("Ollama generator ready (model: %s).", gen.model)
+                            result = gen
+                        else:
+                            logger.warning("Ollama not available. Generation disabled.")
+                    except Exception as e:
+                        logger.warning("Failed to initialize Ollama generator: %s", e)
                 else:
-                    logger.warning("Ollama not available. Generation disabled.")
-            else:
-                logger.info("Generation disabled (set RAG_GENERATION_ENABLED=true to enable).")
-            return None
+                    logger.info("Generation disabled (set RAG_GENERATION_ENABLED=true to enable).")
+                return result
+            finally:
+                logger.info("_load_generator elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
 
         def _load_models_sequential():
             """Load GPU models one at a time to avoid meta tensor conflicts."""
-            logger.info("Loading embedding model...")
-            emb = LocalBGEEmbeddings()
-            logger.info("Loading reranker model...")
-            rer = LocalBGEReranker()
-            return emb, rer
+            _t0 = time.perf_counter()
+            try:
+                logger.info("Loading embedding model...")
+                _t_emb = time.perf_counter()
+                emb = LocalBGEEmbeddings()
+                logger.info("Embedding model loaded in %.1fms.", (time.perf_counter() - _t_emb) * 1000)
+
+                logger.info("Loading reranker model...")
+                _t_rer = time.perf_counter()
+                rer = LocalBGEReranker()
+                logger.info("Reranker model loaded in %.1fms.", (time.perf_counter() - _t_rer) * 1000)
+                return emb, rer
+            finally:
+                logger.info("_load_models_sequential elapsed: %.1fms", (time.perf_counter() - _t0) * 1000)
 
         with ThreadPoolExecutor(max_workers=3) as pool:
             fut_models = pool.submit(_load_models_sequential)
@@ -326,35 +348,55 @@ class RAGChain:
 
     def _do_search(self, bm25_query, query_embedding, alpha, search_limit, filters):
         """Run hybrid search against the database layer (persistent or transient client)."""
-        if self._weaviate_client is not None:
-            return search(
-                client=self._weaviate_client,
-                query=bm25_query,
-                query_embedding=query_embedding,
-                alpha=alpha,
-                limit=search_limit,
-                filters=filters,
+        _t0 = time.perf_counter()
+        try:
+            if self._weaviate_client is not None:
+                results = search(
+                    client=self._weaviate_client,
+                    query=bm25_query,
+                    query_embedding=query_embedding,
+                    alpha=alpha,
+                    limit=search_limit,
+                    filters=filters,
+                )
+            else:
+                with get_client() as client:
+                    ensure_collection(client)
+                    results = search(
+                        client=client,
+                        query=bm25_query,
+                        query_embedding=query_embedding,
+                        alpha=alpha,
+                        limit=search_limit,
+                        filters=filters,
+                    )
+            logger.debug(
+                "_do_search returned %d hits in %.1fms (alpha=%.2f, limit=%d)",
+                len(results), (time.perf_counter() - _t0) * 1000, alpha, search_limit,
             )
-        with get_client() as client:
-            ensure_collection(client)
-            return search(
-                client=client,
-                query=bm25_query,
-                query_embedding=query_embedding,
-                alpha=alpha,
-                limit=search_limit,
-                filters=filters,
+            return results
+        except Exception as exc:
+            logger.error(
+                "_do_search failed after %.1fms: %s",
+                (time.perf_counter() - _t0) * 1000, exc,
             )
+            raise
 
     @staticmethod
     def _ranked_from_search_results(search_results, top_k: int) -> List[RankedResult]:
         """Convert search results into a sorted RankedResult list."""
+        _t0 = time.perf_counter()
         ranked = [
             RankedResult(text=r.text, score=r.score, metadata=r.metadata)
             for r in search_results
         ]
         ranked.sort(key=lambda result: result.score, reverse=True)
-        return ranked[:top_k]
+        top = ranked[:top_k]
+        logger.debug(
+            "_ranked_from_search_results: kept %d of %d hits in %.2fms",
+            len(top), len(ranked), (time.perf_counter() - _t0) * 1000,
+        )
+        return top
 
     def run(
         self,

@@ -1,0 +1,225 @@
+{
+  "_comment": "IMMUTABLE baseline snapshot. Captured on iteration 001. Compared by the regression guard against every subsequent iteration. DO NOT MODIFY by hand — restart the loop with a new baseline if needed.",
+  "queries": {
+    "kg-01": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "median_ms": 1015.6
+    },
+    "kg-02": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1031.6
+    },
+    "kg-03": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1073.0
+    },
+    "kg-04": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "median_ms": 1111.4
+    },
+    "kg-05": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1304.5
+    },
+    "kg-06": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "median_ms": 1534.0
+    },
+    "kg-07": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1658.6
+    },
+    "kg-08": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1750.4
+    },
+    "kg-09": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1645.0
+    },
+    "kg-10": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1775.0
+    },
+    "kg-11": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1795.1
+    },
+    "kg-12": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39"
+      ],
+      "median_ms": 1664.6
+    },
+    "kg-13": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "median_ms": 2315.0
+    },
+    "kg-14": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "58c26b0705577f1a",
+        "dad13002217ad917",
+        "dbdf5eceefb7ae39",
+        "e3b4b0a19e276cbe",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1806.1
+    },
+    "kg-15": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 2144.9
+    },
+    "cold-01": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "bbe4edf27fa1480f"
+      ],
+      "median_ms": 2043.4
+    },
+    "cold-02": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "bbe4edf27fa1480f"
+      ],
+      "median_ms": 1803.3
+    },
+    "cold-03": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dad13002217ad917",
+        "e3b4b0a19e276cbe"
+      ],
+      "median_ms": 1588.6
+    },
+    "cold-04": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "2bdbfa447fe0f695",
+        "4ed7fd5096667761",
+        "55528e742e871fbc",
+        "bbe4edf27fa1480f",
+        "eb68c068cf726729"
+      ],
+      "median_ms": 1707.4
+    },
+    "cold-05": {
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "median_ms": 1718.3
+    }
+  }
+}

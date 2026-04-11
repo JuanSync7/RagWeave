@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "_note": "Multi-run baseline re-capture at commit 61a5408 (iter 003 HEAD). Replaces single-run baseline at b1f6e28 (iter 001b), which was noise-pathological. Protocol: N=5 independent samples, max(p95) is the settled score used by the keep rule.",
+  "commit": "61a5408",
+  "commit_label": "iter_003",
+  "protocol": {
+    "samples_per_iteration": 5,
+    "settled_metric": "max_p95_ms",
+    "rationale": "Single-sample p95 has ~80% variance on a shared GPU (see iterations.tsv iter 002 discard and iter 003 reruns). Max across N makes the keep rule noise-resistant."
+  },
+  "samples": [
+    {"report": "iteration_003_report.json", "p50_ms": 956,  "p95_ms": 1253, "p99_ms": 1474, "mean_ms": 1003},
+    {"report": "iteration_003_rerun1.json", "p50_ms": 1357, "p95_ms": 2266, "p99_ms": 2871, "mean_ms": 1427},
+    {"report": "iteration_003_rerun2.json", "p50_ms": 1148, "p95_ms": 1259, "p99_ms": 1287, "mean_ms": 1154},
+    {"report": "iteration_003_rerun3.json", "p50_ms": 921,  "p95_ms": 1158, "p99_ms": 1430, "mean_ms": 951},
+    {"report": "iteration_003_rerun4.json", "p50_ms": 1164, "p95_ms": 1252, "p99_ms": 1271, "mean_ms": 1162}
+  ],
+  "cross_sample_stats": {
+    "p50_ms":  {"min": 921,  "median": 1148, "max": 1357, "mean": 1109, "stdev": 177},
+    "p95_ms":  {"min": 1158, "median": 1253, "max": 2266, "mean": 1438, "stdev": 465},
+    "p99_ms":  {"min": 1271, "median": 1430, "max": 2871, "mean": 1667, "stdev": 679},
+    "mean_ms": {"min": 951,  "median": 1154, "max": 1427, "mean": 1140, "stdev": 186}
+  },
+  "settled": {
+    "best_p95_ms": 2266,
+    "best_lint_failure_count": 0,
+    "regression_guard_passed": true,
+    "drift_total": 0,
+    "guarded_total": 75,
+    "lint_failures_across_samples": 0
+  },
+  "target": {
+    "p95_ms": 1813,
+    "rationale": "20% reduction from settled baseline 2266 ms = 1813 ms. Supersedes the original stop condition (2425 ms derived from retired baseline 3031 ms)."
+  }
+}
