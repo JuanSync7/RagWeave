@@ -45,8 +45,8 @@ dev = [
   "pytest-timeout>=2.2.0",
   "deptry",
   # Post-refactoring import repair tool. Install from local path until published to PyPI;
-  # swap to "import-check>=0.1.0" once the package is released.
-  "import-check @ file:///home/juansync7/import-check",
+  # swap to "import-doctor>=0.1.0" once the package is released.
+  "import-doctor @ file:///home/juansync7/import-check",
 ]
 pii = [
   "presidio-analyzer",
