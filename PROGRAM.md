@@ -4,7 +4,9 @@
 
 Reduce **retrieval-only p95 latency** (stages 1–5: query_processing → kg_expansion → embedding → hybrid_search → reranking) of `RAGChain.ask(...)` while preserving the output contract. As a secondary, structural concern, ensure every stage has uniform logging, error handling, and duration tracking, with natural code flow.
 
-Current baseline: **TBD** — recorded in iteration 001 by `scripts/benchmark_retrieval_query.py` against `research/benchmark_queries.json`. Generation (stage 6) is explicitly out of scope for latency optimization but is still invoked end-to-end so the harness measures realistic conditions.
+Current baseline: **2266 ms p95** (max across 5 samples at commit `61a5408`, iter 003 HEAD). Recorded in `research/baseline_v2_aggregate.json`. The single-sample baseline at iter 001b (`b1f6e28`, p95 3031 ms) has been **retired as noise-pathological** — see `research/iterations.tsv` iter 002 discard entry for the evidence (uniform cross-stage regression on a latency-neutral change) and iter 003 reruns (same commit, p95 samples 1253/2266/1259/1158/1252).
+
+Generation (stage 6) is explicitly out of scope for latency optimization but is still invoked end-to-end so the harness measures realistic conditions.
 
 ## Scoring mode
 
@@ -14,17 +16,23 @@ The harness emits a JSON report; the loop reads `retrieval_p95_ms` from it. Scor
 
 ## Metric
 
-**Primary score**: `retrieval_p95_ms` from `research/iteration_<NNN>_report.json`, computed across 20 benchmark queries × 3 repetitions = 60 samples per iteration. Baseline is captured in iteration 001 and stored as `research/baseline_report.json`.
+**Primary score**: `settled_p95_ms` = **max** of `retrieval_p95_ms` across **N=3 independent samples** per iteration, where each sample is one invocation of `scripts/benchmark_retrieval_query.py` over 20 benchmark queries × 3 repetitions = 60 observations.
+
+Samples are orchestrated by `scripts/bench_multirun.sh <N> <label>`, a thin wrapper that invokes the immutable harness N times and aggregates. Max (not median) is the conservative choice — the keep rule judges an iteration against the worst of its N samples, so a single noise-lucky run cannot falsely advance `best_p95_ms`. Rationale for multi-run: single-sample p95 on the shared GPU has been measured at ~80% run-to-run variance on identical code (same commit, five runs: 1253 / 2266 / 1259 / 1158 / 1252 ms). See `research/baseline_v2_aggregate.json`.
+
+**Starting baseline**: `best_p95_ms = 2266`, `best_lint_failure_count = 0`, captured at iter 003 (commit `61a5408`). The earlier single-run baseline at iter 001b (`b1f6e28`, p95 3031 ms) is retired.
+
+All comparisons below use `settled_p95_ms` = max(p95) across the iteration's N samples, NOT a single run.
 
 **Iteration kept** if BOTH:
 1. **Primary metric** — one of:
-   - `retrieval_p95_ms < best_p95_ms` (strict latency improvement), OR
-   - `retrieval_p95_ms ≤ best_p95_ms` AND `lint_failure_count < best_lint_failure_count` (latency tied, lint strictly improved), OR
-   - **Lint-progress tolerance band** — `lint_failure_count < best_lint_failure_count` AND `retrieval_p95_ms ≤ best_p95_ms × 1.05`. Rationale: the measured noise floor between runs is ±10% (see iter 002 discard in `research/iterations.tsv`), which swamps any single-iteration lint-only change. This band allows structural/lint progress to land as long as p95 is within 5% of the best — tight enough to catch real regressions, loose enough to survive GPU scheduler jitter. When this branch is taken, best_p95_ms is NOT advanced (only best_lint_failure_count is); the latency best remains frozen at the prior iteration.
-2. **Hard guards (all must pass)**:
-   - Regression guard: per-query `(action, top_k_doc_id_set)` matches baseline snapshot for ≥95% of the guarded (KG) subset (≤5% drift tolerance).
+   - `settled_p95_ms < best_p95_ms` (strict latency improvement), OR
+   - `settled_p95_ms ≤ best_p95_ms` AND `lint_failure_count < best_lint_failure_count` (latency tied, lint strictly improved), OR
+   - **Lint-progress tolerance band** — `lint_failure_count < best_lint_failure_count` AND `settled_p95_ms ≤ best_p95_ms × 1.05`. Allows structural/lint progress to land as long as the settled (max-of-N) p95 is within 5% of the best. When this branch is taken, `best_p95_ms` is NOT advanced — only `best_lint_failure_count` is.
+2. **Hard guards (all must pass on EVERY sample)**:
+   - Regression guard: per-query `(action, top_k_doc_id_set)` matches baseline snapshot for ≥95% of the guarded (KG) subset (≤5% drift tolerance) in each of the N samples.
    - `tests/retrieval/` pytest still passes.
-   - **Lint monotonicity**: `lint_failure_count ≤ best_lint_failure_count`. The baseline starts with N failures (measured at iteration 001b); kept iterations may not increase that count, only hold or decrease it. This drives the lint count toward zero.
+   - **Lint monotonicity**: `lint_failure_count ≤ best_lint_failure_count` in each sample. Kept iterations may not increase that count, only hold or decrease it. Drives the lint count toward zero.
 
 **Iteration discarded** if any hard guard fails OR if neither the latency improvement nor the lint-progress band conditions above are satisfied.
 
@@ -130,11 +138,11 @@ User-provided strategies, in priority order. The loop picks one per iteration. *
 
 ## Stop conditions
 
-- **Success**: `retrieval_p95_ms ≤ baseline_retrieval_p95_ms × 0.80` (≥20% reduction). Stop and write `changelog.md`.
+- **Success**: `settled_p95_ms ≤ 1813` (20% reduction from the retired-and-replaced settled baseline of 2266 ms at iter 003). Stop and write `changelog.md`.
 - **No-progress**: 15 consecutive iterations with no improvement. Stop and write `changelog.md`.
 - **Hard cap**: 30 total iterations. Stop and write `changelog.md`.
 - **Service outage**: 2 consecutive iterations crash on pre-flight (Weaviate or Ollama down). Stop, write `changelog.md` noting the outage, and exit so the user can restart services.
-- **Lint zero (bonus success)**: if `retrieval_p95_ms` target is met AND `lint_failure_count == 0`, this is a "perfect" stop — both objectives achieved. Stop immediately and write `changelog.md`.
+- **Lint zero (achieved at iter 003)**: lint_failure_count is already 0. The secondary objective is satisfied; remaining work is pure latency optimization.
 
 ## Pre-flight requirements (for `auto-research run`)
 

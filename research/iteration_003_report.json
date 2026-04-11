@@ -1,0 +1,608 @@
+{
+  "schema_version": 1,
+  "queries_total": 20,
+  "reps_per_query": 3,
+  "aggregate": {
+    "retrieval_p50_ms": 956.2,
+    "retrieval_p95_ms": 1253.2,
+    "retrieval_p99_ms": 1474.5,
+    "retrieval_mean_ms": 1003.3,
+    "samples_total": 60
+  },
+  "per_stage": {
+    "reranking": {
+      "p50_ms": 921.2,
+      "p95_ms": 1153.0,
+      "mean_ms": 967.0,
+      "samples": 60
+    },
+    "embedding": {
+      "p50_ms": 0.0,
+      "p95_ms": 71.0,
+      "mean_ms": 23.4,
+      "samples": 60
+    },
+    "query_processing": {
+      "p50_ms": 2.5,
+      "p95_ms": 12.9,
+      "mean_ms": 4.0,
+      "samples": 60
+    },
+    "hybrid_search": {
+      "p50_ms": 6.3,
+      "p95_ms": 28.9,
+      "mean_ms": 8.7,
+      "samples": 60
+    },
+    "kg_expansion": {
+      "p50_ms": 0.1,
+      "p95_ms": 0.2,
+      "mean_ms": 0.1,
+      "samples": 60
+    }
+  },
+  "per_query": [
+    {
+      "id": "kg-01",
+      "kind": "kg",
+      "text": "What is Retrieval-Augmented Generation and how does it work?",
+      "samples_ms": [
+        887.8,
+        865.1,
+        872.4
+      ],
+      "median_ms": 872.4,
+      "per_stage_median_ms": {
+        "reranking": 859.3,
+        "embedding": 0.0,
+        "query_processing": 1.7,
+        "hybrid_search": 4.1,
+        "kg_expansion": 0.0
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-02",
+      "kind": "kg",
+      "text": "Explain machine learning in the context of this knowledge base.",
+      "samples_ms": [
+        886.6,
+        880.6,
+        882.1
+      ],
+      "median_ms": 882.1,
+      "per_stage_median_ms": {
+        "reranking": 874.5,
+        "embedding": 0.0,
+        "query_processing": 1.5,
+        "hybrid_search": 4.6,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-03",
+      "kind": "kg",
+      "text": "How is deep learning used by ACME?",
+      "samples_ms": [
+        907.5,
+        885.1,
+        889.3
+      ],
+      "median_ms": 889.3,
+      "per_stage_median_ms": {
+        "reranking": 879.2,
+        "embedding": 0.0,
+        "query_processing": 1.7,
+        "hybrid_search": 5.1,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-04",
+      "kind": "kg",
+      "text": "What does BAAI provide for embeddings?",
+      "samples_ms": [
+        913.9,
+        897.5,
+        900.9
+      ],
+      "median_ms": 900.9,
+      "per_stage_median_ms": {
+        "reranking": 889.1,
+        "embedding": 0.0,
+        "query_processing": 2.3,
+        "hybrid_search": 5.7,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-05",
+      "kind": "kg",
+      "text": "Tell me about web development practices documented here.",
+      "samples_ms": [
+        967.2,
+        917.8,
+        905.2
+      ],
+      "median_ms": 917.8,
+      "per_stage_median_ms": {
+        "reranking": 896.5,
+        "embedding": 0.0,
+        "query_processing": 2.1,
+        "hybrid_search": 6.5,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-06",
+      "kind": "kg",
+      "text": "What are vector embeddings and where are they used?",
+      "samples_ms": [
+        926.9,
+        905.4,
+        909.5
+      ],
+      "median_ms": 909.5,
+      "per_stage_median_ms": {
+        "reranking": 896.1,
+        "embedding": 0.0,
+        "query_processing": 2.0,
+        "hybrid_search": 6.0,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-07",
+      "kind": "kg",
+      "text": "How does unsupervised learning differ from supervised learning?",
+      "samples_ms": [
+        979.0,
+        934.8,
+        931.9
+      ],
+      "median_ms": 934.8,
+      "per_stage_median_ms": {
+        "reranking": 923.2,
+        "embedding": 0.0,
+        "query_processing": 2.1,
+        "hybrid_search": 6.3,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-08",
+      "kind": "kg",
+      "text": "Describe TensorFlow's role in this stack.",
+      "samples_ms": [
+        963.2,
+        933.6,
+        928.8
+      ],
+      "median_ms": 933.6,
+      "per_stage_median_ms": {
+        "reranking": 920.7,
+        "embedding": 0.0,
+        "query_processing": 2.2,
+        "hybrid_search": 6.6,
+        "kg_expansion": 0.0
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-09",
+      "kind": "kg",
+      "text": "What is the Technical Architecture Team responsible for?",
+      "samples_ms": [
+        952.5,
+        928.7,
+        926.4
+      ],
+      "median_ms": 928.7,
+      "per_stage_median_ms": {
+        "reranking": 916.8,
+        "embedding": 0.0,
+        "query_processing": 2.1,
+        "hybrid_search": 7.3,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-10",
+      "kind": "kg",
+      "text": "Give me an overview of the Tech Knowledge Base.",
+      "samples_ms": [
+        954.8,
+        929.0,
+        937.4
+      ],
+      "median_ms": 937.4,
+      "per_stage_median_ms": {
+        "reranking": 920.2,
+        "embedding": 0.0,
+        "query_processing": 2.0,
+        "hybrid_search": 6.8,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-11",
+      "kind": "kg",
+      "text": "What does Technologies Inc do?",
+      "samples_ms": [
+        958.1,
+        927.1,
+        930.4
+      ],
+      "median_ms": 930.4,
+      "per_stage_median_ms": {
+        "reranking": 918.9,
+        "embedding": 0.0,
+        "query_processing": 2.4,
+        "hybrid_search": 5.7,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-12",
+      "kind": "kg",
+      "text": "Explain the technical overview document.",
+      "samples_ms": [
+        969.3,
+        945.5,
+        965.4
+      ],
+      "median_ms": 965.4,
+      "per_stage_median_ms": {
+        "reranking": 936.7,
+        "embedding": 0.0,
+        "query_processing": 2.8,
+        "hybrid_search": 5.8,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dbdf5eceefb7ae39"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-13",
+      "kind": "kg",
+      "text": "Where is team documentation kept and what does it contain?",
+      "samples_ms": [
+        1041.5,
+        957.7,
+        1027.9
+      ],
+      "median_ms": 1027.9,
+      "per_stage_median_ms": {
+        "reranking": 987.4,
+        "embedding": 0.0,
+        "query_processing": 2.7,
+        "hybrid_search": 6.1,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-14",
+      "kind": "kg",
+      "text": "What is Python Programming and how does NumPy relate to it?",
+      "samples_ms": [
+        1023.4,
+        1026.8,
+        996.3
+      ],
+      "median_ms": 1023.4,
+      "per_stage_median_ms": {
+        "reranking": 986.9,
+        "embedding": 0.0,
+        "query_processing": 3.5,
+        "hybrid_search": 6.9,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "58c26b0705577f1a",
+        "dad13002217ad917",
+        "dbdf5eceefb7ae39",
+        "e3b4b0a19e276cbe",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "kg-15",
+      "kind": "kg",
+      "text": "How does ACME use machine learning and deep learning together?",
+      "samples_ms": [
+        1085.5,
+        1027.9,
+        1029.7
+      ],
+      "median_ms": 1029.7,
+      "per_stage_median_ms": {
+        "reranking": 1020.3,
+        "embedding": 0.0,
+        "query_processing": 2.9,
+        "hybrid_search": 6.9,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "cold-01",
+      "kind": "cold",
+      "text": "How do I bake sourdough bread at high altitude?",
+      "samples_ms": [
+        1063.1,
+        1030.3,
+        1031.3
+      ],
+      "median_ms": 1031.3,
+      "per_stage_median_ms": {
+        "reranking": 1021.5,
+        "embedding": 0.0,
+        "query_processing": 2.6,
+        "hybrid_search": 6.6,
+        "kg_expansion": 0.0
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "bbe4edf27fa1480f"
+      ],
+      "error": null
+    },
+    {
+      "id": "cold-02",
+      "kind": "cold",
+      "text": "What is the migration pattern of monarch butterflies?",
+      "samples_ms": [
+        1241.4,
+        1037.4,
+        1059.2
+      ],
+      "median_ms": 1059.2,
+      "per_stage_median_ms": {
+        "reranking": 1048.7,
+        "embedding": 0.0,
+        "query_processing": 3.0,
+        "hybrid_search": 6.4,
+        "kg_expansion": 0.0
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "bbe4edf27fa1480f"
+      ],
+      "error": null
+    },
+    {
+      "id": "cold-03",
+      "kind": "cold",
+      "text": "Explain the rules of a chess endgame with king and pawn.",
+      "samples_ms": [
+        1200.5,
+        1185.6,
+        1147.0
+      ],
+      "median_ms": 1185.6,
+      "per_stage_median_ms": {
+        "reranking": 1130.4,
+        "embedding": 0.0,
+        "query_processing": 5.5,
+        "hybrid_search": 11.0,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "dad13002217ad917",
+        "e3b4b0a19e276cbe"
+      ],
+      "error": null
+    },
+    {
+      "id": "cold-04",
+      "kind": "cold",
+      "text": "What's a good recipe for vegetarian chili?",
+      "samples_ms": [
+        1308.8,
+        1128.8,
+        1128.9
+      ],
+      "median_ms": 1128.9,
+      "per_stage_median_ms": {
+        "reranking": 1098.1,
+        "embedding": 0.0,
+        "query_processing": 10.8,
+        "hybrid_search": 19.8,
+        "kg_expansion": 0.1
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "2bdbfa447fe0f695",
+        "4ed7fd5096667761",
+        "55528e742e871fbc",
+        "bbe4edf27fa1480f",
+        "eb68c068cf726729"
+      ],
+      "error": null
+    },
+    {
+      "id": "cold-05",
+      "kind": "cold",
+      "text": "How does plate tectonics produce mountain ranges?",
+      "samples_ms": [
+        1713.0,
+        1258.4,
+        1252.9
+      ],
+      "median_ms": 1258.4,
+      "per_stage_median_ms": {
+        "reranking": 1198.8,
+        "embedding": 0.0,
+        "query_processing": 22.3,
+        "hybrid_search": 35.3,
+        "kg_expansion": 0.4
+      },
+      "action": "search",
+      "top_k_doc_ids": [
+        "4ed7fd5096667761",
+        "53e01890b3cec209",
+        "55528e742e871fbc",
+        "80a3cf917f202445",
+        "d8fa7e6e4369768b"
+      ],
+      "error": null
+    }
+  ],
+  "lint_check": {
+    "passed": true,
+    "failures": [],
+    "files_checked": [
+      "src/retrieval/pipeline/rag_chain.py",
+      "src/retrieval/query/nodes/query_processor.py",
+      "src/retrieval/query/nodes/reranker.py",
+      "src/retrieval/common/utils.py",
+      "src/retrieval/common/exceptions.py",
+      "src/retrieval/common/__init__.py",
+      "src/retrieval/common/schemas.py"
+    ]
+  },
+  "regression_guard": {
+    "passed": true,
+    "drift_count": 0,
+    "guarded_count": 15,
+    "drift_fraction": 0.0,
+    "tolerance": 0.05,
+    "drifts": [],
+    "_note": "Only kg-kind queries are asserted; cold queries contribute latency only."
+  }
+}
