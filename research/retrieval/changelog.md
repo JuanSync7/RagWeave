@@ -1,7 +1,8 @@
 # Auto-Research Changelog — Retrieval Query Pipeline
 
-**Branch**: `autoresearch/container-2026-04-10`
-**Worktree**: `.claude/worktrees/autoresearch-retrieval-query-2026-04-10`
+**Loop branch (origin)**: `worktree-autoresearch-retrieval-query-2026-04-10`
+**Promoted to**: `develop` (loop result), then `cleanup/research-relocate` (post-loop artifact relocation)
+**Worktree**: `.claude/worktrees/autoresearch-retrieval-query-2026-04-10` (removed after the cleanup commit)
 **Outcome**: **SUCCESS** — settled p95 294 ms (target ≤ 1813 ms, achieved 84% below target)
 
 ## Headline result
@@ -46,18 +47,33 @@ Per PROGRAM.md §Stop conditions:
 
 **Achieved** at iter 005 with `settled_p95 = 294 ms`. The hard target (1813) was cleared by 1519 ms (84%).
 
-## Protocol artifacts created during the run
+## Protocol artifacts
 
-- `PROGRAM.md` — research brief + keep rule + stop conditions. Mutated twice (iter 003 added lint-progress tolerance band; iter 003 added scoped `config/settings.py` exception for precision keys; iter 005 clarified that the "defaults preserve baseline" constraint was iter-003-scoped).
-- `scripts/benchmark_retrieval_query.py` — **immutable** during the loop. Score authority. 20 queries × 3 reps = 60 samples per invocation.
-- `scripts/bench_multirun.sh` — thin wrapper around the immutable harness, added in iter 003. Runs N samples, aggregates `max(p95)` across them. Used by iter 004/005.
-- `research/benchmark_queries.json` — **immutable**. 15 KG queries + 5 cold queries (the latter contribute latency only, no top-K assertion).
-- `research/baseline_report.json` — original single-sample baseline snapshot (iter 001b). Retained for history but superseded by…
-- `research/baseline_v2_aggregate.json` — **current baseline of record**. 5-sample aggregate at iter 003 (`61a5408`). `best_p95_ms=2266` was the starting point for iter 004/005.
-- `research/iterations.tsv` — one row per iteration with status and reasoning.
-- `research/iteration_003_{report,rerun1..4}.json` — 5 raw per-sample baseline reports.
-- `research/iter_004_run{1..3}.json`, `research/iter_005_run{1..3}.json` — per-sample iteration reports.
-- `research/baseline_outputs.json` — regression-guard snapshot (per-query `action` + top-K SHA1 doc IDs). Unchanged from iter 001b — all subsequent iterations still match it.
+The loop produced two classes of files: **durable** (still in the repo) and
+**transient** (raw per-sample evidence, pruned in the post-loop relocate
+commit because `iterations.tsv` already encodes the signal).
+
+**Durable — co-located under `research/retrieval/`:**
+
+- `PROGRAM.md` (sibling) — research brief + keep rule + stop conditions. Mutated three times during the run: iter 003 added the lint-progress tolerance band; iter 003 added the scoped `config/settings.py` exception for precision keys; iter 005 clarified that the "defaults preserve baseline" constraint was iter-003-scoped.
+- `iterations.tsv` (sibling) — one row per iteration with commit, settled p95, drift, status, and a paragraph of reasoning. The durable record of every iteration's decision and rationale.
+- `benchmark_queries.json` (sibling) — **immutable**. 15 KG queries + 5 cold queries (the latter contribute latency only, no top-K assertion).
+- `baseline_outputs.json` (sibling) — regression-guard snapshot (per-query `action` + top-K SHA1 doc IDs). Unchanged from iter 001b — all subsequent iterations still match it.
+
+**Durable — outside `research/retrieval/`:**
+
+- `scripts/benchmark_retrieval_query.py` — **immutable** during the loop. Score authority. 20 queries × 3 reps = 60 samples per invocation. Reads its fixtures from `research/retrieval/`.
+- `scripts/bench_multirun.sh` — thin wrapper around the immutable harness, added in iter 003. Runs N samples, aggregates `max(p95)` across them. Used by iter 004/005. Writes per-sample reports under `research/retrieval/`.
+
+**Transient (pruned in cleanup commit `417a0ae`):**
+
+- `baseline_report.json` — original single-sample baseline snapshot (iter 001b). Superseded by the iter 003 multi-run baseline. The single-sample numbers are still recorded in the iter 001b row of `iterations.tsv`.
+- `baseline_v2_aggregate.json` — was the "current baseline of record" during the run. 5-sample aggregate at iter 003 (`61a5408`); `best_p95_ms=2266`. The same numbers (and the per-sample p95 values 1253/2266/1259/1158/1252) are recorded in the iter 003 row of `iterations.tsv`.
+- `iteration_003_{report,rerun1..4}.json` — 5 raw per-sample baseline reports. Were load-bearing during the loop as evidence for the multi-run protocol redesign; post-hoc the conclusion (~80% single-sample variance) is captured in the iter 002 discard row of `iterations.tsv`.
+- `iter_004_run{1..3}.json`, `iter_005_run{1..3}.json` — per-sample iteration reports for iter 004 and iter 005. The aggregated p95s (max-of-3) are in the corresponding `iterations.tsv` rows.
+- `latest_report.json` — transient default harness output, regenerated next run.
+
+These pruned files are preserved in git history at commit `d049f72` (the final loop commit, before the cleanup) for anyone who wants to audit the raw evidence.
 
 ## What worked (and why)
 
@@ -88,4 +104,4 @@ Per PROGRAM.md §Stop conditions:
 
 ## Regression-guard snapshot verification
 
-All 5 iteration-005 samples produced exactly the same top-5 doc IDs as `research/baseline_outputs.json` on all 15 KG queries. Output contract preserved.
+All 5 iteration-005 samples produced exactly the same top-5 doc IDs as `baseline_outputs.json` (sibling) on all 15 KG queries. Output contract preserved.
