@@ -83,7 +83,7 @@ make console-build   # one-shot production build
 ### 3. Start infrastructure services
 
 ```bash
-./scripts/compose.sh up -d
+./scripts/compose.sh --profile temporal up -d
 ```
 
 This starts the core services: **Temporal** (orchestration) + **Temporal UI** (port 8080).
@@ -147,8 +147,8 @@ python -m server.worker
 Or use Docker/Podman profiles for a fully containerized stack:
 
 ```bash
-./scripts/compose.sh --profile app --profile workers up -d
-# Scale workers: ./scripts/compose.sh --profile workers up -d --scale rag-worker=3
+./scripts/compose.sh --profile temporal --profile app --profile workers up -d
+# Scale workers: ./scripts/compose.sh --profile temporal --profile workers up -d --scale rag-worker=3
 
 # After code changes, rebuild + restart:
 make restart        # app + workers
@@ -171,7 +171,7 @@ python -m server.cli_client
 make test                          # full suite (uv run pytest)
 
 # Fast static gates (no test execution). Pick one depending on scope:
-make precommit-check               # runs L1+L2+L3+TS on git-tracked files (skips WIP)
+make precommit-check               # runs L1+L2+L3+L4+TS on git-tracked files (skips WIP)
 make all-check                     # same, but over the full tree including untracked
 
 # Individual layers:
@@ -179,40 +179,51 @@ make py-compile-check              # L1: compileall across source tree
 make import-check-tracked          # L2 (tracked files only)
 make import-check                  # L2 (full tree)
 make dep-check                     # L3: deptry
+make container-dep-check           # L4: requirements-*.txt in sync with pyproject.toml
 
 # Targeted pytest invocations still work directly:
 source .venv/bin/activate
 pytest tests/ingest/ -v            # ingestion tests only
 ```
 
-> Neither `precommit-check` nor `all-check` runs the pytest suite — they're fast static gates. Run `make test` separately. **Use `precommit-check` before every `git commit`** so in-progress untracked work doesn't block your commit. **Use `all-check` before releases or as a periodic hygiene sweep** to catch issues in WIP code you haven't committed yet.
+> Neither `precommit-check` nor `all-check` runs the pytest suite — they're fast static gates. Run `make test` separately. **Use `precommit-check` before every `git commit`** so in-progress untracked work doesn't block your commit. **Use `all-check` before releases or as a periodic hygiene sweep** to catch issues in WIP code you haven't committed yet. L4 (`container-dep-check`) catches missing or misplaced deps across `pyproject.toml` and the two container requirements files.
 
 ## Container Profiles
 
-| Profile | Services | Use Case |
-|---------|----------|----------|
-| *(default)* | Temporal + Temporal UI | Local development (run API/worker in terminals) |
-| `app` | + API server + Redis | Containerized API |
-| `workers` | + Temporal worker(s) + Redis | Containerized workers |
-| `monitoring` | + Prometheus, Grafana, Alertmanager, Dozzle | Observability stack |
-| `observability` | + Langfuse (full stack) | LLM tracing and evaluation |
-| `gateway` | + nginx HTTPS reverse proxy | TLS termination for `rag-api` |
+Two services have no profile and start whenever compose is invoked:
+
+| Container | Image | Size |
+|-----------|-------|------|
+| `rag-postgres` | `postgres:16-alpine` | 395 MB |
+| `rag-minio` | `minio/minio:latest` | 241 MB |
+
+All other services are profile-gated:
+
+| Profile | Use Case | Key containers | Third-party images | Approx. pull |
+|---------|----------|----------------|--------------------|--------------|
+| `temporal` | Temporal orchestration engine + UI | `rag-temporal-db`, `rag-temporal`, `rag-temporal-ui` | `postgres:16-alpine`¹, `temporalio/auto-setup`, `temporalio/ui` | +1.24 GB |
+| `app` | Containerized API server | `rag-api`², `rag-nginx`, `rag-redis`, `pg-maintenance` | `nginx:alpine`, `redis:7-alpine`, `postgres:16-alpine`¹ | +544 MB |
+| `workers` | Containerized ingest/query workers | `rag-worker`² | `redis:7-alpine`¹ | +5.79 GB |
+| `monitoring` | Prometheus + Grafana + Dozzle | `rag-prometheus`, `rag-alertmanager`, `rag-grafana`, `rag-monitor` | `prom/prometheus`, `prom/alertmanager`, `grafana/grafana`, `amir20/dozzle` | +1.74 GB |
+| `observability` | Langfuse LLM tracing (full stack) | `rag-langfuse-*` (6 containers) | `postgres:17`, `redis:7`, `clickhouse/clickhouse-server`, `cgr.dev/chainguard/minio`, `langfuse/langfuse-worker:3`, `langfuse/langfuse:3` | +5.93 GB |
+| `gateway` | nginx HTTPS reverse proxy | `rag-nginx` | `nginx:alpine`¹ | +94 MB |
+
+¹ Shared image — no additional pull if already present from another profile.  
+² Custom-built locally — see [Container Images](#container-images).
 
 ```bash
 # Example: full production stack with monitoring
-./scripts/compose.sh --profile app --profile workers --profile monitoring up -d
+./scripts/compose.sh --profile temporal --profile app --profile workers --profile monitoring up -d
 ```
 
 ## Container Images
 
-The stack uses two images with strict dependency isolation (both measured with `podman images`):
+The stack uses two images with strict dependency isolation:
 
-| Image | Size | Baseline | Δ | Contents |
-|---|---|---|---|---|
-| `rag-api` | **389 MB** | 6.65 GB | **−94%** | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
-| `rag-worker` | **5.79 GB** | 6.65 GB | **−13%** | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
-
-Baseline was a single monolithic image built from `pip install .`. The dominant win is the API split; the worker still carries full torch because GPU inference is required.
+| Image | Size | Contents |
+|---|---|---|
+| `rag-api` | 389 MB | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
+| `rag-worker` | 5.79 GB | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
 
 Dependencies live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would install every dep listed under `[project.dependencies]`, which undoes the isolation. Local dev still uses `pyproject.toml` via `make install`; containers bypass it.
 
@@ -280,7 +291,7 @@ echo "127.0.0.1  aion.local" | sudo tee -a /etc/hosts
 ### Start with HTTPS
 
 ```bash
-./scripts/compose.sh --profile app --profile gateway up -d
+./scripts/compose.sh --profile temporal --profile app --profile gateway up -d
 # Browse: https://aion.local
 ```
 
@@ -321,7 +332,7 @@ podman info | grep -i rootless   # should show: rootless: true
 echo "CONTAINER_SOCK=\$XDG_RUNTIME_DIR/podman/podman.sock" >> .env
 
 # 5. Use compose.sh as normal — it auto-detects Podman
-./scripts/compose.sh --profile app up -d
+./scripts/compose.sh --profile temporal --profile app up -d
 ```
 
 See `docs/operations/PODMAN_SPEC.md` for full details.
@@ -332,7 +343,7 @@ Containerized workers expect embedding/reranker models mounted at `/models`. Set
 
 ```bash
 export RAG_MODEL_ROOT=/path/to/your/models
-./scripts/compose.sh --profile workers up -d
+./scripts/compose.sh --profile temporal --profile workers up -d
 ```
 
 Default model paths inside the container:
@@ -417,19 +428,22 @@ Run `make help` for this list in the terminal. All targets are also documented i
 | `make import-check` | L2 internal: resolve imports + encapsulation, **whole tree** (includes untracked) |
 | `make import-check-tracked` | L2 internal but only for **git-tracked** files (for `precommit-check`) |
 | `make dep-check` | L3 external: `deptry` — `pyproject.toml` vs actual imports |
-| `make precommit-check` | **Compound gate for `git commit`**: L1 + L2(tracked) + L3 + `npm ci` + console-check. Excludes untracked WIP. |
+| `make container-dep-check` | L4 container: `requirements-*.txt` in sync with `pyproject.toml` |
+| `make precommit-check` | **Compound gate for `git commit`**: L1 + L2(tracked) + L3 + L4 + `npm ci` + console-check. Excludes untracked WIP. |
 | `make all-check` | **Compound gate for release**: same checks but over the entire tree including untracked. |
 | **Container images** (see [Container Images](#container-images) for details) | |
-| `make container-build` | Build `rag-api` + `rag-worker` with docker (BuildKit) |
+| `make container-build` | Compile frontend + build `rag-api` + `rag-worker` with docker (BuildKit) |
 | `make container-build-api` | Build only `rag-api` |
 | `make container-build-worker` | Build only `rag-worker` |
-| `make container-build-podman` | Build both with podman (`--format docker`) |
+| `make container-build-podman` | Compile frontend + build both with podman (`--format docker`) |
 | `make container-probe` | Run the API import probe inside `rag-api` — catches transitive ML leakage |
 | `make container-sizes` | Print current `rag-api` / `rag-worker` image sizes |
-| `make container-clean` | Remove local `rag-api` / `rag-worker` images |
+| `make container-clean` | Remove local `rag-api` / `rag-worker` images + dangling images |
+| `make smoke-test` | Full integration check: build + stack + cloudflared tunnel + API checks + teardown |
+| `make container-build-and-test` | Build images then immediately run smoke test (`SKIP_BUILD=1`) |
 | **Stack restart** (uses `scripts/restart_stack.sh` — auto-detects docker/podman) | |
-| `make restart` | Restart `app` + `workers` profiles with rebuild |
-| `make restart-all` | Restart all profiles with rebuild |
+| `make restart` | Compile frontend + restart `app` + `workers` profiles with rebuild |
+| `make restart-all` | Compile frontend + restart all profiles with rebuild |
 
 ## Engineering Docs
 

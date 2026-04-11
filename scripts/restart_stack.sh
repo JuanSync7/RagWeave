@@ -53,12 +53,13 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --temporal)      PROFILES+=("temporal"); shift ;;
         --app)           PROFILES+=("app"); shift ;;
         --workers)       PROFILES+=("workers"); shift ;;
         --monitoring)    PROFILES+=("monitoring"); shift ;;
         --observability) PROFILES+=("observability"); shift ;;
         --all)
-            PROFILES+=("app" "workers" "monitoring" "observability")
+            PROFILES+=("temporal" "app" "workers" "monitoring" "observability")
             shift ;;
         --build)         BUILD=true; shift ;;
         --clean)         CLEAN_VOLUMES=true; shift ;;
@@ -103,7 +104,7 @@ fi
 # Stop all containers (including all profiles, not just selected ones)
 # This ensures nothing is left running from a previous config.
 "$COMPOSE" \
-    --profile app --profile workers --profile monitoring --profile observability --profile gateway \
+    --profile temporal --profile app --profile workers --profile monitoring --profile observability --profile gateway \
     "${DOWN_ARGS[@]}" 2>&1 || true
 
 # Verify nothing is still running
@@ -149,8 +150,10 @@ echo "════════════════════════�
 # Collect containers that have health checks
 HEALTH_TARGETS=()
 
-# Temporal DB is always started (no profile)
-HEALTH_TARGETS+=("rag-temporal-db")
+# Temporal DB health check when temporal profile is active
+for p in "${PROFILES[@]+"${PROFILES[@]}"}"; do
+    [[ "$p" == "temporal" ]] && HEALTH_TARGETS+=("rag-temporal-db") && break
+done
 
 # Profile-dependent health checks
 for p in "${PROFILES[@]+"${PROFILES[@]}"}"; do

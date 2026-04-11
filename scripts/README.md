@@ -57,10 +57,10 @@ This directory contains operations and development tooling scripts for running, 
 
 ```bash
 # Start infrastructure (auto-detects Docker vs Podman)
-./scripts/compose.sh up -d
+./scripts/compose.sh --profile temporal up -d
 
 # Full stack with monitoring
-./scripts/compose.sh --profile app --profile workers --profile monitoring up -d
+./scripts/compose.sh --profile temporal --profile app --profile workers --profile monitoring up -d
 
 # Run load test with SLO checks
 python scripts/load_test_api.py --url http://localhost:8000 --total-requests 1000 --concurrency 100

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @summary
 # Auto-detect Docker or Podman and run compose with the correct binary.
-# Usage: ./scripts/compose.sh --profile app up -d
+# Usage: ./scripts/compose.sh --profile temporal --profile app up -d
 # Exports: (none — exec's into compose)
 # Deps: podman-compose | podman compose | docker compose
 # @end-summary

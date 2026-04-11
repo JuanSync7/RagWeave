@@ -25,7 +25,13 @@ from typing import Any, Optional
 
 from temporalio import activity
 
-from config.settings import GLINER_ENABLED
+from config.settings import (
+    GLINER_ENABLED,
+    RAG_INGESTION_DOCLING_ENABLED,
+    RAG_INGESTION_DOCLING_MODEL,
+    RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
+    RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
+)
 from src.core import LocalBGEEmbeddings
 from src.core import KnowledgeGraphBuilder
 from src.ingest.common import (
@@ -34,6 +40,7 @@ from src.ingest.common import (
 )
 from src.ingest.doc_processing import run_document_processing
 from src.ingest.embedding import run_embedding_pipeline
+from src.ingest.support import ensure_docling_ready
 import src.db as db
 import src.vector_db as vector_db
 
@@ -48,7 +55,7 @@ _db_client: Optional[Any] = None
 
 
 def prewarm_worker_resources() -> None:
-    """Load the embedding model and MinIO client before the worker starts.
+    """Load the embedding model, MinIO client, and optionally Docling models before the worker starts.
 
     Call this once at worker startup so the first activity execution does not
     pay the model-load penalty.
@@ -57,6 +64,24 @@ def prewarm_worker_resources() -> None:
     _embedder = LocalBGEEmbeddings()
     _db_client = db.create_persistent_client()
     logger.info("worker resources prewarmed: embedder + db client ready")
+
+    if RAG_INGESTION_DOCLING_ENABLED:
+        logger.info("prewarming Docling models (RAG_INGESTION_DOCLING_ENABLED=true)...")
+        try:
+            ensure_docling_ready(
+                parser_model=RAG_INGESTION_DOCLING_MODEL,
+                artifacts_path=RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
+                auto_download=RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
+            )
+            logger.info("Docling models ready")
+        except RuntimeError as exc:
+            logger.warning(
+                "Docling is enabled but models could not be prepared — "
+                "ingestion jobs using Docling will fail: %s",
+                exc,
+            )
+    else:
+        logger.info("Docling disabled (RAG_INGESTION_DOCLING_ENABLED=false) — skipping model warmup")
 
 
 def _get_embedder() -> LocalBGEEmbeddings:
