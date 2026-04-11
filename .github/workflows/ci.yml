@@ -19,5 +19,5 @@ jobs:
       - name: Build console TypeScript UI
         run: npm --prefix server/console/web ci && npm --prefix server/console/web run check && npm --prefix server/console/web run build
       - name: Compile checks
-        run: uv run python -m py_compile server/api.py server/activities.py src/retrieval/rag_chain.py
+        run: uv run python -m py_compile server/api.py server/activities.py src/retrieval/pipeline/rag_chain.py
 
