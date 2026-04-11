@@ -6,6 +6,7 @@
 
 .PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check all-check setup restart restart-all \
+        venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
         container-build-podman container-probe container-sizes container-clean
 
@@ -25,6 +26,7 @@ help:
 	@echo "Setup & install"
 	@echo "  setup              Full one-shot setup: venv + deps + console install + build"
 	@echo "  install            (Re)install Python deps into the active env (editable + dev extras)"
+	@echo "  venv-doctor        Check .venv health (detects stale shebangs after dir rename)"
 	@echo ""
 	@echo "Web console (TypeScript)"
 	@echo "  console-install    npm install for the web console"
@@ -55,15 +57,77 @@ help:
 	@echo "  restart-all        Restart all profiles with rebuild"
 	@echo ""
 
-# Full project setup (Python + TypeScript)
-setup:
+# ---------------------------------------------------------------------------
+# Virtual env health
+#
+# pip/uv install console scripts (deptry, pytest, uvicorn, ...) with an
+# ABSOLUTE-path shebang pointing at the venv's python. If the project
+# directory is renamed after setup, every console script in .venv/bin/
+# silently breaks with "Permission denied" or "No such file or directory".
+# The python interpreter itself (.venv/bin/python3 -> /usr/bin/python3 or
+# similar) is a symlink and keeps working, which makes the failure mode
+# confusing — `python ...` works but `pytest` / `deptry` / `uvicorn` don't.
+#
+# `venv-doctor` detects the mismatch by comparing a known console script's
+# shebang to the current project path. `_venv-auto-heal` is the silent
+# version used as an implicit dep by `setup` and `install` so repair is
+# automatic on re-run. Neither touches .venv unless the mismatch is real.
+# ---------------------------------------------------------------------------
+
+# Verbose health check — prints either "ok" or a diagnosis.
+venv-doctor:
+	@if [ ! -d .venv ]; then \
+		echo "venv-doctor: no .venv/ present — run 'make setup'"; exit 1; \
+	elif [ ! -x .venv/bin/python3 ]; then \
+		echo "venv-doctor: .venv/ exists but has no python3 — run 'rm -rf .venv && make setup'"; exit 1; \
+	else \
+		expected="$$(pwd)/.venv/bin/python3"; \
+		for script in .venv/bin/pytest .venv/bin/pip .venv/bin/python3; do \
+			if [ -f "$$script" ]; then \
+				first="$$(head -c 2 $$script)"; \
+				if [ "$$first" = "#!" ]; then \
+					actual="$$(head -n 1 $$script | sed 's|^#!||')"; \
+					if [ "$$actual" != "$$expected" ]; then \
+						echo "venv-doctor: STALE venv detected"; \
+						echo "  $$script shebang:   $$actual"; \
+						echo "  expected:          $$expected"; \
+						echo "  cause:             project directory was renamed after 'make setup'"; \
+						echo "  fix:               rm -rf .venv && make setup"; \
+						echo "                     (or: make install — auto-heals before reinstalling)"; \
+						exit 1; \
+					fi; \
+					break; \
+				fi; \
+			fi; \
+		done; \
+		echo "venv-doctor: .venv/ healthy"; \
+	fi
+
+# Silent version used as a hidden dep of setup/install. Nukes and rebuilds
+# .venv ONLY when a stale shebang is detected — no-op on a healthy venv.
+_venv-auto-heal:
+	@if [ -d .venv ] && [ -f .venv/bin/pip ]; then \
+		expected="$$(pwd)/.venv/bin/python3"; \
+		actual="$$(head -n 1 .venv/bin/pip | sed 's|^#!||')"; \
+		if [ "$$actual" != "$$expected" ]; then \
+			echo ">>> Stale venv detected (shebang points to $$actual)"; \
+			echo ">>> Removing .venv/ so it can be recreated at $$expected"; \
+			rm -rf .venv; \
+		fi; \
+	fi
+
+# Full project setup (Python + TypeScript). Auto-heals a stale venv first.
+setup: _venv-auto-heal
 	uv venv
 	uv pip install -e ".[dev]"
 	$(MAKE) console-install
 	$(MAKE) console-build
 	@echo "\n✓ Setup complete. Activate with: source .venv/bin/activate"
 
-install:
+# (Re)install Python deps into the active env. Auto-heals a stale venv
+# first so `make install` after a directory rename Just Works.
+install: _venv-auto-heal
+	@if [ ! -d .venv ]; then uv venv; fi
 	uv pip install -e ".[dev]"
 
 console-install:
