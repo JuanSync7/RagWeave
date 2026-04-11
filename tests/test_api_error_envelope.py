@@ -122,7 +122,7 @@ def test_500_query_failure_uses_standard_envelope(monkeypatch):
     body = response.json()
     assert response.status_code == 500
     assert body["ok"] is False
-    assert body["error"]["code"] == "HTTP_500"
+    assert body["error"]["code"] == "INTERNAL_SERVER_ERROR"
     assert "simulated workflow failure" in body["error"]["message"]
 
 

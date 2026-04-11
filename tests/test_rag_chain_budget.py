@@ -11,8 +11,17 @@ class _DummySpan:
     def end(self, status="ok", error=None):
         return None
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
 
 class _DummyTracer:
+    def span(self, name, attributes=None, parent=None):
+        return _DummySpan()
+
     def start_span(self, name, attrs=None, parent=None):
         return _DummySpan()
 
