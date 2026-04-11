@@ -4,7 +4,7 @@
 
 Reduce **retrieval-only p95 latency** (stages 1–5: query_processing → kg_expansion → embedding → hybrid_search → reranking) of `RAGChain.ask(...)` while preserving the output contract. As a secondary, structural concern, ensure every stage has uniform logging, error handling, and duration tracking, with natural code flow.
 
-Current baseline: **2266 ms p95** (max across 5 samples at commit `61a5408`, iter 003 HEAD). Recorded in `research/baseline_v2_aggregate.json`. The single-sample baseline at iter 001b (`b1f6e28`, p95 3031 ms) has been **retired as noise-pathological** — see `research/iterations.tsv` iter 002 discard entry for the evidence (uniform cross-stage regression on a latency-neutral change) and iter 003 reruns (same commit, p95 samples 1253/2266/1259/1158/1252).
+Current baseline: **2266 ms p95** (max across 5 samples at commit `61a5408`, iter 003 HEAD). Recorded in `iterations.tsv` (iter 003 row). The single-sample baseline at iter 001b (`b1f6e28`, p95 3031 ms) has been **retired as noise-pathological** — see `iterations.tsv` iter 002 discard entry for the evidence (uniform cross-stage regression on a latency-neutral change) and iter 003 reruns (same commit, p95 samples 1253/2266/1259/1158/1252).
 
 Generation (stage 6) is explicitly out of scope for latency optimization but is still invoked end-to-end so the harness measures realistic conditions.
 
@@ -18,7 +18,7 @@ The harness emits a JSON report; the loop reads `retrieval_p95_ms` from it. Scor
 
 **Primary score**: `settled_p95_ms` = **max** of `retrieval_p95_ms` across **N=3 independent samples** per iteration, where each sample is one invocation of `scripts/benchmark_retrieval_query.py` over 20 benchmark queries × 3 repetitions = 60 observations.
 
-Samples are orchestrated by `scripts/bench_multirun.sh <N> <label>`, a thin wrapper that invokes the immutable harness N times and aggregates. Max (not median) is the conservative choice — the keep rule judges an iteration against the worst of its N samples, so a single noise-lucky run cannot falsely advance `best_p95_ms`. Rationale for multi-run: single-sample p95 on the shared GPU has been measured at ~80% run-to-run variance on identical code (same commit, five runs: 1253 / 2266 / 1259 / 1158 / 1252 ms). See `research/baseline_v2_aggregate.json`.
+Samples are orchestrated by `scripts/bench_multirun.sh <N> <label>`, a thin wrapper that invokes the immutable harness N times and aggregates. Max (not median) is the conservative choice — the keep rule judges an iteration against the worst of its N samples, so a single noise-lucky run cannot falsely advance `best_p95_ms`. Rationale for multi-run: single-sample p95 on the shared GPU has been measured at ~80% run-to-run variance on identical code (same commit, five runs: 1253 / 2266 / 1259 / 1158 / 1252 ms). The iter 003 row in `iterations.tsv` records the per-sample numbers.
 
 **Starting baseline**: `best_p95_ms = 2266`, `best_lint_failure_count = 0`, captured at iter 003 (commit `61a5408`). The earlier single-run baseline at iter 001b (`b1f6e28`, p95 3031 ms) is retired.
 
@@ -38,7 +38,7 @@ All comparisons below use `settled_p95_ms` = max(p95) across the iteration's N s
 
 ## Regression guard — output contract
 
-Before measuring latency, the harness re-runs the benchmark queries and compares each query's `(action, top_k_doc_id_set)` against `research/baseline_outputs.json`:
+Before measuring latency, the harness re-runs the benchmark queries and compares each query's `(action, top_k_doc_id_set)` against `baseline_outputs.json`:
 
 - **Scope**: only **KG queries** (`kind == "kg"`, 15 of 20) are asserted. Cold queries (`kind == "cold"`, 5 of 20) contribute latency samples but NO top-K assertion. Rationale: on an off-topic corpus, reranker scores for cold queries are all near-tied (0.03-0.05 range), and microscopic numerical shifts from legitimate optimizations (e.g. FP16 inference) would cause spurious drift without signaling any real quality regression. The 15 KG queries, by contrast, have clearly separated scores and are a meaningful correctness oracle.
 - **Action match**: `RAGResponse.action.value` must equal the baseline action for that query.
@@ -74,9 +74,8 @@ Only modify these — everything else is locked:
 
 - `PROGRAM.md` — this file
 - `scripts/benchmark_retrieval_query.py` — the scoring harness
-- `research/benchmark_queries.json` — fixed query set
-- `research/baseline_outputs.json` — baseline `(action, top_k_ids)` snapshot
-- `research/baseline_report.json` — baseline latency report
+- `benchmark_queries.json` (sibling) — fixed query set
+- `baseline_outputs.json` (sibling) — baseline `(action, top_k_ids)` snapshot
 - All files under `tests/` — correctness suite (must continue to pass)
 - `config/settings.py` — configuration is frozen EXCEPT for the additive precision-mode exception listed under "Mutable files" above
 - `src/core/embeddings.py`, `src/core/knowledge_graph/` — shared infrastructure
@@ -122,18 +121,18 @@ User-provided strategies, in priority order. The loop picks one per iteration. *
 
 ## Loop mechanics
 
-1. Read `research/iterations.tsv` to see what's been tried; read git log for context.
+1. Read `iterations.tsv` (sibling) to see what's been tried; read git log for context.
 2. Pick a strategy from exploration directions (or the most promising sub-strategy if the parent strategy has been partially tried).
 3. Make a focused, single-idea change. Update modified files' `@summary` blocks if exports changed.
 4. `git commit -m "iter NNN: <one-line summary>"` with a body explaining the change.
 5. Pre-flight: verify Weaviate, Ollama, and local BGE models are reachable. If not, abort iteration with status `crash`.
-6. Run `python scripts/benchmark_retrieval_query.py --report research/iteration_<NNN>_report.json`.
+6. Run `python scripts/benchmark_retrieval_query.py --report research/retrieval/iteration_<NNN>_report.json`. (Per-iteration reports are noisy intermediate output and should be pruned at end of loop — `iterations.tsv` is the durable record.)
 7. Read the report. Extract `retrieval_p95_ms`, `regression_guard_passed`, `lint_check_passed`.
 8. Run `pytest tests/retrieval/ -q` — capture pass/fail.
 9. Compare to previous best:
    - If `retrieval_p95_ms < best_p95_ms` AND all guards pass → status `keep`, advance best.
    - Else → status `discard`, `git reset --hard <best_commit>`.
-10. Append a row to `research/iterations.tsv`: `iteration | commit | retrieval_p95_ms | retrieval_p50_ms | drift_count | lint_pass | tests_pass | status | summary`.
+10. Append a row to `iterations.tsv` (sibling): `iteration | commit | retrieval_p95_ms | retrieval_p50_ms | drift_count | lint_pass | tests_pass | status | summary`.
 11. Check stop conditions; if not met, repeat.
 
 ## Stop conditions
