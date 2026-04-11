@@ -67,8 +67,8 @@ def test_ingest_source_marks_unchanged_file_as_skip(tmp_path: Path):
     assert result["should_skip"] is True
 
 
-def test_pipeline_exposes_13_named_nodes():
-    assert len(PIPELINE_NODE_NAMES) == 13
+def test_pipeline_exposes_15_named_nodes():
+    assert len(PIPELINE_NODE_NAMES) == 15
     assert PIPELINE_NODE_NAMES[0] == "document_ingestion"
     assert PIPELINE_NODE_NAMES[-1] == "knowledge_graph_storage"
 

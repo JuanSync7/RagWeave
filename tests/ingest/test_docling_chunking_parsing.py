@@ -410,8 +410,12 @@ class TestParseWithDoclingHappyPath:
         assert result.headings == ["Introduction"]
         assert result.parser_model == "my-model"
 
-    def test_artifacts_path_forwarded_to_converter(self, tmp_path):
-        """When artifacts_path is provided, it is passed to DocumentConverter."""
+    def test_artifacts_path_accepted_but_not_forwarded(self, tmp_path):
+        """parse_with_docling accepts artifacts_path for caller compat but no
+        longer forwards it to DocumentConverter (newer Docling versions
+        removed the constructor kwarg; model location is now controlled by
+        warmup_docling_models / HF cache). See src/ingest/support/docling.py
+        line 307-309 for the explicit drop comment."""
         source_file = tmp_path / "doc.pdf"
         source_file.write_bytes(b"%PDF-1.4 fake")
         artifacts = str(tmp_path / "artifacts")
@@ -429,7 +433,7 @@ class TestParseWithDoclingHappyPath:
             )
 
         _, kwargs = MockConverter.call_args
-        assert kwargs.get("artifacts_path") == artifacts
+        assert "artifacts_path" not in kwargs
 
     def test_no_artifacts_path_does_not_pass_key_to_converter(self, tmp_path):
         """When artifacts_path is empty, artifacts_path is NOT passed to DocumentConverter."""

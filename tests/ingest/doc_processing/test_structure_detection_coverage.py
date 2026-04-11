@@ -199,6 +199,7 @@ class TestStructureDetectionErrorScenarios:
             "heading_count",
             "docling_enabled",
             "docling_model",
+            "docling_document_available",
         }
 
     def test_structure_detection_node_processing_log_records_ok(self):

@@ -78,11 +78,17 @@ def test_ingest_file_returns_source_hash(tmp_path):
 
 
 def test_ingest_file_writes_clean_store(tmp_path):
-    """ingest_file must write Phase 1 clean text to CleanDocumentStore."""
+    """ingest_file must write Phase 1 clean text to CleanDocumentStore.
+
+    Note: as of the export_processed gating change, the clean store write
+    only happens when both `export_processed=True` and `clean_store_dir` is
+    set. This test exercises the opt-in debug-export path.
+    """
     doc = tmp_path / "doc.txt"
     doc.write_text("Clean document text.")
     store_dir = tmp_path / "store"
     runtime = _make_runtime(tmp_path, store_subdir="store")
+    runtime.config.export_processed = True
 
     with patch("src.ingest.impl.run_document_processing",
                return_value=_phase1_result(doc, cleaned="Clean document text.")), \

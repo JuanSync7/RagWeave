@@ -190,6 +190,26 @@ def _all_mocks_happy(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _stub_to_rgb():
+    """Patch ``_to_rgb`` to return its input unchanged for the whole module.
+
+    The visual_embedding tests pass in MagicMock images, and the production
+    ``_to_rgb`` calls ``Image.fromarray(mock)`` when the input is not a real
+    ``PIL.Image.Image``. With real PIL installed (the normal CI/local case
+    once *any* earlier test imports Pillow), this raises
+    ``AttributeError: __array_interface__``. The PIL stub at the top of this
+    file only installs when PIL is not yet in ``sys.modules``, so it doesn't
+    help once another test has already pulled in real PIL — hence the test
+    pollution that only manifested when this file ran after others.
+
+    Tests that need to assert on ``_to_rgb`` behavior can still ``patch`` it
+    inside the test body — that inner patch wins over this autouse fixture.
+    """
+    with patch(_TO_RGB, side_effect=lambda x: x):
+        yield
+
+
 @pytest.fixture
 def happy_state_10() -> dict:
     """State for a 10-page document with all visual embedding flags on."""
