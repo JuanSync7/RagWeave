@@ -1,6 +1,6 @@
 # @summary
 # Centralizes configuration settings for a RAG (Retrieval-Augmented Generation) system.
-# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, KG_PATH, SEMANTIC_CHUNKING_ENABLED, GLINER_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config
+# Exports: PROJECT_ROOT, DOCUMENTS_DIR, PROCESSED_DIR, EMBEDDING_MODEL_PATH, RERANKER_MODEL_PATH, VECTOR_DB_BACKEND, VECTOR_COLLECTION_DEFAULT, WEAVIATE_COLLECTION_NAME, DATABASE_BACKEND, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE, HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, QUERY_CONFIDENCE_THRESHOLD, MAX_SANITIZATION_ITERATIONS, QUERY_PROCESSING_MODEL, QUERY_MAX_LENGTH, QUERY_PROCESSING_TEMPERATURE, QUERY_LOG_DIR, PROMPTS_DIR, DOMAIN_DESCRIPTION, KG_ENABLED, KG_PATH, SEMANTIC_CHUNKING_ENABLED, GLINER_ENABLED, GENERATION_ENABLED, RAG_CONFIDENCE_ROUTING_ENABLED, RAG_DOCUMENT_FORMATTING_ENABLED, RAG_NEMO_PII_GLINER_ENABLED, RAG_INGESTION_VLM_MODE, RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS, RAG_INGESTION_PERSIST_DOCLING_DOCUMENT, RAG_INGESTION_ENABLE_VISUAL_EMBEDDING, RAG_INGESTION_VISUAL_TARGET_COLLECTION, RAG_INGESTION_COLQWEN_MODEL, RAG_INGESTION_COLQWEN_BATCH_SIZE, RAG_INGESTION_PAGE_IMAGE_QUALITY, RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION, RAG_VISUAL_RETRIEVAL_ENABLED, RAG_VISUAL_RETRIEVAL_LIMIT, RAG_VISUAL_RETRIEVAL_MIN_SCORE, RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS, RAG_STAGE_BUDGET_VISUAL_RETRIEVAL_MS, validate_visual_retrieval_config, VALID_MODEL_PRECISIONS, EMBEDDING_PRECISION_QUERY, EMBEDDING_PRECISION_INGEST, RERANKER_PRECISION, VISUAL_RETRIEVAL_PRECISION, GENERATION_PRECISION
 # Deps: os, pathlib, logging, dotenv
 # @end-summary
 """Centralized configuration for the RAG system."""
@@ -565,6 +565,64 @@ RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))
 # Maximum number of (query, document) pairs per tokenizer/model forward pass.
 # Reduce to lower peak VRAM usage when SEARCH_LIMIT is large.
 RERANKER_BATCH_SIZE = int(os.environ.get("RAG_RERANKER_BATCH_SIZE", "32"))
+
+# --- Model precision modes (per-model-surface) ---
+# Supported precisions for neural model surfaces in the pipeline. Each key
+# selects the numeric dtype (and, for int8/int4, the quantization scheme) used
+# for that model's weights and activations. Defaults are "fp32" to preserve
+# baseline behavior; iterations that flip a key to a lower precision MUST
+# pass the regression guard before being accepted.
+#
+# Mapping per surface:
+#   EMBEDDING_PRECISION_QUERY     — BGE query-time embedder (LocalBGEEmbeddings)
+#   EMBEDDING_PRECISION_INGEST    — BGE ingest-time embedder (same model class,
+#                                    separate config so ingest can be fp32 while
+#                                    query is fp16, or vice versa)
+#   RERANKER_PRECISION            — BGE reranker (LocalBGEReranker)
+#   VISUAL_RETRIEVAL_PRECISION    — ColQwen2 visual embedder (ingest and query)
+#   GENERATION_PRECISION          — advisory. Generation goes through the
+#                                    Ollama HTTP API, so actual precision is
+#                                    baked into the Ollama model tag (e.g.,
+#                                    "qwen2.5:3b-instruct-q4_K_M"). This key
+#                                    documents the expected precision for
+#                                    observability/SLO reasoning; it does not
+#                                    reconfigure the remote model.
+#
+# Allowed values (case-insensitive, lowered at validation):
+#   "fp32"  — float32 (default, maximum accuracy)
+#   "fp16"  — float16 (NVIDIA Tensor Core fast path)
+#   "bf16"  — bfloat16 (Ampere+; trades range for stability vs fp16)
+#   "int8"  — 8-bit integer quantization (bitsandbytes / torch.quantization)
+#   "int4"  — 4-bit integer quantization (bitsandbytes / GPTQ)
+VALID_MODEL_PRECISIONS = frozenset({"fp32", "fp16", "bf16", "int8", "int4"})
+
+
+def _read_precision_env(env_key: str, default: str = "fp32") -> str:
+    """Read a precision setting from the environment, validate, and return normalized value.
+
+    Returns the lowercased value if valid; otherwise logs a warning and
+    falls back to ``default``. Raising would break imports for operators
+    who set a typo — silent fallback + startup warning is friendlier.
+    """
+    raw = os.environ.get(env_key, default)
+    value = raw.strip().lower()
+    if value not in VALID_MODEL_PRECISIONS:
+        import warnings
+        warnings.warn(
+            f"{env_key}={raw!r} is not a valid precision mode "
+            f"(allowed: {sorted(VALID_MODEL_PRECISIONS)}). Falling back to {default!r}.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return default
+    return value
+
+
+EMBEDDING_PRECISION_QUERY = _read_precision_env("RAG_EMBEDDING_PRECISION_QUERY")
+EMBEDDING_PRECISION_INGEST = _read_precision_env("RAG_EMBEDDING_PRECISION_INGEST")
+RERANKER_PRECISION = _read_precision_env("RAG_RERANKER_PRECISION")
+VISUAL_RETRIEVAL_PRECISION = _read_precision_env("RAG_VISUAL_RETRIEVAL_PRECISION")
+GENERATION_PRECISION = _read_precision_env("RAG_GENERATION_PRECISION")  # advisory
 
 # --- Document Formatting ---
 RAG_DOCUMENT_FORMATTING_ENABLED = os.environ.get(
