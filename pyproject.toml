@@ -65,6 +65,17 @@ visual = [
   "colpali-engine>=0.3.0",
   "bitsandbytes>=0.43.0",
 ]
+kg = [
+  # Knowledge-graph feature (src/knowledge_graph/). Mirrors the deps in
+  # containers/requirements-worker.txt so the containerized worker and local
+  # `uv pip install -e ".[kg]"` produce the same runtime.
+  "neo4j",
+  "igraph",
+  "leidenalg",
+  "tree-sitter",
+  "tree-sitter-verilog",
+  "pyverilog",
+]
 all = [
   "ragweave[pii]",
   "ragweave[gliner]",
@@ -72,22 +83,58 @@ all = [
   "ragweave[pinecone]",
   "ragweave[qdrant]",
   "ragweave[visual]",
+  "ragweave[kg]",
 ]
 
 [tool.deptry]
-exclude = [".venv"]
-# pinecone-client installs as 'pinecone' — map the package name to its import name
-package_module_name_map = {"pinecone-client" = "pinecone"}
+# Paths excluded from the import scan. Everything else in the tree (src/,
+# server/, config/, etc.) IS scanned so new imports are caught.
+exclude = [
+    ".venv",
+    ".claude",        # agentic worktrees / skill outputs — not production code
+    "tests",          # test-only deps live in the [dev] extras, not prod
+    "evals",          # eval fixtures use domain-specific deps (cocotb, etc.)
+    "import_check",   # bundled dev tool (uses libcst — declared as dev extra)
+]
+[tool.deptry.package_module_name_map]
+# Packages whose distribution name differs from their import name.
+pinecone-client = "pinecone"
+presidio-analyzer = "presidio_analyzer"
+presidio-anonymizer = "presidio_anonymizer"
+qdrant-client = "qdrant_client"
+colpali-engine = "colpali_engine"
+tree-sitter = "tree_sitter"
+tree-sitter-verilog = "tree_sitter_verilog"
+# Below: dist-name == import-name, mapped explicitly so deptry doesn't emit
+# "Assuming the corresponding module name..." warnings when the optional
+# extras that install them aren't active in the current venv.
+spacy = "spacy"
+gliner = "gliner"
+chromadb = "chromadb"
+bitsandbytes = "bitsandbytes"
+neo4j = "neo4j"
 
 [tool.deptry.per_rule_ignores]
-# uvicorn: CLI entry point, never imported directly
-# accelerate: loaded automatically by transformers/torch at runtime
-# pytest-mock: pytest plugin, used via fixture not import
-# deptry: dev tool, not imported in source
-DEP002 = ["uvicorn", "accelerate", "pytest-mock", "deptry"]
-# starlette: always bundled with fastapi
-# docling_core: always bundled with docling
-DEP003 = ["starlette", "docling_core"]
+# DEP002 — declared as a dep but not imported in source code.
+# Valid reasons: CLI entry points, pytest plugins used via flags/fixtures,
+# runtime-loaded plugins, dev tooling.
+DEP002 = [
+    "uvicorn",             # CLI entry point (uvicorn server.api:app ...)
+    "accelerate",          # loaded automatically by transformers/torch at runtime
+    "pytest",              # used via `import pytest` in tests/, which is excluded from scan
+    "pytest-mock",         # pytest plugin, used via the mocker fixture
+    "pytest-timeout",      # pytest plugin, used via --timeout CLI flag
+    "pytest-json-report",  # pytest plugin, used via --json-report CLI flag
+    "deptry",              # this tool itself — invoked via CLI
+]
+# DEP003 — imported under a name that's a transitive dep of something we
+# already declare directly. Listed here for packages that are stable-bundled
+# and safe to rely on transitively.
+DEP003 = [
+    "starlette",           # always bundled with fastapi
+    "docling_core",        # always bundled with docling
+    "PIL",                 # always bundled with torchvision (from torch)
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -32,12 +32,14 @@ help:
 	@echo "  console-build      Compile TS -> static/main.js"
 	@echo "  console-watch      Watch mode — rebuild on TS change"
 	@echo ""
-	@echo "Checks & tests"
-	@echo "  test               Run the pytest suite"
-	@echo "  py-compile-check   Smoke compile check on entry-point Python modules"
-	@echo "  dep-check          Run deptry (unused / missing deps)"
-	@echo "  import-check       Run the custom import_check module"
-	@echo "  all-check          Pre-commit bundle: npm ci + py-compile + console-check (NO tests)"
+	@echo "Static checks (3 layers — each catches a distinct bug class)"
+	@echo "  py-compile-check   L1 syntax: compileall across src/ server/ config/ import_check/"
+	@echo "  import-check       L2 internal: do 'from X import Y' resolve to real symbols?"
+	@echo "  dep-check          L3 external: is pyproject.toml in sync with actual imports? (deptry)"
+	@echo "  all-check          Pre-commit gate: L1 + L2 + L3 + npm ci + console-check (NO pytest)"
+	@echo ""
+	@echo "Tests"
+	@echo "  test               Run the pytest suite (not included in all-check)"
 	@echo ""
 	@echo "Container lifecycle (docker or podman — auto-detected)"
 	@echo "  container-build         Build rag-api + rag-worker with docker (BuildKit)"
@@ -76,21 +78,49 @@ console-build:
 console-watch:
 	npm --prefix server/console/web run watch
 
+# ---------------------------------------------------------------------------
+# Static checks & tests
+#
+# Three Python checks that stack in layers — each catches a distinct bug class:
+#
+#   py-compile-check  Layer 1: does every .py parse as valid Python syntax?
+#                     (python -m compileall, fast, skips unchanged files)
+#   import-check      Layer 2: do project-internal `from X import Y` statements
+#                     resolve to real symbols? Catches stale imports after
+#                     refactors and encapsulation violations.
+#   dep-check         Layer 3: is pyproject.toml in sync with actual third-party
+#                     imports? (deptry — unused/missing/misplaced deps)
+#
+# `all-check` is the pre-commit gate that runs all of the above plus the web
+# console type-check. It does NOT run the pytest suite — use `make test` for
+# that (intentional split: pre-commit should stay fast).
+# ---------------------------------------------------------------------------
+
+# Layer 1: syntax-only check on the whole source tree. compileall is fast
+# because it skips .py files whose cached .pyc is already current.
 py-compile-check:
-	uv run python -m py_compile server/api.py server/activities.py src/retrieval/pipeline/rag_chain.py
+	uv run python -m compileall -q src server config import_check
 
 test:
 	uv run pytest
 
+# Layer 3: deptry verifies pyproject.toml matches actual imports.
+# Invoked via `python -m deptry` instead of the deptry console script so it
+# survives venv-path rot (e.g. directory renames that break cached shebangs).
 dep-check:
-	uv run deptry .
+	uv run python -m deptry .
 
+# Layer 2: internal import resolution + encapsulation violations.
 import-check:
 	uv run python -m import_check
 
+# Pre-commit gate. Every fast static check, NO pytest.
+# Order: cheap -> expensive so failures surface the lowest-level issue first.
 all-check:
-	npm --prefix server/console/web ci
 	$(MAKE) py-compile-check
+	$(MAKE) import-check
+	$(MAKE) dep-check
+	npm --prefix server/console/web ci
 	$(MAKE) console-check
 
 restart:
