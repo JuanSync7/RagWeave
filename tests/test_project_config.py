@@ -112,6 +112,7 @@ _PYPROJECT_IMPORT_MAP: dict[str, set[str]] = {
     # Dev deps
     "pytest": {"pytest"},
     "pytest-mock": {"pytest_mock"},
+    "import-mend": {"import_mend"},
 }
 
 # All importable names that pyproject.toml covers
@@ -129,7 +130,7 @@ _OPTIONAL_IMPORTS = frozenset({
 })
 
 # Root-level scripts and local packages that are importable but not third-party packages
-_LOCAL_ROOT_MODULES = frozenset({"ingest", "query", "cli", "colang_demo", "import_check"})
+_LOCAL_ROOT_MODULES = frozenset({"ingest", "query", "cli", "colang_demo"})
 
 
 @pytest.fixture

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # @summary
-# One-off tool that repairs encapsulation violations flagged by import_check
+# One-off tool that repairs encapsulation violations flagged by import_mend
 # by (1) promoting reached-into symbols to package-level __init__.py re-exports
 # and (2) rewriting violating imports to use the package path.
 # Exports: main, collect_violations, generate_reexports, rewrite_imports
-# Deps: ast, import_check
+# Deps: ast, import_mend
 # @end-summary
-"""Auto-fix encapsulation violations reported by ``import_check``.
+"""Auto-fix encapsulation violations reported by ``import_mend``.
 
 For each violating import of the form ``from pkg.sub import sym``, this
 script:
@@ -40,14 +40,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-# Ensure we can import import_check when run from any CWD.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
-from import_check import check  # noqa: E402
-from import_check.schemas import ImportError as CheckError  # noqa: E402
-from import_check.schemas import ImportErrorType  # noqa: E402
+from import_mend import check  # noqa: E402
+from import_mend.schemas import ImportError as CheckError  # noqa: E402
+from import_mend.schemas import ImportErrorType  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +440,7 @@ def apply_import_rewrites(
 
 def run_compile_check(root: Path) -> bool:
     """Run ``python -m compileall`` across the project source tree."""
-    print("\n[verify] running compileall on src/ server/ config/ import_check/ ...")
+    print("\n[verify] running compileall on src/ server/ config/ ...")
     result = subprocess.run(
         [
             sys.executable,
@@ -453,7 +450,6 @@ def run_compile_check(root: Path) -> bool:
             "src",
             "server",
             "config",
-            "import_check",
         ],
         cwd=root,
         capture_output=True,
@@ -511,7 +507,7 @@ def main() -> int:
     before_total, before_encap = run_import_check(root)
 
     # --- Step 1: collect ---
-    print(">>> collecting encapsulation violations from import_check ...")
+    print(">>> collecting encapsulation violations from import_mend ...")
     violations, bare_imports = collect_violations(root, only_package=args.only)
     if not violations and not bare_imports:
         print("  nothing to do — no encapsulation violations found.")

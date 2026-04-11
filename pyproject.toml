@@ -106,7 +106,6 @@ exclude = [
     ".claude",        # agentic worktrees / skill outputs — not production code
     "tests",          # dev deps belong here; test dep errors caught by pytest
     "evals",          # eval fixtures use domain-specific deps (cocotb, etc.)
-    "import_check",   # TODO: remove once import_check/ directory is deleted from RagWeave
 ]
 # Tells deptry that `[project.optional-dependencies].dev` is the dev-dep
 # group. Currently this mainly affects DEP002 classification; it becomes
