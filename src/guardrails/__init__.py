@@ -24,8 +24,8 @@ import logging
 from typing import List, Tuple
 
 from src.guardrails.backend import GuardrailBackend
-from src.guardrails.common.merge_gate import RailMergeGate
-from src.guardrails.common.schemas import (
+from src.guardrails.common import RailMergeGate
+from src.guardrails.common import (
     GuardrailsMetadata,
     InputRailResult,
     OutputRailResult,
@@ -70,7 +70,7 @@ def _get_guardrail_backend() -> GuardrailBackend:
     if _guardrail_backend is None:
         from config.settings import GUARDRAIL_BACKEND
         if GUARDRAIL_BACKEND == "nemo":
-            from src.guardrails.nemo_guardrails.backend import NemoBackend
+            from src.guardrails.nemo_guardrails import NemoBackend
             _guardrail_backend = NemoBackend()
         elif GUARDRAIL_BACKEND in ("", "none"):
             _guardrail_backend = _NoOpBackend()

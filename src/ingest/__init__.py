@@ -12,7 +12,13 @@ artifacts). The package exports a small, stable surface so callers do not depend
 on internal node implementations.
 """
 
-from src.ingest.common.types import IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime
+from src.ingest.common import (
+    IngestFileResult,
+    IngestionConfig,
+    IngestionDesignCheck,
+    IngestionRunSummary,
+    Runtime,
+)
 from src.ingest.impl import ingest_directory, ingest_file, verify_core_design
 
 __all__ = [

@@ -16,7 +16,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
-from src.guardrails.common.schemas import InputRailResult, OutputRailResult
+from src.guardrails.common import (
+    InputRailResult,
+    OutputRailResult,
+)
 
 
 class GuardrailBackend(ABC):

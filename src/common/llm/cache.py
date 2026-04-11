@@ -31,7 +31,10 @@ from langchain_core.caches import BaseCache, InMemoryCache
 from langchain_core.globals import get_llm_cache, set_llm_cache
 from langchain_core.outputs import Generation
 
-from src.platform.cache.provider import CacheProvider, get_cache
+from src.platform.cache import (
+    CacheProvider,
+    get_cache,
+)
 
 logger = logging.getLogger(__name__)
 

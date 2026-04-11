@@ -4,12 +4,19 @@
 # Deps: src.retrieval.common, src.retrieval.pipeline, src.retrieval.query, src.retrieval.generation
 # @end-summary
 
-from src.retrieval.common.schemas import RAGRequest, RAGResponse, RankedResult
-from src.retrieval.query.schemas import QueryAction, QueryResult
-from src.retrieval.query.nodes.query_processor import process_query
-from src.retrieval.query.nodes.reranker import LocalBGEReranker
-from src.retrieval.pipeline.rag_chain import RAGChain
-from src.retrieval.generation.nodes.generator import OllamaGenerator
+from src.retrieval.common import (
+    RAGRequest,
+    RAGResponse,
+    RankedResult,
+)
+from src.retrieval.query import (
+    QueryAction,
+    QueryResult,
+)
+from src.retrieval.query.nodes import process_query
+from src.retrieval.query.nodes import LocalBGEReranker
+from src.retrieval.pipeline import RAGChain
+from src.retrieval.generation.nodes import OllamaGenerator
 from src.retrieval.generation.confidence import (
     ConfidenceBreakdown,
     PostGuardrailAction,

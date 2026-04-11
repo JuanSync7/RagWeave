@@ -555,7 +555,7 @@ async def run_output_rails(answer: str) -> dict:
 
     if rail_result.final_answer != answer:
         # Check if it was a rejection (faithfulness fail → fallback message)
-        from src.guardrails.common.schemas import RailVerdict
+        from src.guardrails.common import RailVerdict
         if rail_result.faithfulness_verdict == RailVerdict.REJECT:
             return {
                 "action": "reject",

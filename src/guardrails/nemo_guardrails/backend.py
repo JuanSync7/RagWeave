@@ -19,7 +19,10 @@ import logging
 from typing import List, Tuple
 
 from src.guardrails.backend import GuardrailBackend
-from src.guardrails.common.schemas import InputRailResult, OutputRailResult
+from src.guardrails.common import (
+    InputRailResult,
+    OutputRailResult,
+)
 
 logger = logging.getLogger("rag.guardrails.nemo_backend")
 
@@ -60,12 +63,12 @@ class NemoBackend(GuardrailBackend):
         )
         from src.guardrails.nemo_guardrails.runtime import GuardrailsRuntime
         from src.guardrails.nemo_guardrails.executor import InputRailExecutor, OutputRailExecutor
-        from src.guardrails.shared.faithfulness import FaithfulnessChecker
-        from src.guardrails.shared.injection import InjectionDetector
-        from src.guardrails.shared.intent import IntentClassifier
-        from src.guardrails.shared.pii import PIIDetector
-        from src.guardrails.shared.topic_safety import TopicSafetyChecker
-        from src.guardrails.shared.toxicity import ToxicityFilter
+        from src.guardrails.shared import FaithfulnessChecker
+        from src.guardrails.shared import InjectionDetector
+        from src.guardrails.shared import IntentClassifier
+        from src.guardrails.shared import PIIDetector
+        from src.guardrails.shared import TopicSafetyChecker
+        from src.guardrails.shared import ToxicityFilter
 
         logger.info("Initializing NeMo Guardrails backend...")
         runtime = GuardrailsRuntime.get()

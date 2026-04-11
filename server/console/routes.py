@@ -17,7 +17,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from temporalio.client import Client  # pyright: ignore[reportMissingImports]
 
-from server.common.schemas import ApiErrorResponse
+from server.common import ApiErrorResponse
 from server.console.services import (
     CONSOLE_HTML_PATH,
     USER_CONSOLE_HTML_PATH,
@@ -30,7 +30,11 @@ from server.console.services import (
     tail_log_lines,
 )
 from server.routes import build_health_response, run_query
-from server.routes.admin import create_api_key_handler, list_api_keys_handler, list_quotas_handler
+from server.routes import (
+    create_api_key_handler,
+    list_api_keys_handler,
+    list_quotas_handler,
+)
 from server.schemas import (
     ConversationCompactRequest,
     ConversationCreateRequest,
@@ -48,9 +52,12 @@ from src.platform.memory import (
     conversation_turns_to_dict,
     get_conversation_memory,
 )
-from src.platform.security.auth import Principal, authenticate_request
-from src.platform.security.rbac import require_role
-from src.platform.command_catalog import (
+from src.platform.security import (
+    Principal,
+    authenticate_request,
+)
+from src.platform.security import require_role
+from src.platform import (
     MODE_CONSOLE_INGEST,
     MODE_CONSOLE_QUERY,
     get_command_spec,
@@ -500,7 +507,7 @@ def create_console_router(
         require_role(principal, "admin")
         from config.settings import DOCUMENTS_DIR, PROJECT_ROOT
         from src.ingest.pipeline.impl import IngestionConfig, ingest_directory
-        from src.platform.validation import validate_documents_dir
+        from src.platform import validate_documents_dir
 
         selected_file = None
         documents_dir = DOCUMENTS_DIR

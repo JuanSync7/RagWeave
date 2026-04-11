@@ -16,23 +16,17 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
-from src.ingest.embedding.nodes.chunking import chunking_node
-from src.ingest.embedding.nodes.vlm_enrichment import vlm_enrichment_node
-from src.ingest.embedding.nodes.document_storage_node import document_storage_node
-from src.ingest.embedding.nodes.cross_reference_extraction import (
-    cross_reference_extraction_node,
-)
-from src.ingest.embedding.nodes.embedding_storage import embedding_storage_node
-from src.ingest.embedding.nodes.knowledge_graph_extraction import (
-    knowledge_graph_extraction_node,
-)
-from src.ingest.embedding.nodes.knowledge_graph_storage import (
-    knowledge_graph_storage_node,
-)
-from src.ingest.embedding.nodes.metadata_generation import metadata_generation_node
-from src.ingest.embedding.nodes.quality_validation import quality_validation_node
-from src.ingest.embedding.nodes.visual_embedding import visual_embedding_node
+from src.ingest.embedding.nodes import chunk_enrichment_node
+from src.ingest.embedding.nodes import chunking_node
+from src.ingest.embedding.nodes import vlm_enrichment_node
+from src.ingest.embedding.nodes import document_storage_node
+from src.ingest.embedding.nodes import cross_reference_extraction_node
+from src.ingest.embedding.nodes import embedding_storage_node
+from src.ingest.embedding.nodes import knowledge_graph_extraction_node
+from src.ingest.embedding.nodes import knowledge_graph_storage_node
+from src.ingest.embedding.nodes import metadata_generation_node
+from src.ingest.embedding.nodes import quality_validation_node
+from src.ingest.embedding.nodes import visual_embedding_node
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 

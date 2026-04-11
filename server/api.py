@@ -40,17 +40,17 @@ from config.settings import (
     RATE_LIMIT_REQUESTS_PER_MINUTE,
     RATE_LIMIT_WINDOW_SECONDS,
 )
-from src.platform.limits.provider import InMemoryRateLimiter
-from src.platform.metrics import (
+from src.platform.limits import InMemoryRateLimiter
+from src.platform import (
     INFLIGHT_REQUESTS,
     OVERLOAD_REJECTS,
     RATE_LIMIT_REJECTS,
     REQUESTS_TOTAL,
 )
-from src.platform.observability.providers import get_tracer
-from src.platform.security.auth import Principal
-from src.platform.security.quota_store import get_tenant_quota
-from src.platform.security.rbac import require_role
+from src.platform.observability import get_tracer
+from src.platform.security import Principal
+from src.platform.security import get_tenant_quota
+from src.platform.security import require_role
 from server.console import create_console_router
 from server.routes import (
     create_admin_router,

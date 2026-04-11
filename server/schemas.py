@@ -16,7 +16,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional
 
-from server.common.schemas import ApiErrorDetail, ApiErrorResponse, ConsoleEnvelope
+from server.common import (
+    ApiErrorDetail,
+    ApiErrorResponse,
+    ConsoleEnvelope,
+)
 
 
 class QueryRequest(BaseModel):
@@ -324,7 +328,7 @@ class ConsoleIngestionRequest(BaseModel):
         Fields not present in the request (None) keep their IngestionConfig
         env-var defaults.  Fields with explicit values override the defaults.
         """
-        from src.ingest.common.types import IngestionConfig
+        from src.ingest.common import IngestionConfig
 
         overrides: dict[str, Any] = {}
         for req_field, cfg_field in INGESTION_REQUEST_FIELD_MAP.items():

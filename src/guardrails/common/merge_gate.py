@@ -54,7 +54,7 @@ class RailMergeGate:
         Returns:
             A dict describing routing action and optional message/query payload.
         """
-        from src.guardrails.shared.intent import INTENT_RESPONSES
+        from src.guardrails.shared import INTENT_RESPONSES
 
         # Priority 1: injection reject
         if rail_result.injection_verdict == RailVerdict.REJECT:
@@ -74,7 +74,7 @@ class RailMergeGate:
 
         # Priority 3: topic safety (LLM-based off-topic detection)
         if rail_result.topic_off_topic:
-            from src.guardrails.shared.topic_safety import REJECTION_MESSAGE as TOPIC_MSG
+            from src.guardrails.shared import REJECTION_MESSAGE
 
             logger.info("Merge gate: CANNED (topic_safety: off-topic)")
             return {

@@ -14,8 +14,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.ingest.support.docling import parse_with_docling
-from src.ingest.common.shared import append_processing_log
+from src.ingest.support import parse_with_docling
+from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 
 _FIGURE_PATTERN = re.compile(r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", re.IGNORECASE)

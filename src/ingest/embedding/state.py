@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, TypedDict
 
-from src.ingest.common.schemas import ProcessedChunk
-from src.ingest.common.types import Runtime
+from src.ingest.common import ProcessedChunk
+from src.ingest.common import Runtime
 
 
 class EmbeddingPipelineState(TypedDict, total=False):

@@ -17,3 +17,6 @@ __all__ = [
     "LocalBGEReranker",
     "RankedResult",
 ]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.retrieval.query.nodes.query_processor import _call_ollama

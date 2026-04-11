@@ -19,10 +19,21 @@ from server.schemas import (
     QuotaUpdateRequest,
     StatusResponse,
 )
-from src.platform.security.api_key_store import create_api_key, list_api_keys, revoke_api_key
-from src.platform.security.auth import Principal, authenticate_request
-from src.platform.security.quota_store import delete_tenant_quota, list_quotas, set_tenant_quota
-from src.platform.security.rbac import require_role
+from src.platform.security import (
+    create_api_key,
+    list_api_keys,
+    revoke_api_key,
+)
+from src.platform.security import (
+    Principal,
+    authenticate_request,
+)
+from src.platform.security import (
+    delete_tenant_quota,
+    list_quotas,
+    set_tenant_quota,
+)
+from src.platform.security import require_role
 
 
 async def list_api_keys_handler(

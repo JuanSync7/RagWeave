@@ -58,3 +58,6 @@ __all__ = [
     "quality_score",
     "CleanDocumentStore",
 ]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.ingest.common.types import IngestFileResult

@@ -21,23 +21,23 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 from typing import Any, Dict, List, Optional
 
-from src.common.utils import make_query_hash
-from src.guardrails.common.schemas import (
+from src.common import make_query_hash
+from src.guardrails.common import (
     GuardrailsMetadata,
     InputRailResult,
     OutputRailResult,
     RailExecution,
     RailVerdict,
 )
-from src.guardrails.shared.faithfulness import FaithfulnessChecker
-from src.guardrails.shared.injection import InjectionDetector
-from src.guardrails.shared.intent import IntentClassifier
-from src.guardrails.shared.pii import PIIDetector
-from src.guardrails.shared.topic_safety import TopicSafetyChecker
-from src.guardrails.shared.toxicity import ToxicityFilter
-from src.platform.observability.providers import get_tracer
-from src.platform.metrics import PIPELINE_STAGE_MS
-from src.platform.timing import measure_ms
+from src.guardrails.shared import FaithfulnessChecker
+from src.guardrails.shared import InjectionDetector
+from src.guardrails.shared import IntentClassifier
+from src.guardrails.shared import PIIDetector
+from src.guardrails.shared import TopicSafetyChecker
+from src.guardrails.shared import ToxicityFilter
+from src.platform.observability import get_tracer
+from src.platform import PIPELINE_STAGE_MS
+from src.platform import measure_ms
 
 logger = logging.getLogger("rag.guardrails.executor")
 
@@ -446,7 +446,10 @@ class OutputRailExecutor:
                         )
                         default_verdict = RailVerdict.REJECT
                         if name == "faithfulness":
-                            from src.guardrails.shared.faithfulness import _FALLBACK_MESSAGE, FaithfulnessResult
+                            from src.guardrails.shared import (
+                                FaithfulnessResult,
+                                _FALLBACK_MESSAGE,
+                            )
                             rail_results["faithfulness"] = FaithfulnessResult(
                                 overall_score=0.0,
                                 verdict=RailVerdict.REJECT,
@@ -471,7 +474,10 @@ class OutputRailExecutor:
                         )
                         default_verdict = RailVerdict.REJECT
                         if name == "faithfulness":
-                            from src.guardrails.shared.faithfulness import _FALLBACK_MESSAGE, FaithfulnessResult
+                            from src.guardrails.shared import (
+                                FaithfulnessResult,
+                                _FALLBACK_MESSAGE,
+                            )
                             rail_results["faithfulness"] = FaithfulnessResult(
                                 overall_score=0.0,
                                 verdict=RailVerdict.REJECT,

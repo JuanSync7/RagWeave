@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from config.settings import INGESTION_MANIFEST_PATH
-from src.common.utils import parse_json_object
+from src.common import parse_json_object
 
 logger = logging.getLogger("rag.ingest.pipeline.stage")
 

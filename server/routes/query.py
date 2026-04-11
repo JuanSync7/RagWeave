@@ -31,11 +31,11 @@ from server.schemas import (
     ConversationMetaResponse,
 )
 from server.workflows import RAG_QUERY_TASK_QUEUE, RAGQueryWorkflow
-from src.platform.metrics import (
+from src.platform import (
     MEMORY_OP_MS,
     MEMORY_SUMMARY_TRIGGERS,
-    REQUEST_LATENCY_MS,
     REQUESTS_TOTAL,
+    REQUEST_LATENCY_MS,
     render_metrics,
 )
 from src.platform.memory import (
@@ -43,8 +43,11 @@ from src.platform.memory import (
     conversation_turns_to_dict,
     get_conversation_memory,
 )
-from src.platform.security.auth import Principal, authenticate_request
-from src.platform.security.tenancy import resolve_tenant_id
+from src.platform.security import (
+    Principal,
+    authenticate_request,
+)
+from src.platform.security import resolve_tenant_id
 
 
 def _sse(event: str, data: dict) -> str:
@@ -95,7 +98,10 @@ def _stream_llm(
 ):
     """Stream generation tokens via LLMProvider (provider-agnostic)."""
     from src.platform.llm import get_llm_provider
-    from src.retrieval.generation.nodes.generator import _get_system_prompt as _get_gen_system_prompt, _build_user_prompt
+    from src.retrieval.generation.nodes import (
+        _build_user_prompt,
+        _get_system_prompt,
+    )
 
     def _record_stage(stage: str, bucket: str, started_at: float) -> None:
         if stage_timings is None:

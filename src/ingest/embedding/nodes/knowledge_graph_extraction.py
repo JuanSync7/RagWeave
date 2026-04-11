@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.core.knowledge_graph import EntityExtractor
-from src.ingest.common.shared import append_processing_log
+from src.core import EntityExtractor
+from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 

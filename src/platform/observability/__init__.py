@@ -136,19 +136,19 @@ def _init_backend() -> ObservabilityBackend:
         provider = os.environ.get("OBSERVABILITY_PROVIDER", "noop").strip().lower()
 
     if not provider or provider == "noop":
-        from src.platform.observability.noop.backend import NoopBackend
+        from src.platform.observability.noop import NoopBackend
         return NoopBackend()
 
     if provider == "langfuse":
         try:
-            from src.platform.observability.langfuse.backend import LangfuseBackend
+            from src.platform.observability.langfuse import LangfuseBackend
             return LangfuseBackend()
         except Exception as exc:
             logger.warning(
                 "Failed to initialize langfuse backend (%s); falling back to noop.",
                 exc,
             )
-            from src.platform.observability.noop.backend import NoopBackend
+            from src.platform.observability.noop import NoopBackend
             return NoopBackend()
 
     raise ValueError(
@@ -161,3 +161,9 @@ def _init_backend() -> ObservabilityBackend:
 Tracer = ObservabilityBackend
 
 __all__ = ["get_tracer", "observe", "Tracer", "Span", "Trace", "Generation"]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.platform.observability.schemas import (
+    GenerationRecord,
+    TraceRecord,
+)

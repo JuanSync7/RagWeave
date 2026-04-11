@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Generator, Optional
 
-from src.db.common.schemas import StoredDocument
+from src.db.common import StoredDocument
 
 
 class DocumentBackend(ABC):

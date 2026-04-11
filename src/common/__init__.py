@@ -8,3 +8,6 @@
 from src.common.utils import parse_json_object
 
 __all__ = ["parse_json_object"]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.common.utils import make_query_hash

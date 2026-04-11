@@ -11,7 +11,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.ingest.common.shared import quality_score, append_processing_log
+from src.ingest.common import (
+    append_processing_log,
+    quality_score,
+)
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 _WHITESPACE_RE = re.compile(r"\s+")

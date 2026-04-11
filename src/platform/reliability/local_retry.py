@@ -10,7 +10,7 @@ import time
 from typing import Callable, Optional, TypeVar
 
 from src.platform.reliability.contracts import RetryProvider
-from src.platform.schemas.reliability import RetryPolicy
+from src.platform.schemas import RetryPolicy
 
 T = TypeVar("T")
 

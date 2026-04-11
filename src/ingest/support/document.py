@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, DEFAULT_TENANT_ID
-from src.ingest.common.schemas import ProcessedChunk
+from src.ingest.common import ProcessedChunk
 
 
 @dataclass

@@ -15,3 +15,7 @@ __all__ = [
     "RetrievalError",
     "ModelLoadError",
 ]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.retrieval.common.schemas import VisualPageResult
+from src.retrieval.common.utils import parse_json_object

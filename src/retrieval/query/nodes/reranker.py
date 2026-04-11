@@ -19,9 +19,9 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config.settings import RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH, RERANKER_BATCH_SIZE
 from src.platform.observability import get_tracer
-from src.vector_db.common.schemas import SearchResult
-from src.retrieval.common.schemas import RankedResult
-from src.retrieval.common.exceptions import ModelLoadError
+from src.vector_db.common import SearchResult
+from src.retrieval.common import RankedResult
+from src.retrieval.common import ModelLoadError
 
 
 class LocalBGEReranker:
