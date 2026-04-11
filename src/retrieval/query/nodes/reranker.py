@@ -35,14 +35,18 @@ from src.retrieval.common import ModelLoadError
 logger = logging.getLogger("rag.reranker")
 
 
-# Mapping from precision name → torch dtype. int8/int4 are handled via
-# bitsandbytes quantization (not a plain dtype) and fall through to the
-# fp32 load path in this iteration — the keys exist so downstream iterations
-# can flip them on without another PROGRAM.md change.
-_TORCH_DTYPE_BY_PRECISION = {
-    "fp32": torch.float32,
-    "fp16": torch.float16,
-    "bf16": torch.bfloat16,
+# Mapping from precision name → torch dtype attribute name. Stored as
+# strings (resolved via getattr at use time) rather than as torch dtype
+# objects so the module can be imported even when torch is partially
+# installed — module-level `torch.float32` access blew up CI collection
+# whenever the wheel cache landed on an incomplete torch build. int8/int4
+# are handled via bitsandbytes quantization (not a plain dtype) and fall
+# through to the fp32 load path in this iteration — the keys exist so
+# downstream iterations can flip them on without another PROGRAM.md change.
+_TORCH_DTYPE_NAME_BY_PRECISION = {
+    "fp32": "float32",
+    "fp16": "float16",
+    "bf16": "bfloat16",
 }
 
 
@@ -64,7 +68,8 @@ class LocalBGEReranker:
         _t0 = time.perf_counter()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.precision = precision
-        torch_dtype = _TORCH_DTYPE_BY_PRECISION.get(precision)
+        _dtype_name = _TORCH_DTYPE_NAME_BY_PRECISION.get(precision)
+        torch_dtype = getattr(torch, _dtype_name) if _dtype_name else None
         # SDPA = torch.nn.functional.scaled_dot_product_attention. On transformers
         # >=4.38 with XLM-RoBERTa this routes attention ops through PyTorch's
         # fused Flash / Memory-Efficient / math backends, bypassing the eager
@@ -89,7 +94,7 @@ class LocalBGEReranker:
             else:
                 # fp32 path. int8/int4 also land here until a future iteration
                 # wires bitsandbytes.
-                if precision not in ("fp32", None) and precision not in _TORCH_DTYPE_BY_PRECISION:
+                if precision not in ("fp32", None) and precision not in _TORCH_DTYPE_NAME_BY_PRECISION:
                     logger.warning(
                         "Reranker precision=%r is declared but not yet wired "
                         "(int8/int4 require bitsandbytes); loading fp32.",
