@@ -44,9 +44,7 @@ dev = [
   "pytest-json-report>=1.5.0",
   "pytest-timeout>=2.2.0",
   "deptry",
-  # Post-refactoring import repair tool. Install from local path until published to PyPI;
-  # swap to "import-mend>=0.1.0" once the package is released.
-  "import-mend @ file:///home/juansync7/import-check",
+  "import-mend>=0.1.0",
 ]
 pii = [
   "presidio-analyzer",
