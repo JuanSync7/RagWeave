@@ -8,8 +8,11 @@
 
 | Image | Baseline | Final | Reduction |
 |---|---|---|---|
-| `rag-api` | _TBD — baseline rebuild in progress_ | **~390 MB** | — |
-| `rag-worker` | _TBD — baseline rebuild in progress_ | **~5.8 GB** | — |
+| `rag-api` | 6.65 GB | **389 MB** | **−6.26 GB (−94%)** |
+| `rag-worker` | 6.65 GB | **5.79 GB** | **−0.86 GB (−13%)** |
+| **Combined** | **~13.3 GB** | **~6.18 GB** | **−7.12 GB (−54%)** |
+
+Baseline was a single monolithic image layout (`pip install .` pulled every dep including torch into both images). The dominant win is the API split — it no longer contains torch/docling/transformers/nemoguardrails. The worker still carries full torch (required for GPU inference) but benefits from multi-stage build, cache/test stripping, and no curl.
 
 > **A note on measurement**: The auto-research run used `docker inspect --format='{{.Size}}'` as its metric, which reports a single-platform image slice (no BuildKit provenance attestations) and came in much smaller than the actual disk image. The iteration-by-iteration **deltas** in `iterations.tsv` remain accurate relative measurements, but the absolute numbers there understate the true on-disk size by 2–3×.
 >

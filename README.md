@@ -191,12 +191,14 @@ pytest tests/ingest/ -v   # ingestion tests only
 
 ## Container Images
 
-The stack uses two images with strict dependency isolation:
+The stack uses two images with strict dependency isolation (both measured with `podman images`):
 
-| Image | Size (podman) | Contents |
-|---|---|---|
-| `rag-api` | **~390 MB** | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
-| `rag-worker` | **~5.8 GB** | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
+| Image | Size | Baseline | Δ | Contents |
+|---|---|---|---|---|
+| `rag-api` | **389 MB** | 6.65 GB | **−94%** | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
+| `rag-worker` | **5.79 GB** | 6.65 GB | **−13%** | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
+
+Baseline was a single monolithic image built from `pip install .`. The dominant win is the API split; the worker still carries full torch because GPU inference is required.
 
 Dependencies live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would install every dep listed under `[project.dependencies]`, which undoes the isolation. Local dev still uses `pyproject.toml` via `make install`; containers bypass it.
 

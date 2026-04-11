@@ -6,11 +6,25 @@
 
 ## Final Score
 
+Two tables — the first is what the auto-research scoring metric saw (`docker inspect .Size`, single-platform slice), the second is ground truth (`podman images`, true on-disk size as measured after the run). **Deltas in both tables are valid; absolute values in the first are under-reported by roughly 2–3×** due to how `docker inspect` measures single-platform image slices without BuildKit provenance attestations.
+
+### As scored during the run (`docker inspect .Size`)
+
 | Image | Baseline | Final | Reduction |
 |---|---|---|---|
 | **API** | 3,197 MB | **115 MB** | **−96.4%** (−3,082 MB) |
 | **Runtime** | 3,205 MB | **2,926 MB** | **−8.7%** (−279 MB) |
 | **Total** | **6,402 MB** | **3,041 MB** | **−52.5%** (−3,361 MB) |
+
+### True on-disk size (`podman images`, measured after the run)
+
+| Image | Baseline | Final | Reduction |
+|---|---|---|---|
+| **API** | 6.65 GB | **389 MB** | **−94%** (−6.26 GB) |
+| **Runtime** | 6.65 GB | **5.79 GB** | **−13%** (−0.86 GB) |
+| **Combined** | **~13.3 GB** | **~6.18 GB** | **−54%** (−7.12 GB) |
+
+Baseline was effectively one monolithic image built from `pip install .`, so both services shared the same ~6.65 GB layout. The dominant win is the API split — it no longer contains torch/docling/transformers. The worker still carries full torch (kept for GPU inference) but benefits from the multi-stage build, cache/test stripping, and removal of curl + build-essential from the runtime layer.
 
 ## Iterations Summary
 
@@ -68,16 +82,21 @@ First attempt at `requirements-api.txt` was missing `weaviate-client`. Import pr
 **Fix**: Added `weaviate-client` to `requirements-api.txt` (iter-004).
 The probe mechanism worked exactly as designed — caught a transitive runtime dep without needing a healthcheck or running the full server.
 
-## Remaining Gaps (recommended manual follow-ups)
+## Post-run follow-ups (manual, after auto-research stopped)
 
-### 1. BuildKit pip cache mounts (rejected in iter-007 due to scoring rules)
-Not kept because the size metric didn't move, but this is a genuinely good change. Adds `--mount=type=cache,target=/root/.cache/pip` to both builder stages. Future rebuilds that add/change a dep will reuse cached wheels instead of re-downloading. Recommended for manual addition.
+### 1. BuildKit pip cache mounts — **re-added** (commit `992c37d`)
+Discarded by the size-only metric in iter-007, but re-added manually after the run because the rebuild-speed benefit is substantial when deps change. `RUN --mount=type=cache,target=/root/.cache/pip` now lives in both builder stages.
 
-### 2. CPU-only torch (requires user decision)
-The runtime image is still dominated by `torch` (~1.5 GB of CUDA libraries bundled in the default wheel). If the worker does not use GPU inference, switching to `torch --index-url https://download.pytorch.org/whl/cpu` would shave another 1-1.5 GB off the runtime image. **This was NOT attempted** because the worker is designed to optionally run with NVIDIA container runtime (see `docker-compose.yml` comment on `rag-worker`) and defaulting to CPU-only torch would break GPU inference.
+### 2. Podman verification — **done**
+Both images build cleanly with `podman build --format docker -f ...` on podman 4.9.3. `--format docker` is used to preserve `HEALTHCHECK` directives if ever re-added (podman's default OCI format silently drops them). See `make container-build-podman`.
 
-### 3. Podman/OCI compatibility verification (Direction 6)
-All changes use standard Dockerfile syntax (no Docker-specific extensions). Should work with `podman build -f containers/Dockerfile.api .` out of the box. Not explicitly verified during this run because Podman isn't installed in the current WSL2 environment. Recommended manual verification before shipping.
+### 3. HEALTHCHECK moved to docker-compose.yml (commit `900348b`)
+Because podman OCI drops `HEALTHCHECK`, the check was moved to the compose file where both `docker-compose` and `podman-compose` respect it identically. The check uses Python stdlib `urllib.request` so no curl is needed inside the image.
+
+## Intentionally rejected
+
+### CPU-only torch
+The worker image is still dominated by `torch` (~1.5 GB of CUDA libraries bundled in the default wheel). Switching to `torch --index-url https://download.pytorch.org/whl/cpu` would shave another 1–1.5 GB off the runtime image, but the user confirmed that **GPU inference is required** for embedding and reranking models. Full torch stays in `requirements-worker.txt`.
 
 ## Build time observations
 
