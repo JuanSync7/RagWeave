@@ -346,12 +346,14 @@ def _get_input_executor():
             RAG_NEMO_TOPIC_SAFETY_INSTRUCTIONS,
             RAG_NEMO_RAIL_TIMEOUT_SECONDS,
         )
-        from src.guardrails.executor import InputRailExecutor
-        from src.guardrails.intent import IntentClassifier
-        from src.guardrails.injection import InjectionDetector
-        from src.guardrails.pii import PIIDetector
-        from src.guardrails.toxicity import ToxicityFilter
-        from src.guardrails.topic_safety import TopicSafetyChecker
+        from src.guardrails.nemo_guardrails import InputRailExecutor
+        from src.guardrails.shared import (
+            InjectionDetector,
+            IntentClassifier,
+            PIIDetector,
+            TopicSafetyChecker,
+            ToxicityFilter,
+        )
 
         intent_classifier = IntentClassifier(
             confidence_threshold=RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD,
@@ -398,9 +400,8 @@ def _get_input_executor():
             topic_safety_checker=topic_safety_checker,
             timeout_seconds=RAG_NEMO_RAIL_TIMEOUT_SECONDS,
         )
-        _rail_instances["merge_gate"] = __import__(
-            "src.guardrails.executor", fromlist=["RailMergeGate"]
-        ).RailMergeGate()
+        from src.guardrails.common import RailMergeGate
+        _rail_instances["merge_gate"] = RailMergeGate()
         # Store shared instances for output executor
         _rail_instances["_pii"] = pii_detector
         _rail_instances["_toxicity"] = toxicity_filter
@@ -420,8 +421,8 @@ def _get_output_executor():
             RAG_NEMO_OUTPUT_TOXICITY_ENABLED,
             RAG_NEMO_RAIL_TIMEOUT_SECONDS,
         )
-        from src.guardrails.executor import OutputRailExecutor
-        from src.guardrails.faithfulness import FaithfulnessChecker
+        from src.guardrails.nemo_guardrails import OutputRailExecutor
+        from src.guardrails.shared import FaithfulnessChecker
 
         # Ensure input executor is initialized first (for shared instances)
         _get_input_executor()
@@ -555,7 +556,7 @@ async def run_output_rails(answer: str) -> dict:
 
     if rail_result.final_answer != answer:
         # Check if it was a rejection (faithfulness fail → fallback message)
-        from src.guardrails.common.schemas import RailVerdict
+        from src.guardrails.common import RailVerdict
         if rail_result.faithfulness_verdict == RailVerdict.REJECT:
             return {
                 "action": "reject",

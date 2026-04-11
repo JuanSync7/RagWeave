@@ -24,7 +24,7 @@ from config.settings import (
     SEMANTIC_CHUNKING_ENABLED,
     SEMANTIC_SIMILARITY_THRESHOLD,
 )
-from src.ingest.common.schemas import ProcessedChunk
+from src.ingest.common import ProcessedChunk
 from src.ingest.support.document import (
     extract_metadata,
     metadata_to_dict,

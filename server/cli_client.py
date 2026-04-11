@@ -31,9 +31,15 @@ from pathlib import Path
 from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.platform.cli_interactive import get_input_with_menu, setup_tab_completion
-from src.platform.command_catalog import MODE_SERVER_CLI, list_command_specs
-from src.platform.command_runtime import dispatch_slash_command
+from src.platform import (
+    get_input_with_menu,
+    setup_tab_completion,
+)
+from src.platform import (
+    MODE_SERVER_CLI,
+    list_command_specs,
+)
+from src.platform import dispatch_slash_command
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)

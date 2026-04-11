@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from src.guardrails.common.schemas import RailVerdict
+from src.guardrails.common import RailVerdict
 
 logger = logging.getLogger("rag.guardrails.toxicity")
 
@@ -147,7 +147,7 @@ class ToxicityFilter:
         else:
             prompt = _SELF_CHECK_INPUT_PROMPT.format(text=text)
 
-        from src.retrieval.query.nodes.query_processor import _call_ollama
+        from src.retrieval.query.nodes import _call_ollama
 
         result = _call_ollama(
             prompt,

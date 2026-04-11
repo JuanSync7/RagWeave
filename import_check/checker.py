@@ -357,12 +357,26 @@ def _check_symbol_defined(
     Also checks ``__all__`` if present -- if ``symbol_name`` appears in the
     ``__all__`` list literal, the symbol is considered defined.
 
+    Fallback chain (in order) when the AST walk above finds nothing:
+
+    1. Sub-module fallback — if *module_file* is a package's ``__init__.py``
+       and ``symbol_name`` names an actual sub-module file
+       (``package/symbol_name.py`` or ``package/symbol_name/__init__.py``),
+       consider it defined. This is the ``from package import submodule``
+       idiom — valid Python that the AST walk misses because sub-modules
+       aren't AST nodes in the package's ``__init__.py``.
+    2. ``__getattr__`` — if the module defines a top-level ``__getattr__``
+       function, assume dynamic name resolution may provide the symbol.
+    3. ``.pyi`` stub — if a co-located type stub exists, re-run the AST
+       symbol check against the stub file.
+
     Args:
         module_file: Path to the module source file.
         symbol_name: Name to look for.
 
     Returns:
-        ``True`` if the symbol is defined or re-exported in the module.
+        ``True`` if the symbol is defined, re-exported, or satisfied by
+        one of the fallbacks above.
     """
     try:
         source = module_file.read_text(encoding="utf-8")
@@ -423,6 +437,21 @@ def _check_symbol_defined(
                                 return True
 
     # --- Fallback chain ---
+
+    # Step 1: sub-module fallback. When the AST walk fails to find the
+    # symbol and *module_file* is a package's __init__.py, the name may
+    # actually be a sub-module file inside that package rather than a
+    # symbol defined in __init__. This is the `from package import
+    # submodule` idiom — valid Python that the checks above miss because
+    # sub-modules aren't AST nodes in __init__.py.
+    if module_file.name == "__init__.py":
+        package_dir = module_file.parent
+        # `package/submodule.py`
+        if (package_dir / f"{symbol_name}.py").is_file():
+            return True
+        # `package/submodule/__init__.py` (sub-package)
+        if (package_dir / symbol_name / "__init__.py").is_file():
+            return True
 
     # Step 2: __getattr__ check
     _config = config or ImportCheckConfig()

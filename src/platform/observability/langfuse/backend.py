@@ -20,7 +20,7 @@ from src.platform.observability.backend import (
     Span,
     Trace,
 )
-from src.platform.observability.noop.backend import (
+from src.platform.observability.noop import (
     NoopGeneration,
     NoopSpan,
     NoopTrace,

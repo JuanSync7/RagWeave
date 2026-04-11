@@ -40,30 +40,40 @@ from config.settings import (
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_EXPORT_EXTENSIONS,
 )
-from src.core.embeddings import LocalBGEEmbeddings
-from src.core.knowledge_graph import KnowledgeGraphBuilder, export_obsidian
+from src.core import LocalBGEEmbeddings
+from src.core import (
+    KnowledgeGraphBuilder,
+    export_obsidian,
+)
 from src.vector_db import (
     delete_collection,
     delete_by_source_key,
     ensure_collection,
     get_client,
 )
-from src.ingest.support.docling import ensure_docling_ready
-from src.ingest.support.vision import ensure_vision_ready
-from src.ingest.common.schemas import ManifestEntry, SourceIdentity
-from src.ingest.common.utils import load_manifest, save_manifest, sha256_path
-from src.ingest.common.shared import extract_keywords_fallback
-from src.ingest.common.types import (
+from src.ingest.support import ensure_docling_ready
+from src.ingest.support import ensure_vision_ready
+from src.ingest.common import (
+    ManifestEntry,
+    SourceIdentity,
+)
+from src.ingest.common import (
+    load_manifest,
+    save_manifest,
+    sha256_path,
+)
+from src.ingest.common import extract_keywords_fallback
+from src.ingest.common import (
+    IngestFileResult,
     IngestionConfig,
     IngestionDesignCheck,
-    IngestFileResult,
     IngestionRunSummary,
     PIPELINE_NODE_NAMES,
     Runtime,
 )
-from src.ingest.common.clean_store import CleanDocumentStore
-from src.ingest.doc_processing.impl import run_document_processing
-from src.ingest.embedding.impl import run_embedding_pipeline
+from src.ingest.common import CleanDocumentStore
+from src.ingest.doc_processing import run_document_processing
+from src.ingest.embedding import run_embedding_pipeline
 
 logger = logging.getLogger("rag.ingest")
 _LOCAL_CONNECTOR = "local_fs"

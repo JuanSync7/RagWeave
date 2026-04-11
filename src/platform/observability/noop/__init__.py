@@ -11,3 +11,10 @@ when OBSERVABILITY_PROVIDER is unset or set to "noop".
 from src.platform.observability.noop.backend import NoopBackend
 
 __all__ = ["NoopBackend"]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.platform.observability.noop.backend import (
+    NoopGeneration,
+    NoopSpan,
+    NoopTrace,
+)

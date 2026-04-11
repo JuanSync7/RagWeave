@@ -11,9 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.ingest.common.shared import append_processing_log
+from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
-from src.ingest.support.vision import generate_vision_notes
+from src.ingest.support import generate_vision_notes
 
 
 def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]:

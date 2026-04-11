@@ -45,17 +45,17 @@ operations tooling for observability, backup/restore, and scaling.
 > **Podman users**: Podman is supported as a drop-in replacement for Docker.
 > See [Podman Setup](#podman-setup) below for one-time configuration.
 
-### 1. Clone and install Python dependencies
+### 1. Clone and set up the project
 
 ```bash
 git clone <repo-url> && cd RAG
-uv venv
-uv pip install -e ".[dev]"
+make setup
 ```
 
-This creates a `.venv/`, installs all runtime dependencies plus dev tools (pytest, etc.).
+`make setup` runs the full one-shot: creates `.venv/`, installs all runtime + dev dependencies via `uv`, installs web-console npm deps, and compiles the TypeScript console. Run once per clone.
 
-> **Alternative** (pip only): `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`
+> Prefer explicit steps? `make install` does just the Python deps; `make console-install && make console-build` handles the console. Or skip `make` entirely:
+> `uv venv && uv pip install -e ".[dev]"`, or `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`.
 
 #### Optional dependency groups
 
@@ -70,18 +70,14 @@ uv pip install -e ".[qdrant]"       # Qdrant vector store
 uv pip install -e ".[all]"          # All optional dependencies
 ```
 
-### 2. Build the web console
+### 2. Web console (already built by `make setup`)
+
+`make setup` already installs and compiles the web console. You only need these targets when iterating on the TypeScript source:
 
 ```bash
-make console-install   # npm install for TypeScript deps
-make console-build     # compiles src/main.ts → static/main.js
-```
-
-Or directly:
-
-```bash
-npm --prefix server/console/web install
-npm --prefix server/console/web run build
+make console-watch   # rebuild on change (live dev)
+make console-check   # type-check only, no emit
+make console-build   # one-shot production build
 ```
 
 ### 3. Start infrastructure services
@@ -153,6 +149,10 @@ Or use Docker/Podman profiles for a fully containerized stack:
 ```bash
 ./scripts/compose.sh --profile app --profile workers up -d
 # Scale workers: ./scripts/compose.sh --profile workers up -d --scale rag-worker=3
+
+# After code changes, rebuild + restart:
+make restart        # app + workers
+make restart-all    # all profiles (monitoring, gateway, etc.)
 ```
 
 Then use the CLI client or web console:
@@ -168,10 +168,24 @@ python -m server.cli_client
 ## Running Tests
 
 ```bash
+make test                          # full suite (uv run pytest)
+
+# Fast static gates (no test execution). Pick one depending on scope:
+make precommit-check               # runs L1+L2+L3+TS on git-tracked files (skips WIP)
+make all-check                     # same, but over the full tree including untracked
+
+# Individual layers:
+make py-compile-check              # L1: compileall across source tree
+make import-check-tracked          # L2 (tracked files only)
+make import-check                  # L2 (full tree)
+make dep-check                     # L3: deptry
+
+# Targeted pytest invocations still work directly:
 source .venv/bin/activate
-pytest                    # full suite
-pytest tests/ingest/ -v   # ingestion tests only
+pytest tests/ingest/ -v            # ingestion tests only
 ```
+
+> Neither `precommit-check` nor `all-check` runs the pytest suite — they're fast static gates. Run `make test` separately. **Use `precommit-check` before every `git commit`** so in-progress untracked work doesn't block your commit. **Use `all-check` before releases or as a periodic hygiene sweep** to catch issues in WIP code you haven't committed yet.
 
 ## Container Profiles
 
@@ -188,6 +202,62 @@ pytest tests/ingest/ -v   # ingestion tests only
 # Example: full production stack with monitoring
 ./scripts/compose.sh --profile app --profile workers --profile monitoring up -d
 ```
+
+## Container Images
+
+The stack uses two images with strict dependency isolation (both measured with `podman images`):
+
+| Image | Size | Baseline | Δ | Contents |
+|---|---|---|---|---|
+| `rag-api` | **389 MB** | 6.65 GB | **−94%** | FastAPI, Temporal client, Weaviate client — no torch, no docling, no ML stack |
+| `rag-worker` | **5.79 GB** | 6.65 GB | **−13%** | Full ML stack (torch, sentence-transformers, docling, langchain, nemoguardrails) |
+
+Baseline was a single monolithic image built from `pip install .`. The dominant win is the API split; the worker still carries full torch because GPU inference is required.
+
+Dependencies live in `containers/requirements-api.txt` and `containers/requirements-worker.txt` — **not** in `pyproject.toml`. This is deliberate: `pip install .` would install every dep listed under `[project.dependencies]`, which undoes the isolation. Local dev still uses `pyproject.toml` via `make install`; containers bypass it.
+
+**Adding a new dependency:**
+- If the API server imports it → add to `pyproject.toml` AND `containers/requirements-api.txt`
+- If only the worker uses it → add to `pyproject.toml` AND `containers/requirements-worker.txt`
+- Dev-only (pytest, deptry, etc.) → `pyproject.toml` only
+
+### Build the images
+
+**With make (recommended):**
+
+```bash
+make container-build          # build both with docker (BuildKit)
+make container-build-podman   # build both with podman (preferred for production)
+make container-probe          # run API import probe — catches transitive ML leakage
+make container-sizes          # show current image sizes
+make container-clean          # remove local rag-api / rag-worker images
+```
+
+**Manual Docker:**
+
+```bash
+DOCKER_BUILDKIT=1 docker build -t rag-api    -f containers/Dockerfile.api .
+DOCKER_BUILDKIT=1 docker build -t rag-worker -f containers/Dockerfile.runtime .
+```
+
+**Manual Podman:**
+
+```bash
+# --format docker preserves HEALTHCHECK directives if ever re-added to the Dockerfile
+podman build --format docker -t rag-api    -f containers/Dockerfile.api .
+podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
+```
+
+### Architecture notes
+
+- **Multi-stage builds** — `build-essential` (gcc et al) lives in the builder stage only; the runtime stage copies just the installed `site-packages`. Saves ~170 MB per image.
+- **BuildKit pip cache mounts** — `RUN --mount=type=cache,target=/root/.cache/pip` persists pip's wheel cache across rebuilds. Does not affect final image size but dramatically speeds up dep-change rebuilds (e.g. bumping torch version).
+- **`.dockerignore`** — excludes `.venv/`, `tests/`, `evals/`, `docs/`, `node_modules/`, etc. Fully-cached rebuilds take ~1.5 seconds.
+- **HEALTHCHECK lives in `docker-compose.yml`**, not in the Dockerfile — podman's default OCI image format drops `HEALTHCHECK` directives, and compose-level healthchecks work identically under both docker-compose and podman-compose.
+- **Source code is on `PYTHONPATH=/app`**, so there's no `pip install .` step. Changing source doesn't invalidate the dep layer.
+- **GPU inference is supported** in the worker image — full torch with bundled CUDA libs. To enable on the host: set `gpus: all` under `rag-worker` in `docker-compose.yml` and ensure the NVIDIA container runtime is installed.
+
+Full optimization history (9-iteration auto-research run): [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md)
 
 ## HTTPS Gateway (nginx)
 
@@ -327,14 +397,39 @@ The ingestion pipeline uses stable source identity metadata instead of filename-
 | `python -m server.cli_client` | Interactive client targeting the API server |
 | `python -m server.mcp_adapter` | MCP tooling adapter over the API (`stdio` transport) |
 
-## Console UI Dev Shortcuts
+## Make Targets
 
-```bash
-make console-install    # npm install
-make console-check      # TypeScript type-check (no emit)
-make console-build      # compile TS → JS
-make all-check          # full check (npm ci + py-compile + TS check)
-```
+Run `make help` for this list in the terminal. All targets are also documented in comments in the [Makefile](Makefile) itself.
+
+| Target | Purpose |
+|---|---|
+| **Setup & install** | |
+| `make setup` | **First-time setup.** Creates venv, installs Python deps, runs `npm install`, builds the web console |
+| `make install` | (Re)install Python deps into the active env (`uv pip install -e ".[dev]"`) |
+| **Web console (TypeScript)** | |
+| `make console-install` | `npm install` for the web console |
+| `make console-check` | TypeScript type-check (no emit) |
+| `make console-build` | Compile TS → `static/main.js` |
+| `make console-watch` | Watch mode — rebuild on TS change |
+| **Checks & tests** | |
+| `make test` | Run the pytest suite |
+| `make py-compile-check` | L1 syntax: `compileall` across `src/`, `server/`, `config/`, `import_check/` |
+| `make import-check` | L2 internal: resolve imports + encapsulation, **whole tree** (includes untracked) |
+| `make import-check-tracked` | L2 internal but only for **git-tracked** files (for `precommit-check`) |
+| `make dep-check` | L3 external: `deptry` — `pyproject.toml` vs actual imports |
+| `make precommit-check` | **Compound gate for `git commit`**: L1 + L2(tracked) + L3 + `npm ci` + console-check. Excludes untracked WIP. |
+| `make all-check` | **Compound gate for release**: same checks but over the entire tree including untracked. |
+| **Container images** (see [Container Images](#container-images) for details) | |
+| `make container-build` | Build `rag-api` + `rag-worker` with docker (BuildKit) |
+| `make container-build-api` | Build only `rag-api` |
+| `make container-build-worker` | Build only `rag-worker` |
+| `make container-build-podman` | Build both with podman (`--format docker`) |
+| `make container-probe` | Run the API import probe inside `rag-api` — catches transitive ML leakage |
+| `make container-sizes` | Print current `rag-api` / `rag-worker` image sizes |
+| `make container-clean` | Remove local `rag-api` / `rag-worker` images |
+| **Stack restart** (uses `scripts/restart_stack.sh` — auto-detects docker/podman) | |
+| `make restart` | Restart `app` + `workers` profiles with rebuild |
+| `make restart-all` | Restart all profiles with rebuild |
 
 ## Engineering Docs
 

@@ -1,0 +1,49 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Dev / test
+tests/
+evals/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docs and research
+docs/
+auto-research/
+*.md
+!containers/requirements-api.txt
+!containers/requirements-worker.txt
+
+# Git / IDE
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# Node / frontend build artifacts
+node_modules/
+server/console/web/node_modules/
+server/console/web/.svelte-kit/
+
+# Ops / infra (not needed inside containers)
+ops/
+scripts/
+certs/
+.tmp-*/
+.context/
+
+# Runtime state
+.runtime/
+.weaviate_data/
+models/
+logs/

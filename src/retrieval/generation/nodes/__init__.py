@@ -16,3 +16,9 @@ __all__ = [
     "VersionConflict",
     "sanitize_answer",
 ]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from src.retrieval.generation.nodes.generator import (
+    _build_user_prompt,
+    _get_system_prompt,
+)

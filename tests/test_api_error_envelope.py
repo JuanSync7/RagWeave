@@ -122,8 +122,12 @@ def test_500_query_failure_uses_standard_envelope(monkeypatch):
     body = response.json()
     assert response.status_code == 500
     assert body["ok"] is False
-    assert body["error"]["code"] == "HTTP_500"
-    assert "simulated workflow failure" in body["error"]["message"]
+    assert body["error"]["code"] == "INTERNAL_SERVER_ERROR"
+    # Production's unhandled-exception handler intentionally returns a
+    # generic message and does NOT leak the upstream exception text — the
+    # original "simulated workflow failure" is logged server-side but is
+    # scrubbed from the client response (server/api.py:230-241).
+    assert body["error"]["message"] == "Internal server error"
 
 
 def test_404_not_found_uses_standard_envelope(monkeypatch):

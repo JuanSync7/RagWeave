@@ -20,7 +20,11 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Generator, List, Optional
 
-from src.vector_db.common.schemas import DocumentRecord, SearchResult, SearchFilter
+from src.vector_db.common import (
+    DocumentRecord,
+    SearchFilter,
+    SearchResult,
+)
 
 
 class VectorBackend(ABC):

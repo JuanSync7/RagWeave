@@ -18,8 +18,11 @@ from dataclasses import asdict
 from typing import Optional
 
 from temporalio import activity
-from src.platform.cache.provider import get_cache
-from src.platform.metrics import CACHE_HITS, CACHE_MISSES
+from src.platform.cache import get_cache
+from src.platform import (
+    CACHE_HITS,
+    CACHE_MISSES,
+)
 
 logger = logging.getLogger("rag.server.activities")
 
@@ -34,7 +37,7 @@ def init_rag_chain() -> None:
         logger.warning("RAGChain already initialized, skipping re-init")
         return
 
-    from src.retrieval.pipeline.rag_chain import RAGChain
+    from src.retrieval.pipeline import RAGChain
     logger.info("Initializing RAGChain (loading models into memory)...")
     start = time.time()
     _rag_chain = RAGChain()

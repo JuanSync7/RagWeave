@@ -17,3 +17,6 @@ __all__ = [
     "console_ok",
     "console_err",
 ]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from server.common.utils import validate_startup_config

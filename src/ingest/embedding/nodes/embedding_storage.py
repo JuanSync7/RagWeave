@@ -16,7 +16,7 @@ from src.vector_db import (
     ensure_collection,
     DocumentRecord,
 )
-from src.ingest.common.shared import append_processing_log
+from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 

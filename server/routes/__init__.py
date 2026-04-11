@@ -19,3 +19,10 @@ __all__ = [
     "build_health_response",
     "create_documents_router",
 ]
+
+# --- Auto-generated re-exports (fix_encapsulation.py) ---
+from server.routes.admin import (
+    create_api_key_handler,
+    list_api_keys_handler,
+    list_quotas_handler,
+)

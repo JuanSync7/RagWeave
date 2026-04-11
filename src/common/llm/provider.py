@@ -93,7 +93,7 @@ class ChatLLMAdapter(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         """Run a synchronous completion via the platform LLMProvider."""
-        from src.platform.llm.provider import get_llm_provider
+        from src.platform.llm import get_llm_provider
 
         provider = get_llm_provider()
         msg_dicts = _messages_to_dicts(messages)
@@ -151,7 +151,7 @@ class ChatLLMAdapter(BaseChatModel):
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         """Stream tokens from the platform LLMProvider."""
-        from src.platform.llm.provider import get_llm_provider
+        from src.platform.llm import get_llm_provider
 
         provider = get_llm_provider()
         msg_dicts = _messages_to_dicts(messages)

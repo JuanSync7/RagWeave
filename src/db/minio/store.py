@@ -27,7 +27,7 @@ from config.settings import (
     MINIO_BUCKET,
     MINIO_SECURE,
 )
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.db.minio.store")
 tracer = get_tracer()

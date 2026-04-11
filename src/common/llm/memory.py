@@ -55,7 +55,7 @@ class ConversationSession:
         self._project_id = project_id
 
         if backend == "redis":
-            from src.platform.memory.provider import get_conversation_memory
+            from src.platform.memory import get_conversation_memory
 
             self._provider = get_conversation_memory()
             self._provider.ensure_conversation(

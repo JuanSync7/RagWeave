@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.ingest.support.llm import _llm_json
-from src.ingest.common.shared import append_processing_log
+from src.ingest.support import _llm_json
+from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 
 _MAX_REFACTOR_INPUT = 10000

@@ -1,0 +1,18 @@
+# API server dependencies — lightweight HTTP frontend only.
+# No torch, docling, or ML model deps. Worker deps are in requirements-worker.txt.
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+temporalio
+redis
+pyjwt[crypto]
+prometheus-client
+langfuse
+litellm
+minio
+pyyaml
+orjson
+mcp>=1.26.0
+langdetect
+# server/routes/documents.py → src.vector_db → weaviate (needed at import time)
+weaviate-client

@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from typing import Any, Generator, Optional
 
 from src.db.backend import DocumentBackend
-from src.db.common.schemas import StoredDocument
+from src.db.common import StoredDocument
 from src.db.minio.store import (
     create_client as _mn_create_client,
     ensure_bucket as _mn_ensure_bucket,

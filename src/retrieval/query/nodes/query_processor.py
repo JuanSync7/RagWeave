@@ -38,7 +38,7 @@ from config.settings import (
 from src.platform.llm import get_llm_provider
 from src.platform.observability import get_tracer
 from src.retrieval.query.schemas import QueryAction, QueryResult, QueryState
-from src.retrieval.common.utils import parse_json_object
+from src.retrieval.common import parse_json_object
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -84,10 +84,23 @@ def _ensure_file_logging() -> None:
 
 
 def _load_prompt(filename: str) -> str:
-    path = PROMPTS_DIR / filename
-    if not path.exists():
-        raise FileNotFoundError(f"Prompt file not found: {path}")
-    return path.read_text(encoding="utf-8")
+    _t0 = time.perf_counter()
+    try:
+        path = PROMPTS_DIR / filename
+        if not path.exists():
+            logger.error("Prompt file not found: %s", path)
+            raise FileNotFoundError(f"Prompt file not found: {path}")
+        text = path.read_text(encoding="utf-8")
+        logger.debug(
+            "_load_prompt: loaded %s (%d chars) in %.2fms",
+            filename, len(text), (time.perf_counter() - _t0) * 1000,
+        )
+        return text
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        logger.error("_load_prompt: failed to read %s: %s", filename, exc)
+        raise
 
 
 _REFORMULATOR_PROMPT: Optional[str] = None
@@ -134,10 +147,15 @@ def _get_kg_terms() -> tuple:
     if _KG_TERMS is not None:
         return _KG_TERMS, _KG_WORD_INDEX
 
+    _t0 = time.perf_counter()
     _KG_TERMS = []
     _KG_WORD_INDEX = defaultdict(list)
 
     if not KG_PATH.exists():
+        logger.debug(
+            "_get_kg_terms: no KG file at %s (%.2fms)",
+            KG_PATH, (time.perf_counter() - _t0) * 1000,
+        )
         return _KG_TERMS, _KG_WORD_INDEX
 
     try:
@@ -159,8 +177,8 @@ def _get_kg_terms() -> tuple:
                     _KG_WORD_INDEX[word].append(term)
 
         logger.info(
-            "Loaded %d KG terms (%d index keys) for reformulation context",
-            len(_KG_TERMS), len(_KG_WORD_INDEX),
+            "Loaded %d KG terms (%d index keys) for reformulation context in %.1fms",
+            len(_KG_TERMS), len(_KG_WORD_INDEX), (time.perf_counter() - _t0) * 1000,
         )
     except (orjson.JSONDecodeError, KeyError) as e:
         logger.warning("Failed to load KG terms: %s", e)
@@ -185,6 +203,7 @@ def _load_injection_patterns() -> List[re.Pattern]:
     if _INJECTION_PATTERNS is not None:
         return _INJECTION_PATTERNS
 
+    _t0 = time.perf_counter()
     try:
         import yaml
         patterns_path = PROMPTS_DIR.parent / "config" / "injection_patterns.yaml"
@@ -197,9 +216,10 @@ def _load_injection_patterns() -> List[re.Pattern]:
             raw_patterns = data.get("patterns", [])
             _INJECTION_PATTERNS = [re.compile(p, re.I) for p in raw_patterns]
             logger.info(
-                "Loaded %d injection patterns from %s",
+                "Loaded %d injection patterns from %s in %.1fms",
                 len(_INJECTION_PATTERNS),
                 patterns_path,
+                (time.perf_counter() - _t0) * 1000,
             )
             return _INJECTION_PATTERNS
     except Exception as e:
@@ -230,8 +250,24 @@ def _detect_injection(query: str) -> bool:
     (regex + perplexity + model + LLM) handles this. This function
     serves as a lightweight fallback for environments without NeMo.
     """
-    patterns = _load_injection_patterns()
-    return any(p.search(query) for p in patterns)
+    _t0 = time.perf_counter()
+    try:
+        patterns = _load_injection_patterns()
+        hit = any(p.search(query) for p in patterns)
+        if hit:
+            logger.warning(
+                "_detect_injection: match in %.2fms (query_len=%d)",
+                (time.perf_counter() - _t0) * 1000, len(query),
+            )
+        else:
+            logger.debug(
+                "_detect_injection: clean in %.2fms (query_len=%d)",
+                (time.perf_counter() - _t0) * 1000, len(query),
+            )
+        return hit
+    except re.error as exc:
+        logger.error("_detect_injection: regex error %s — treating as clean", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -270,14 +306,27 @@ def _has_backward_reference(query: str) -> bool:
     Returns True if the query contains explicit backward-reference markers
     or has high pronoun density without resolution targets.
     """
-    if any(p.search(query) for p in _BACKWARD_REF_PATTERNS):
-        return True
-    words = query.split()
-    if words:
-        pronoun_count = len(_PRONOUNS.findall(query))
-        if pronoun_count / len(words) >= _PRONOUN_DENSITY_THRESHOLD:
+    _t0 = time.perf_counter()
+    try:
+        if any(p.search(query) for p in _BACKWARD_REF_PATTERNS):
+            logger.debug(
+                "_has_backward_reference: explicit marker in %.2fms",
+                (time.perf_counter() - _t0) * 1000,
+            )
             return True
-    return False
+        words = query.split()
+        if words:
+            pronoun_count = len(_PRONOUNS.findall(query))
+            if pronoun_count / len(words) >= _PRONOUN_DENSITY_THRESHOLD:
+                logger.debug(
+                    "_has_backward_reference: high pronoun density (%d/%d) in %.2fms",
+                    pronoun_count, len(words), (time.perf_counter() - _t0) * 1000,
+                )
+                return True
+        return False
+    except re.error as exc:
+        logger.error("_has_backward_reference: regex error %s — treating as absent", exc)
+        return False
 
 
 def _detect_suppress_memory(query: str) -> bool:
@@ -285,7 +334,17 @@ def _detect_suppress_memory(query: str) -> bool:
 
     Returns True if the user explicitly asks to ignore conversation history.
     """
-    return any(p.search(query) for p in _CONTEXT_RESET_PATTERNS)
+    _t0 = time.perf_counter()
+    try:
+        hit = any(p.search(query) for p in _CONTEXT_RESET_PATTERNS)
+        logger.debug(
+            "_detect_suppress_memory: %s in %.2fms",
+            "hit" if hit else "clean", (time.perf_counter() - _t0) * 1000,
+        )
+        return hit
+    except re.error as exc:
+        logger.error("_detect_suppress_memory: regex error %s — treating as absent", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +383,11 @@ def _check_llm_available() -> bool:
     with get_tracer().span("query_processor.llm_healthcheck"):
         try:
             provider = get_llm_provider()
-            return provider.is_available(model_alias="query")
-        except Exception:
+            available = provider.is_available(model_alias="query")
+            logger.debug("_check_llm_available: %s", available)
+            return available
+        except Exception as exc:
+            logger.warning("_check_llm_available: provider error: %s", exc)
             return False
 
 

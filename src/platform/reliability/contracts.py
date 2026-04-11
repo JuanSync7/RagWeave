@@ -11,7 +11,7 @@ Defines the minimal interface for executing operations with retry semantics.
 from abc import ABC, abstractmethod
 from typing import Callable, Optional, TypeVar
 
-from src.platform.schemas.reliability import RetryPolicy
+from src.platform.schemas import RetryPolicy
 
 T = TypeVar("T")
 

@@ -18,8 +18,8 @@ from contextlib import contextmanager
 from typing import Any, Generator, Optional
 
 from src.db.backend import DocumentBackend
-from src.db.common.schemas import StoredDocument
-from src.db.minio.store import build_document_id
+from src.db.common import StoredDocument
+from src.db.minio import build_document_id
 
 logger = logging.getLogger("rag.db")
 
@@ -32,7 +32,7 @@ def _get_db_backend() -> DocumentBackend:
     if _db_backend is None:
         from config.settings import DATABASE_BACKEND
         if DATABASE_BACKEND == "minio":
-            from src.db.minio.backend import MinioBackend
+            from src.db.minio import MinioBackend
             _db_backend = MinioBackend()
         else:
             raise ValueError(

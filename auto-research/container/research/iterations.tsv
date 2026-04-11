@@ -1,0 +1,14 @@
+iteration	commit	api_mb	runtime_mb	total_mb	score_saved_mb	status	change_summary
+001	5463e69	3197	3205	6402	0	keep	baseline — no changes
+002	b515047	3197	3205	6402	0	discard	dep-split via extras — no effect; pip installs all core deps regardless of extras flag
+003	745e467	—	—	—	—	crash	requirements-api.txt missing weaviate-client; server/routes/documents.py → src.vector_db → weaviate
+004	6e8eedb	242	3175	3417	2985	keep	added weaviate-client; dep isolation working — API dropped 92% (3197→242 MB)
+005	44804c2	144	3070	3214	3188	keep	multi-stage builds; build-essential removed from runtime — API 144 MB, Runtime 3070 MB
+006	ae75a41	140	3065	3205	3197	keep	.dockerignore added; build context trimmed — 9 MB size gain, rebuilds now ~1.6s (fully cached)
+007	6176437	140	3065	3205	3197	discard	BuildKit pip cache mounts — no size change (as expected); useful for rebuild speed but metric is size only; recommended as manual follow-up
+008	3e504b7	138	3060	3198	3204	keep	dropped curl from both images; API uses Python urllib healthcheck; worker has no healthcheck
+009	cd5dbf0	115	2926	3041	3361	keep	stripped __pycache__, tests/, *.pyc from /install before stage copy — auto-research STOP (target met by inspect metric)
+010	992c37d	115	2926	3041	3361	keep	[manual follow-up] BuildKit pip cache mounts re-added for rebuild speed; no size change
+011	900348b	115	2926	3041	3361	keep	[manual follow-up] moved HEALTHCHECK from Dockerfile.api to docker-compose.yml; works with podman OCI format
+# NOTE: api_mb/runtime_mb/total_mb/score_saved_mb above are from `docker inspect .Size` (single-platform slice, no attestations).
+# TRUE on-disk sizes (`podman images`): API ~390 MB, Runtime ~5.8 GB, Total ~6.2 GB. The deltas are accurate; absolute values are under-reported by 2-3x.

@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.ingest.support.llm import _llm_json
-from src.ingest.common.shared import extract_keywords_fallback, append_processing_log
+from src.ingest.support import _llm_json
+from src.ingest.common import (
+    append_processing_log,
+    extract_keywords_fallback,
+)
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 _MAX_TEXT_FOR_METADATA = 10000

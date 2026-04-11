@@ -23,7 +23,7 @@ from src.ingest import (
     IngestionConfig,
     ingest_directory,
 )
-from src.platform.validation import validate_documents_dir
+from src.platform import validate_documents_dir
 
 logging.basicConfig(
     level=logging.INFO,

@@ -32,11 +32,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.ingest.common.schemas import ProcessedChunk
-from src.ingest.common.shared import append_processing_log
-from src.ingest.common.types import IngestionConfig
+from src.ingest.common import ProcessedChunk
+from src.ingest.common import append_processing_log
+from src.ingest.common import IngestionConfig
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.ingest.support.vision import (
+from src.ingest.support import (
     _IMAGE_REF_PATTERN,
     _describe_image,
     _extract_image_candidates,

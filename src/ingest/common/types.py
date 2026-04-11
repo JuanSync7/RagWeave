@@ -70,8 +70,8 @@ from config.settings import (
     RAG_INGESTION_PAGE_IMAGE_QUALITY,
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
 )
-from src.core.embeddings import LocalBGEEmbeddings
-from src.core.knowledge_graph import KnowledgeGraphBuilder
+from src.core import LocalBGEEmbeddings
+from src.core import KnowledgeGraphBuilder
 from src.ingest.common.schemas import ProcessedChunk
 
 PIPELINE_NODE_NAMES = [

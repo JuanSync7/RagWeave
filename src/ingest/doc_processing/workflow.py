@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from src.ingest.doc_processing.nodes.document_ingestion import document_ingestion_node
-from src.ingest.doc_processing.nodes.structure_detection import structure_detection_node
-from src.ingest.doc_processing.nodes.multimodal_processing import multimodal_processing_node
-from src.ingest.doc_processing.nodes.text_cleaning import text_cleaning_node
-from src.ingest.doc_processing.nodes.document_refactoring import document_refactoring_node
+from src.ingest.doc_processing.nodes import document_ingestion_node
+from src.ingest.doc_processing.nodes import structure_detection_node
+from src.ingest.doc_processing.nodes import multimodal_processing_node
+from src.ingest.doc_processing.nodes import text_cleaning_node
+from src.ingest.doc_processing.nodes import document_refactoring_node
 from src.ingest.doc_processing.state import DocumentProcessingState
 
 

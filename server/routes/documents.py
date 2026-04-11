@@ -18,7 +18,10 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from server.common.schemas import ApiErrorDetail, ApiErrorResponse
+from server.common import (
+    ApiErrorDetail,
+    ApiErrorResponse,
+)
 from server.schemas import (
     CollectionItem,
     CollectionListResponse,
@@ -30,8 +33,11 @@ from server.schemas import (
     SourceListResponse,
     SourceSummary,
 )
-from src.platform.security.auth import Principal, authenticate_request
-from src.platform.security.tenancy import resolve_tenant_id
+from src.platform.security import (
+    Principal,
+    authenticate_request,
+)
+from src.platform.security import resolve_tenant_id
 import src.db as db
 import src.vector_db as vector_db
 
