@@ -92,7 +92,11 @@ import orjson
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RESEARCH_DIR = REPO_ROOT / "research"
+# research/ mirrors src/ by domain. This harness targets the retrieval pipeline,
+# so its fixtures, baselines, and per-loop narrative live under research/retrieval/.
+# See research/README.md for the convention.
+RESEARCH_ROOT = REPO_ROOT / "research"
+RESEARCH_DIR = RESEARCH_ROOT / "retrieval"
 BENCHMARK_QUERIES_PATH = RESEARCH_DIR / "benchmark_queries.json"
 BASELINE_OUTPUTS_PATH = RESEARCH_DIR / "baseline_outputs.json"
 BASELINE_REPORT_PATH = RESEARCH_DIR / "baseline_report.json"
