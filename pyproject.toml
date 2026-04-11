@@ -44,6 +44,9 @@ dev = [
   "pytest-json-report>=1.5.0",
   "pytest-timeout>=2.2.0",
   "deptry",
+  # Post-refactoring import repair tool. Install from local path until published to PyPI;
+  # swap to "import-check>=0.1.0" once the package is released.
+  "import-check @ file:///home/juansync7/import-check",
 ]
 pii = [
   "presidio-analyzer",
@@ -105,7 +108,7 @@ exclude = [
     ".claude",        # agentic worktrees / skill outputs — not production code
     "tests",          # dev deps belong here; test dep errors caught by pytest
     "evals",          # eval fixtures use domain-specific deps (cocotb, etc.)
-    "import_check",   # bundled dev tool (uses libcst — declared as dev extra)
+    "import_check",   # TODO: remove once import_check/ directory is deleted from RagWeave
 ]
 # Tells deptry that `[project.optional-dependencies].dev` is the dev-dep
 # group. Currently this mainly affects DEP002 classification; it becomes
