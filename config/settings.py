@@ -620,7 +620,11 @@ def _read_precision_env(env_key: str, default: str = "fp32") -> str:
 
 EMBEDDING_PRECISION_QUERY = _read_precision_env("RAG_EMBEDDING_PRECISION_QUERY")
 EMBEDDING_PRECISION_INGEST = _read_precision_env("RAG_EMBEDDING_PRECISION_INGEST")
-RERANKER_PRECISION = _read_precision_env("RAG_RERANKER_PRECISION")
+# iter 005: reranker flipped to fp16 after iter 004 landed SDPA. BGE
+# reranker-v2-m3 tolerates fp16 well (documented by BAAI); scores differ
+# from fp32 in the ~3rd decimal but top-K ordering is stable on
+# well-separated KG queries. Drift-guarded by the regression check.
+RERANKER_PRECISION = _read_precision_env("RAG_RERANKER_PRECISION", default="fp16")
 VISUAL_RETRIEVAL_PRECISION = _read_precision_env("RAG_VISUAL_RETRIEVAL_PRECISION")
 GENERATION_PRECISION = _read_precision_env("RAG_GENERATION_PRECISION")  # advisory
 

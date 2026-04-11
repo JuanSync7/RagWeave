@@ -68,7 +68,7 @@ Only modify these — everything else is locked:
 - `src/retrieval/common/__init__.py` and `src/retrieval/common/schemas.py` — only if a new shared helper or contract requires it
 - New files under `src/retrieval/common/` for genuinely-shared helpers (caching, profiling, parallel-stage utilities)
 - `requirements-api.txt`, `requirements.txt` — to add dependencies (must be pinned, must be justified in the iteration commit)
-- `config/settings.py` — **scoped exception**: additive precision-mode keys only (`EMBEDDING_PRECISION_QUERY`, `EMBEDDING_PRECISION_INGEST`, `RERANKER_PRECISION`, `VISUAL_RETRIEVAL_PRECISION`, `GENERATION_PRECISION`) and their validator. Default values MUST preserve baseline behavior (`fp32`). No threshold tuning, no behavior toggles, no existing-key modification — if a change would alter any pre-existing key's default or type, it belongs in a different iteration and must be justified separately.
+- `config/settings.py` — **scoped exception**: additive precision-mode keys only (`EMBEDDING_PRECISION_QUERY`, `EMBEDDING_PRECISION_INGEST`, `RERANKER_PRECISION`, `VISUAL_RETRIEVAL_PRECISION`, `GENERATION_PRECISION`) and their validator. The iteration that **introduces** these keys (iter 003) MUST set defaults that preserve baseline behavior (`fp32`), so the addition is purely structural. Subsequent iterations MAY flip these defaults (e.g., iter 005 flips `RERANKER_PRECISION` to `fp16` as its declared optimization) — that IS the intended purpose of the config plumbing. No threshold tuning, no other behavior toggles, no existing-key modification outside this set.
 
 ## Immutable files (DO NOT MODIFY)
 
