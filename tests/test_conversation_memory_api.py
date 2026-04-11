@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from server import api
+from src.platform.memory.provider import NoopConversationMemory
 from src.platform.security import auth
 
 
@@ -32,10 +35,28 @@ class _DummyTemporalClient:
         return None
 
 
+_NOOP_MEMORY = NoopConversationMemory()
+
+
 def _set_auth_defaults() -> None:
     auth.AUTH_API_KEYS_REQUIRED = False
     auth.AUTH_JWT_ENABLED = False
     auth.AUTH_OIDC_ENABLED = False
+
+
+_MEMORY_PATCHES = [
+    "server.routes.query.get_conversation_memory",
+    "server.console.routes.get_conversation_memory",
+]
+
+
+def _patch_memory():
+    """Return a context manager that patches all get_conversation_memory call sites."""
+    from contextlib import ExitStack
+    stack = ExitStack()
+    for target in _MEMORY_PATCHES:
+        stack.enter_context(patch(target, return_value=_NOOP_MEMORY))
+    return stack
 
 
 def test_query_returns_conversation_id(monkeypatch):
@@ -45,8 +66,9 @@ def test_query_returns_conversation_id(monkeypatch):
         return _DummyTemporalClient()
 
     monkeypatch.setattr(api.Client, "connect", _fake_connect)
-    with TestClient(api.app, raise_server_exceptions=False) as client:
-        response = client.post("/query", json={"query": "hello"})
+    with _patch_memory():
+        with TestClient(api.app, raise_server_exceptions=False) as client:
+            response = client.post("/query", json={"query": "hello"})
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body.get("conversation_id"), str)
@@ -60,11 +82,12 @@ def test_query_respects_provided_conversation_id(monkeypatch):
         return _DummyTemporalClient()
 
     monkeypatch.setattr(api.Client, "connect", _fake_connect)
-    with TestClient(api.app, raise_server_exceptions=False) as client:
-        response = client.post(
-            "/query",
-            json={"query": "follow up", "conversation_id": "conv_demo_123"},
-        )
+    with _patch_memory():
+        with TestClient(api.app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/query",
+                json={"query": "follow up", "conversation_id": "conv_demo_123"},
+            )
     assert response.status_code == 200
     body = response.json()
     assert body["conversation_id"] == "conv_demo_123"
@@ -77,19 +100,20 @@ def test_console_command_switch_and_compact_actions(monkeypatch):
         return _DummyTemporalClient()
 
     monkeypatch.setattr(api.Client, "connect", _fake_connect)
-    with TestClient(api.app, raise_server_exceptions=False) as client:
-        switch_resp = client.post(
-            "/console/command",
-            json={"mode": "query", "command": "switch", "arg": "conv_abc", "state": {}},
-        )
-        compact_resp = client.post(
-            "/console/command",
-            json={
-                "mode": "query",
-                "command": "compact",
-                "state": {"conversation_id": "conv_abc"},
-            },
-        )
+    with _patch_memory():
+        with TestClient(api.app, raise_server_exceptions=False) as client:
+            switch_resp = client.post(
+                "/console/command",
+                json={"mode": "query", "command": "switch", "arg": "conv_abc", "state": {}},
+            )
+            compact_resp = client.post(
+                "/console/command",
+                json={
+                    "mode": "query",
+                    "command": "compact",
+                    "state": {"conversation_id": "conv_abc"},
+                },
+            )
 
     assert switch_resp.status_code == 200
     switch_data = switch_resp.json()["data"]

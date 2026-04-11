@@ -66,6 +66,9 @@ def _build_chain():
     chain._guardrails_merge_gate = None
     chain._embedding_cache = OrderedDict()
     chain._embedding_cache_max = 128
+    chain._visual_retrieval_enabled = False
+    chain._visual_model = None
+    chain._visual_processor = None
     return chain
 
 

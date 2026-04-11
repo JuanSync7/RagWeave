@@ -116,10 +116,28 @@ def _install_stub_modules() -> None:
         def exp(value):
             return math.exp(value)
 
+        class _InferenceMode:
+            """Context manager stub for torch.inference_mode()."""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        def inference_mode():
+            return _InferenceMode()
+
         torch.cuda = _Cuda()
         torch.no_grad = no_grad
+        torch.inference_mode = inference_mode
         torch.tensor = tensor
         torch.exp = exp
+        # dtype stubs — needed by LocalBGEReranker and similar modules that
+        # call getattr(torch, dtype_name) to resolve a precision string.
+        torch.float32 = "float32"
+        torch.float16 = "float16"
+        torch.bfloat16 = "bfloat16"
         sys.modules["torch"] = torch
 
     if "transformers" not in sys.modules:

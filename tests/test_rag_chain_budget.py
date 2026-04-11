@@ -52,6 +52,9 @@ def _build_chain_for_budget_tests() -> RAGChain:
     chain._guardrails_output_executor = None
     chain._embedding_cache = OrderedDict()
     chain._embedding_cache_max = 128
+    chain._visual_retrieval_enabled = False
+    chain._visual_model = None
+    chain._visual_processor = None
     return chain
 
 
@@ -83,7 +86,7 @@ def test_run_short_circuits_on_budget_after_query_processing(monkeypatch):
 
     response = chain.run(
         "what is rag",
-        overall_timeout_ms=0,
+        overall_timeout_ms=-1,
     )
 
     assert response.action == "ask_user"

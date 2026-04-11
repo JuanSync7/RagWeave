@@ -312,7 +312,7 @@ class RAGChain:
 
         results: List[VisualPageResult] = []
         with self.tracer.span("visual_retrieval.presigned_urls"):
-            minio_client = create_minio_client()
+            minio_client = create_client()
             for record in page_records:
                 try:
                     url = get_page_image_url(
@@ -1014,7 +1014,7 @@ class RAGChain:
             try:
                 context_texts = [r.text for r in reranked]
                 snapshot = calculate_budget(
-                    system_prompt=_get_gen_system_prompt(),
+                    system_prompt=_get_system_prompt(),
                     memory_context=memory_context,
                     chunks=context_texts,
                     query=processed_query,
@@ -1086,7 +1086,7 @@ class RAGChain:
                 from src.retrieval.generation.nodes import sanitize_answer
                 generated_answer = sanitize_answer(
                     generated_answer,
-                    system_prompt=_get_gen_system_prompt(),
+                    system_prompt=_get_system_prompt(),
                 )
 
             # Stage 7.5: Composite confidence scoring + routing (REQ-701, REQ-706)

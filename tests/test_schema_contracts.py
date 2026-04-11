@@ -68,6 +68,13 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     # Runtime / debug
     "ollama_url",
     "persist_docling_document",
+    # Visual embedding (infrastructure/model config, not user-facing API fields)
+    "enable_visual_embedding",
+    "colqwen_model_name",
+    "colqwen_batch_size",
+    "page_image_max_dimension",
+    "page_image_quality",
+    "visual_target_collection",
 })
 
 # Fields on ConsoleIngestionRequest that don't map to IngestionConfig

@@ -88,31 +88,31 @@ class TestExtractImports:
         """Extracts from X import Y."""
         source = "from src.foo import bar\n"
         result = _extract_imports(source)
-        assert ("src.foo", "bar", 1) in result
+        assert ("src.foo", "bar", 1, 0) in result
 
     def test_bare_import(self) -> None:
         """Extracts import X as (X, '', lineno)."""
         source = "import src.foo\n"
         result = _extract_imports(source)
-        assert ("src.foo", "", 1) in result
+        assert ("src.foo", "", 1, 0) in result
 
     def test_aliased_from_import(self) -> None:
         """Aliased imports return the original name, not the alias."""
         source = "from src.foo import bar as baz\n"
         result = _extract_imports(source)
-        assert ("src.foo", "bar", 1) in result
+        assert ("src.foo", "bar", 1, 0) in result
 
     def test_aliased_bare_import(self) -> None:
         """Bare aliased imports: import X as Z -> (X, '', lineno)."""
         source = "import src.foo as sf\n"
         result = _extract_imports(source)
-        assert ("src.foo", "", 1) in result
+        assert ("src.foo", "", 1, 0) in result
 
     def test_lazy_import_inside_function(self) -> None:
         """Imports inside functions are captured."""
         source = "def f():\n    from src.foo import bar\n"
         result = _extract_imports(source)
-        assert ("src.foo", "bar", 2) in result
+        assert ("src.foo", "bar", 2, 0) in result
 
     def test_type_checking_import(self) -> None:
         """Imports inside TYPE_CHECKING blocks are captured."""
@@ -122,7 +122,7 @@ class TestExtractImports:
             "    from src.foo import bar\n"
         )
         result = _extract_imports(source)
-        assert ("src.foo", "bar", 3) in result
+        assert ("src.foo", "bar", 3, 0) in result
 
     def test_try_except_import(self) -> None:
         """Imports inside try/except blocks are captured."""
@@ -133,13 +133,16 @@ class TestExtractImports:
             "    pass\n"
         )
         result = _extract_imports(source)
-        assert ("src.foo", "bar", 2) in result
+        assert ("src.foo", "bar", 2, 0) in result
 
     def test_relative_imports_skipped(self) -> None:
-        """Relative imports (leading dots) are skipped."""
+        """Relative imports (leading dots) are included with level > 0."""
         source = "from .foo import bar\nfrom ..baz import qux\n"
         result = _extract_imports(source)
-        assert result == []
+        # Relative imports are included with their level (not skipped).
+        assert ("foo", "bar", 1, 1) in result
+        assert ("baz", "qux", 2, 2) in result
+        assert all(level > 0 for _, _, _, level in result)
 
     def test_empty_source(self) -> None:
         """Empty source returns empty list."""
@@ -154,15 +157,15 @@ class TestExtractImports:
         """from X import a, b produces two entries."""
         source = "from src.foo import bar, baz\n"
         result = _extract_imports(source)
-        assert ("src.foo", "bar", 1) in result
-        assert ("src.foo", "baz", 1) in result
+        assert ("src.foo", "bar", 1, 0) in result
+        assert ("src.foo", "baz", 1, 0) in result
         assert len(result) == 2
 
     def test_star_import(self) -> None:
         """from X import * is captured."""
         source = "from src.foo import *\n"
         result = _extract_imports(source)
-        assert ("src.foo", "*", 1) in result
+        assert ("src.foo", "*", 1, 0) in result
 
 
 # ---------------------------------------------------------------------------

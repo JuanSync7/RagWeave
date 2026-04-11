@@ -181,7 +181,9 @@ def build_inventory(files: list[str], root: Path) -> SymbolInventory:
     return inventory
 
 
-def build_old_inventory(files: list[str], git_ref: str) -> SymbolInventory:
+def build_old_inventory(
+    files: list[str], git_ref: str, root: Path | None = None
+) -> SymbolInventory:
     """Build a symbol inventory from a previous git state.
 
     Uses ``git show <ref>:<file>`` to retrieve file contents at the given
@@ -190,6 +192,8 @@ def build_old_inventory(files: list[str], git_ref: str) -> SymbolInventory:
     Args:
         files: List of Python file paths to retrieve from git.
         git_ref: Git reference (commit SHA, branch, tag, "HEAD").
+        root: Project root directory. Used as the working directory for git
+            commands. Defaults to the current working directory when None.
 
     Returns:
         SymbolInventory for the historical state.
@@ -198,12 +202,14 @@ def build_old_inventory(files: list[str], git_ref: str) -> SymbolInventory:
         RuntimeError: If git is not available or the ref is invalid.
     """
     inventory: SymbolInventory = {}
+    cwd = str(root) if root is not None else None
 
     for file_path in files:
         result = subprocess.run(
             ["git", "show", f"{git_ref}:{file_path}"],
             capture_output=True,
             text=True,
+            cwd=cwd,
         )
 
         if result.returncode != 0:

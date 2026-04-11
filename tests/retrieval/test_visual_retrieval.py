@@ -1529,8 +1529,8 @@ class TestRAGChainVisualTrack:
         mock_model = MagicMock()
         mock_processor = MagicMock()
 
-        with patch("src.ingest.support.colqwen.ensure_colqwen_ready", return_value=None), \
-             patch("src.ingest.support.colqwen.load_colqwen_model",
+        with patch("src.ingest.support.ensure_colqwen_ready", return_value=None), \
+             patch("src.ingest.support.load_colqwen_model",
                    return_value=(mock_model, mock_processor)) as mock_load:
             chain._ensure_visual_model()   # cold
             chain._ensure_visual_model()   # warm — should skip
@@ -1566,13 +1566,13 @@ class TestRAGChainVisualTrack:
 
         minio_client = MagicMock()
 
-        with patch("src.ingest.support.colqwen.embed_text_query",
+        with patch("src.ingest.support.embed_text_query",
                    return_value=[0.1] * 128), \
              patch("src.vector_db.search_visual",
                    return_value=self.PAGE_RECORDS), \
-             patch("src.db.minio.store.get_page_image_url",
+             patch("src.db.minio.get_page_image_url",
                    return_value="https://minio.example.com/page.jpg"), \
-             patch("src.db.minio.store.create_client",
+             patch("src.db.minio.create_client",
                    return_value=minio_client):
             results = chain._run_visual_retrieval("quarterly revenue Q3", tenant_id="acme")
 
@@ -1594,9 +1594,9 @@ class TestRAGChainVisualTrack:
             embed_calls.append(text)
             return [0.1] * 128
 
-        with patch("src.ingest.support.colqwen.embed_text_query", side_effect=capture_embed), \
+        with patch("src.ingest.support.embed_text_query", side_effect=capture_embed), \
              patch("src.vector_db.search_visual", return_value=[]), \
-             patch("src.db.minio.store.create_client", return_value=MagicMock()):
+             patch("src.db.minio.create_client", return_value=MagicMock()):
             chain._run_visual_retrieval("Q3 2025 quarterly revenue chart", tenant_id=None)
 
         assert embed_calls == ["Q3 2025 quarterly revenue chart"]
@@ -1614,10 +1614,10 @@ class TestRAGChainVisualTrack:
             search_calls.append(kwargs)
             return []
 
-        with patch("src.ingest.support.colqwen.embed_text_query",
+        with patch("src.ingest.support.embed_text_query",
                    return_value=[0.1] * 128), \
              patch("src.vector_db.search_visual", side_effect=capture_search), \
-             patch("src.db.minio.store.create_client", return_value=MagicMock()):
+             patch("src.db.minio.create_client", return_value=MagicMock()):
             chain._run_visual_retrieval("any query", tenant_id="acme")
 
         assert len(search_calls) == 1
@@ -1642,11 +1642,11 @@ class TestRAGChainVisualTrack:
             "https://url/page3.jpg",
         ]
 
-        with patch("src.ingest.support.colqwen.embed_text_query",
+        with patch("src.ingest.support.embed_text_query",
                    return_value=[0.1] * 128), \
              patch("src.vector_db.search_visual", return_value=three_pages), \
-             patch("src.db.minio.store.get_page_image_url", side_effect=url_effects), \
-             patch("src.db.minio.store.create_client", return_value=MagicMock()):
+             patch("src.db.minio.get_page_image_url", side_effect=url_effects), \
+             patch("src.db.minio.create_client", return_value=MagicMock()):
             results = chain._run_visual_retrieval("chart", tenant_id="t1")
 
         page_numbers = [vpr.page_number for vpr in results]
@@ -1662,10 +1662,10 @@ class TestRAGChainVisualTrack:
         chain._visual_processor = MagicMock()
         chain.tracer = self._make_mock_tracer()
 
-        with patch("src.ingest.support.colqwen.embed_text_query",
+        with patch("src.ingest.support.embed_text_query",
                    return_value=[0.1] * 128), \
              patch("src.vector_db.search_visual", return_value=[]), \
-             patch("src.db.minio.store.create_client", return_value=MagicMock()):
+             patch("src.db.minio.create_client", return_value=MagicMock()):
             results = chain._run_visual_retrieval("obscure query", tenant_id=None)
 
         assert results == []
@@ -1692,7 +1692,7 @@ class TestRAGChainVisualTrack:
         chain._visual_processor = MagicMock()
         chain.tracer = self._make_mock_tracer()
 
-        with patch("src.ingest.support.colqwen.embed_text_query",
+        with patch("src.ingest.support.embed_text_query",
                    side_effect=VisualEmbeddingError("embed failed")):
             with pytest.raises(VisualEmbeddingError):
                 chain._run_visual_retrieval("any query", tenant_id=None)
@@ -1704,7 +1704,7 @@ class TestRAGChainVisualTrack:
         chain._visual_processor = MagicMock()
         chain.tracer = self._make_mock_tracer()
 
-        with patch("src.ingest.support.colqwen.embed_text_query",
+        with patch("src.ingest.support.embed_text_query",
                    return_value=[0.1] * 128), \
              patch("src.vector_db.search_visual",
                    side_effect=_WeaviateQueryError("query failed", "grpc")):

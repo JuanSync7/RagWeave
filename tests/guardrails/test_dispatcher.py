@@ -11,7 +11,7 @@ from src.guardrails.common.schemas import InputRailResult, OutputRailResult
 def _reset_dispatcher():
     """Reset the dispatcher's cached backend singleton between tests."""
     import src.guardrails as grd
-    grd._backend = None
+    grd._guardrail_backend = None
 
 
 # ---------------------------------------------------------------------------

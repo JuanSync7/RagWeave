@@ -175,25 +175,30 @@ def fix(root: str | Path | None = None, **config_overrides: object) -> FixResult
     if not changed_files:
         return FixResult()
 
-    # 5. Build old and new inventories.
-    old_inv = inventory.build_old_inventory(changed_files, config.git_ref)
-    logger.info("Built old inventory: %d symbols", sum(len(v) for v in old_inv.values()))
-
-    new_inv = inventory.build_inventory(changed_files, resolved_root)
-    logger.info("Built new inventory: %d symbols", sum(len(v) for v in new_inv.values()))
-
-    # 6. Diff inventories.
-    migration_map = differ.diff_inventories(old_inv, new_inv)
-    logger.info("Migration map: %d entries", len(migration_map))
-
-    # 7. If no migrations, return empty result.
-    if not migration_map:
-        return FixResult()
-
-    # 8. Collect all Python files.
+    # 5. Collect all Python files (needed for both new inventory and fix application).
     all_files = inventory.collect_python_files(
         config.source_dirs, resolved_root, config.exclude_patterns,
     )
+    logger.info("Collected %d Python files", len(all_files))
+
+    # 6. Build old and new inventories.
+    # Old inventory: only the changed files at the git ref.
+    # New inventory: all source files so that symbols in newly added (untracked)
+    # files are visible to the differ and move detection works correctly.
+    old_inv = inventory.build_old_inventory(changed_files, config.git_ref, resolved_root)
+    logger.info("Built old inventory: %d symbols", sum(len(v) for v in old_inv.values()))
+
+    new_inv = inventory.build_inventory(all_files, resolved_root)
+    logger.info("Built new inventory: %d symbols", sum(len(v) for v in new_inv.values()))
+
+    # 7. Diff inventories.
+    migration_map = differ.diff_inventories(old_inv, new_inv)
+    logger.info("Migration map: %d entries", len(migration_map))
+
+    # 8. If no migrations, return empty result.
+    if not migration_map:
+        return FixResult()
+
     logger.info("Applying fixes to %d files", len(all_files))
 
     # 9. Apply fixes.

@@ -96,6 +96,19 @@ _PYPROJECT_IMPORT_MAP: dict[str, set[str]] = {
     "orjson": {"orjson"},
     "minio": {"minio"},
     "langdetect": {"langdetect"},
+    # Visual embedding optional deps
+    "Pillow": {"PIL"},
+    "bitsandbytes": {"bitsandbytes"},
+    "colpali-engine": {"colpali_engine"},
+    # Transitive deps (stable bundled)
+    "docling-core": {"docling_core"},
+    # KG optional deps
+    "igraph": {"igraph"},
+    "leidenalg": {"leidenalg"},
+    "neo4j": {"neo4j"},
+    "pyverilog": {"pyverilog"},
+    "tree-sitter": {"tree_sitter"},
+    "tree-sitter-verilog": {"tree_sitter_verilog"},
     # Dev deps
     "pytest": {"pytest"},
     "pytest-mock": {"pytest_mock"},
@@ -115,8 +128,8 @@ _OPTIONAL_IMPORTS = frozenset({
     "presidio_analyzer", "presidio_anonymizer", "spacy",  # PII detection (src/guardrails/pii.py)
 })
 
-# Root-level scripts that are importable but not third-party packages
-_LOCAL_ROOT_MODULES = frozenset({"ingest", "query", "cli", "colang_demo"})
+# Root-level scripts and local packages that are importable but not third-party packages
+_LOCAL_ROOT_MODULES = frozenset({"ingest", "query", "cli", "colang_demo", "import_check"})
 
 
 @pytest.fixture
