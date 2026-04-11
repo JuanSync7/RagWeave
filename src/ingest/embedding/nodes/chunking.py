@@ -19,14 +19,17 @@ import re as _re
 import unicodedata
 from typing import Any
 
-from src.ingest.support.document import extract_metadata, metadata_to_dict
-from src.ingest.common.schemas import ProcessedChunk
-from src.ingest.support.markdown import (
+from src.ingest.support import (
+    extract_metadata,
+    metadata_to_dict,
+)
+from src.ingest.common import ProcessedChunk
+from src.ingest.support import (
     _build_section_metadata,
     chunk_markdown,
     normalize_headings_to_markdown,
 )
-from src.ingest.common.shared import append_processing_log
+from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 logger = logging.getLogger("rag.ingest.pipeline.chunking")

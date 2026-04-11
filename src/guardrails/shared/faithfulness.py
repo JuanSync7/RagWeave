@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from src.guardrails.common.schemas import RailVerdict
+from src.guardrails.common import RailVerdict
 
 logger = logging.getLogger("rag.guardrails.faithfulness")
 
@@ -250,7 +250,7 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query.nodes.query_processor import _call_ollama
+            from src.retrieval.query.nodes import _call_ollama
 
             response = _call_ollama(
                 prompt,
@@ -298,8 +298,8 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query.nodes.query_processor import _call_ollama
-            from src.common.utils import parse_json_object
+            from src.retrieval.query.nodes import _call_ollama
+            from src.common import parse_json_object
 
             response = _call_ollama(
                 prompt,

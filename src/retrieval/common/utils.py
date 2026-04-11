@@ -7,6 +7,6 @@
 
 from __future__ import annotations
 
-from src.common.utils import parse_json_object
+from src.common import parse_json_object
 
 __all__ = ["parse_json_object"]

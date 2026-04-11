@@ -26,11 +26,14 @@ from typing import Any, Optional
 from temporalio import activity
 
 from config.settings import GLINER_ENABLED
-from src.core.embeddings import LocalBGEEmbeddings
-from src.core.knowledge_graph import KnowledgeGraphBuilder
-from src.ingest.common.types import IngestionConfig, Runtime
-from src.ingest.doc_processing.impl import run_document_processing
-from src.ingest.embedding.impl import run_embedding_pipeline
+from src.core import LocalBGEEmbeddings
+from src.core import KnowledgeGraphBuilder
+from src.ingest.common import (
+    IngestionConfig,
+    Runtime,
+)
+from src.ingest.doc_processing import run_document_processing
+from src.ingest.embedding import run_embedding_pipeline
 import src.db as db
 import src.vector_db as vector_db
 

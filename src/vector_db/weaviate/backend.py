@@ -21,7 +21,11 @@ from contextlib import contextmanager
 from typing import Any, Generator, List, Optional
 
 from src.vector_db.backend import VectorBackend
-from src.vector_db.common.schemas import DocumentRecord, SearchResult, SearchFilter
+from src.vector_db.common import (
+    DocumentRecord,
+    SearchFilter,
+    SearchResult,
+)
 from src.vector_db.weaviate.store import (
     create_persistent_client as _wv_create_persistent,
     get_weaviate_client as _wv_get_ephemeral,

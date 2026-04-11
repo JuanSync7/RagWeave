@@ -24,8 +24,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Optional
 
-from src.common.utils import make_query_hash
-from src.guardrails.common.schemas import RailVerdict
+from src.common import make_query_hash
+from src.guardrails.common import RailVerdict
 
 logger = logging.getLogger("rag.guardrails.injection")
 
@@ -301,8 +301,8 @@ class InjectionDetector:
             f"<msg>{query}</msg>"
         )
 
-        from src.retrieval.query.nodes.query_processor import _call_ollama
-        from src.common.utils import parse_json_object
+        from src.retrieval.query.nodes import _call_ollama
+        from src.common import parse_json_object
 
         result = _call_ollama(
             prompt, system="You are a security classifier. Output only JSON."

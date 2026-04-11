@@ -27,7 +27,7 @@ class SpanRecord:
 
 
 # Backward-compatible re-exports from the canonical location
-from src.platform.observability.schemas import (  # noqa: F401, E402
-    TraceRecord as TraceRecord,
-    GenerationRecord as GenerationRecord,
+from src.platform.observability import (
+    GenerationRecord,
+    TraceRecord,
 )

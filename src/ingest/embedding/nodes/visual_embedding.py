@@ -35,19 +35,22 @@ from typing import Any
 
 from PIL import Image
 
-from src.db.minio.store import delete_page_images, store_page_images
-from src.ingest.common.shared import append_processing_log
+from src.db.minio import (
+    delete_page_images,
+    store_page_images,
+)
+from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
-from src.ingest.support.colqwen import (
+from src.ingest.support import (
     ColQwen2LoadError,
-    ColQwen2PageEmbedding,  # noqa: F401 — kept for typing clarity
+    ColQwen2PageEmbedding,
     VisualEmbeddingError,
     embed_page_images,
     ensure_colqwen_ready,
     load_colqwen_model,
     unload_colqwen_model,
 )
-from src.vector_db.weaviate.visual_store import (
+from src.vector_db.weaviate import (
     add_visual_documents,
     delete_visual_by_source_key,
     ensure_visual_collection,

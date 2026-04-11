@@ -30,12 +30,16 @@ from contextlib import contextmanager
 from typing import Any, Generator, List, Optional
 
 from src.vector_db.backend import VectorBackend
-from src.vector_db.common.schemas import DocumentRecord, SearchResult, SearchFilter
-from src.vector_db.weaviate.store import build_chunk_id
-from src.vector_db.weaviate.visual_store import (
-    ensure_visual_collection as _vs_ensure_visual_collection,
-    add_visual_documents as _vs_add_visual_documents,
-    delete_visual_by_source_key as _vs_delete_visual_by_source_key,
+from src.vector_db.common import (
+    DocumentRecord,
+    SearchFilter,
+    SearchResult,
+)
+from src.vector_db.weaviate import build_chunk_id
+from src.vector_db.weaviate import (
+    add_visual_documents,
+    delete_visual_by_source_key,
+    ensure_visual_collection,
 )
 
 logger = logging.getLogger("rag.vector_db")
@@ -58,7 +62,7 @@ def _get_vector_backend() -> VectorBackend:
     if _vector_backend is None:
         from config.settings import VECTOR_DB_BACKEND
         if VECTOR_DB_BACKEND == "weaviate":
-            from src.vector_db.weaviate.backend import WeaviateBackend
+            from src.vector_db.weaviate import WeaviateBackend
             _vector_backend = WeaviateBackend()
         else:
             raise ValueError(

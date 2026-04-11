@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from src.ingest.common.types import Runtime
+from src.ingest.common import Runtime
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.embedding.workflow import build_embedding_graph
 

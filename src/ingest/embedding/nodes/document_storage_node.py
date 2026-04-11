@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.db import build_document_id, ensure_bucket, put_document
-from src.ingest.common.shared import append_processing_log
+from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 

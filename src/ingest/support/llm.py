@@ -11,8 +11,8 @@ from __future__ import annotations
 import orjson
 import logging
 
-from src.ingest.common.types import IngestionConfig
-from src.ingest.common.utils import parse_json_object
+from src.ingest.common import IngestionConfig
+from src.ingest.common import parse_json_object
 from src.platform.llm import get_llm_provider
 
 logger = logging.getLogger(__name__)

@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from src.guardrails.common.schemas import RailVerdict
+from src.guardrails.common import RailVerdict
 
 logger = logging.getLogger("rag.guardrails.topic_safety")
 
@@ -132,7 +132,7 @@ class TopicSafetyChecker:
             `TopicSafetyResult` derived from the LLM's "on-topic"/"off-topic"
             response.
         """
-        from src.retrieval.query.nodes.query_processor import _call_ollama
+        from src.retrieval.query.nodes import _call_ollama
 
         result = _call_ollama(
             f"User message: {query}",

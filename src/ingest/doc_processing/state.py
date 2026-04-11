@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, TypedDict
 
-from src.ingest.common.types import Runtime
+from src.ingest.common import Runtime
 
 
 class DocumentProcessingState(TypedDict, total=False):

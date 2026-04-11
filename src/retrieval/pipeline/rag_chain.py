@@ -10,10 +10,13 @@ import logging
 import statistics
 import time
 
-from src.core.embeddings import LocalBGEEmbeddings
-from src.retrieval.query.nodes.reranker import LocalBGEReranker
-from src.retrieval.query.nodes.query_processor import process_query
-from src.core.knowledge_graph import KnowledgeGraphBuilder, GraphQueryExpander
+from src.core import LocalBGEEmbeddings
+from src.retrieval.query.nodes import LocalBGEReranker
+from src.retrieval.query.nodes import process_query
+from src.core import (
+    GraphQueryExpander,
+    KnowledgeGraphBuilder,
+)
 from src.vector_db import (
     create_persistent_client,
     get_client,
@@ -22,19 +25,27 @@ from src.vector_db import (
     search,
     SearchFilter,
 )
-from src.retrieval.generation.nodes.generator import OllamaGenerator
+from src.retrieval.generation.nodes import OllamaGenerator
 from src.platform.observability import get_tracer
-from src.platform.reliability.providers import get_retry_provider
-from src.platform.schemas.reliability import RetryPolicy
-from src.platform.validation import (
+from src.platform.reliability import get_retry_provider
+from src.platform.schemas import RetryPolicy
+from src.platform import (
     validate_alpha,
     validate_filter_value,
     validate_positive_int,
 )
-from src.retrieval.query.schemas import QueryAction, QueryResult
-from src.retrieval.common.schemas import RAGRequest, RAGResponse, RankedResult, VisualPageResult
+from src.retrieval.query import (
+    QueryAction,
+    QueryResult,
+)
+from src.retrieval.common import (
+    RAGRequest,
+    RAGResponse,
+    RankedResult,
+    VisualPageResult,
+)
 from src.platform.token_budget import calculate_budget, get_capabilities, TokenBudgetSnapshot
-from src.retrieval.generation.nodes.generator import _get_system_prompt as _get_gen_system_prompt
+from src.retrieval.generation.nodes import _get_system_prompt
 from config.settings import (
     HYBRID_SEARCH_ALPHA, SEARCH_LIMIT, RERANK_TOP_K,
     KG_PATH, KG_ENABLED, GENERATION_ENABLED,
@@ -56,7 +67,7 @@ from config.settings import (
     RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD,
     RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD,
 )
-from src.platform.timing import TimingPool
+from src.platform import TimingPool
 from config.settings import GUARDRAIL_BACKEND
 from src.guardrails import (
     run_input_rails,
@@ -65,7 +76,7 @@ from src.guardrails import (
     redact_pii,
     RailMergeGate,
 )
-from src.guardrails.common.schemas import GuardrailsMetadata
+from src.guardrails.common import GuardrailsMetadata
 from config.settings import (
     RAG_CONFIDENCE_ROUTING_ENABLED,
     RAG_CONFIDENCE_HIGH_THRESHOLD,
@@ -209,7 +220,7 @@ class RAGChain:
         # FR-613: unload visual model if loaded
         if self._visual_model is not None:
             try:
-                from src.ingest.support.colqwen import unload_colqwen_model
+                from src.ingest.support import unload_colqwen_model
                 unload_colqwen_model(self._visual_model)
                 logger.info("ColQwen2 visual model unloaded.")
             except Exception as e:
@@ -233,7 +244,7 @@ class RAGChain:
             return  # warm path
 
         with self.tracer.span("visual_retrieval.model_load"):
-            from src.ingest.support.colqwen import (
+            from src.ingest.support import (
                 ensure_colqwen_ready,
                 load_colqwen_model,
             )
@@ -270,7 +281,7 @@ class RAGChain:
         self._ensure_visual_model()
 
         # FR-605: encode text query (uses processed query, not raw)
-        from src.ingest.support.colqwen import embed_text_query
+        from src.ingest.support import embed_text_query
 
         with self.tracer.span("visual_retrieval.text_encode"):
             query_vector = embed_text_query(
@@ -294,7 +305,10 @@ class RAGChain:
             vs_span.set_attribute("result_count", len(page_records))
 
         # FR-607: generate presigned URLs per result (per-page isolation — NFR-905)
-        from src.db.minio.store import get_page_image_url, create_client as create_minio_client
+        from src.db.minio import (
+            create_client,
+            get_page_image_url,
+        )
 
         results: List[VisualPageResult] = []
         with self.tracer.span("visual_retrieval.presigned_urls"):
@@ -898,7 +912,7 @@ class RAGChain:
             formatted_context_str = None
             if RAG_DOCUMENT_FORMATTING_ENABLED and reranked:
                 t0 = time.perf_counter()
-                from src.retrieval.generation.nodes.document_formatter import format_context
+                from src.retrieval.generation.nodes import format_context
                 with self.tracer.span("rag_chain.format_context", parent=root_span) as fmt_span:
                     formatted = format_context(reranked)
                     formatted_context_str = formatted.context_string
@@ -1069,7 +1083,7 @@ class RAGChain:
 
             # Stage 7.25: Output sanitization (REQ-704)
             if generated_answer:
-                from src.retrieval.generation.nodes.output_sanitizer import sanitize_answer
+                from src.retrieval.generation.nodes import sanitize_answer
                 generated_answer = sanitize_answer(
                     generated_answer,
                     system_prompt=_get_gen_system_prompt(),
@@ -1091,9 +1105,9 @@ class RAGChain:
             ):
                 t0 = time.perf_counter()
                 with self.tracer.span("rag_chain.confidence_routing", parent=root_span) as conf_span:
-                    from src.retrieval.generation.confidence.scoring import compute_composite_confidence
-                    from src.retrieval.generation.confidence.routing import route_by_confidence
-                    from src.retrieval.generation.confidence.schemas import PostGuardrailAction
+                    from src.retrieval.generation.confidence import compute_composite_confidence
+                    from src.retrieval.generation.confidence import route_by_confidence
+                    from src.retrieval.generation.confidence import PostGuardrailAction
 
                     reranker_scores = [r.score for r in reranked]
                     llm_confidence_text = (

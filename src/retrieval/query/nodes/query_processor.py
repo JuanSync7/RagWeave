@@ -38,7 +38,7 @@ from config.settings import (
 from src.platform.llm import get_llm_provider
 from src.platform.observability import get_tracer
 from src.retrieval.query.schemas import QueryAction, QueryResult, QueryState
-from src.retrieval.common.utils import parse_json_object
+from src.retrieval.common import parse_json_object
 
 # ---------------------------------------------------------------------------
 # Logging setup

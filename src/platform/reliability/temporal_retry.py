@@ -11,7 +11,7 @@ from typing import Callable, Dict, Optional, TypeVar
 
 from config.settings import TEMPORAL_TARGET_HOST, TEMPORAL_TASK_QUEUE
 from src.platform.reliability.contracts import RetryProvider
-from src.platform.schemas.reliability import RetryPolicy
+from src.platform.schemas import RetryPolicy
 
 T = TypeVar("T")
 logger = logging.getLogger("rag.reliability.temporal")

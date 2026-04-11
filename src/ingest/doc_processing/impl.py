@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from src.ingest.common.types import Runtime
+from src.ingest.common import Runtime
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.doc_processing.workflow import build_document_processing_graph
 

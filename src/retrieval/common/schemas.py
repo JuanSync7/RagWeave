@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.platform.token_budget.schemas import TokenBudgetSnapshot
+    from src.platform.token_budget import TokenBudgetSnapshot
 
 
 @dataclass

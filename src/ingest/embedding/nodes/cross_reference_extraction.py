@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.ingest.common.shared import cross_refs, append_processing_log
+from src.ingest.common import (
+    append_processing_log,
+    cross_refs,
+)
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 

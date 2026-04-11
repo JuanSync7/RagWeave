@@ -22,7 +22,7 @@ import weaviate
 from weaviate.classes.config import Configure, DataType, Property
 from weaviate.classes.query import Filter, MetadataQuery
 
-from src.platform.observability.providers import get_tracer
+from src.platform.observability import get_tracer
 
 logger = logging.getLogger("rag.vector_db.weaviate.visual_store")
 tracer = get_tracer()
