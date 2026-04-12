@@ -1,2 +1,4 @@
 iteration	commit	hypothesis	score	status	change_summary
 001	3d01d3b	—	0/7	keep	baseline — no changes; sanitizer.py and regex_extractor.py have no logger; expand()/detect()/find_candidates() have no timing
+002	c8d7c55	Adding import logging, module-level logger, and logger.debug() in normalize() to sanitizer.py will satisfy T1+T2, advancing from 0/7 to 2/7	2/7	keep	Added logging import, logger = logging.getLogger(__name__), and logger.debug in normalize(); score confirmed 2/7
+003	e9cca0d	Adding import logging, module-level logger, and logger.debug() in extract() to regex_extractor.py will satisfy T3+T4, advancing from 2/7 to 4/7	4/7	keep	Added logging import, logger = logging.getLogger(__name__), logger.debug in extract() logging source/entity/triple counts; score confirmed 4/7
