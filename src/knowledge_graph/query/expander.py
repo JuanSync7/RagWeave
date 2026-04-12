@@ -17,6 +17,7 @@ to augment BM25 search.  Replaces the legacy ``GraphQueryExpander`` from
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -93,6 +94,7 @@ class GraphQueryExpander:
         """
         try:
             depth = depth if depth is not None else self._max_depth
+        _t0 = time.monotonic()
 
             # Normalise query for matching
             normalized = self._sanitizer.normalize(query)
@@ -163,6 +165,10 @@ class GraphQueryExpander:
             if remaining > 0 and community_terms:
                 result.extend(community_terms[:remaining])
 
+            logger.debug(
+                "GraphQueryExpander.expand: query=%r depth=%d terms=%d elapsed=%.3fs",
+                query, effective_depth, len(result), time.monotonic() - _t0,
+            )
             return result
         except Exception:
             logger.exception(
