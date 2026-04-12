@@ -1,7 +1,7 @@
 # @summary
 # Query sanitizer: normalization, alias expansion, and alias index management.
 # Exports: QuerySanitizer
-# Deps: re, typing
+# Deps: re, typing, logging
 # @end-summary
 """Query sanitization: normalization, alias expansion, and fan-out control.
 
@@ -10,8 +10,11 @@ names, and supports hot-rebuilding the alias index when the graph changes.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["QuerySanitizer"]
 
@@ -65,6 +68,7 @@ class QuerySanitizer:
         q = query.lower().strip()
         q = re.sub(r"[-_]", " ", q)
         q = re.sub(r"\s+", " ", q)
+        logger.debug("QuerySanitizer.normalize: %r → %r", query, q)
         return q
 
     def expand_aliases(self, terms: List[str]) -> List[str]:
