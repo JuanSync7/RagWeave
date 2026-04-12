@@ -222,18 +222,33 @@ class EntityMatcher:
 
         # Convert ms timeout to seconds for the provider call.
         timeout_s = self._llm_fallback_timeout_ms / 1000.0
-        response = provider.json_completion(
-            messages,
-            max_tokens=256,
-            timeout=timeout_s,
-        )
+        try:
+            response = provider.json_completion(
+                messages,
+                max_tokens=256,
+                timeout=timeout_s,
+            )
 
-        matched = json.loads(response.content)
-        if not isinstance(matched, list):
+            matched = json.loads(response.content)
+            if not isinstance(matched, list):
+                return []
+
+            # Guard: keep only names that are actually in the known entity set.
+            return [name for name in matched if name in self._entity_names]
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "LLM returned malformed JSON for query %r; falling back to empty match. Error: %s",
+                query,
+                exc,
+            )
             return []
-
-        # Guard: keep only names that are actually in the known entity set.
-        return [name for name in matched if name in self._entity_names]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LLM entity match failed for query %r; falling back to empty match. Error: %s",
+                query,
+                exc,
+            )
+            return []
 
     def _match_spacy(self, query: str) -> List[str]:
         """Match using spaCy PhraseMatcher (token-boundary aware).
