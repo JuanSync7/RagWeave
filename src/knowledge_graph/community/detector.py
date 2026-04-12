@@ -332,42 +332,60 @@ class CommunityDetector:
         Directed edges A->B and B->A are collapsed into a single undirected
         edge with weight = max(weight_AB, weight_BA).
         """
-        entities = self._backend.get_all_entities()
-        name_to_idx: Dict[str, int] = {}
-        names: List[str] = []
+        try:
+            entities = self._backend.get_all_entities()
+            name_to_idx: Dict[str, int] = {}
+            names: List[str] = []
 
-        for entity in entities:
-            if entity.name not in name_to_idx:
-                name_to_idx[entity.name] = len(names)
-                names.append(entity.name)
+            for entity in entities:
+                if entity.name not in name_to_idx:
+                    name_to_idx[entity.name] = len(names)
+                    names.append(entity.name)
 
-        # Collect edges: for each directed edge, track max weight per
-        # undirected pair (canonical ordering by sorted tuple).
-        edge_weights: Dict[tuple, float] = {}
-        for entity in entities:
-            outgoing = self._backend.get_outgoing_edges(entity.name)
-            for triple in outgoing:
-                src = triple.subject
-                tgt = triple.object
-                if src not in name_to_idx or tgt not in name_to_idx:
-                    continue
-                key = tuple(sorted((src, tgt)))
-                edge_weights[key] = max(edge_weights.get(key, 0.0), triple.weight)
+            # Collect edges: for each directed edge, track max weight per
+            # undirected pair (canonical ordering by sorted tuple).
+            edge_weights: Dict[tuple, float] = {}
+            for entity in entities:
+                outgoing = self._backend.get_outgoing_edges(entity.name)
+                for triple in outgoing:
+                    src = triple.subject
+                    tgt = triple.object
+                    if src not in name_to_idx or tgt not in name_to_idx:
+                        continue
+                    key = tuple(sorted((src, tgt)))
+                    edge_weights[key] = max(edge_weights.get(key, 0.0), triple.weight)
 
-        ig = igraph.Graph(n=len(names), directed=False)
-        ig.vs["name"] = names
+            ig = igraph.Graph(n=len(names), directed=False)
+            ig.vs["name"] = names
 
-        edges = []
-        weights = []
-        for (a, b), w in edge_weights.items():
-            edges.append((name_to_idx[a], name_to_idx[b]))
-            weights.append(w)
+            edges = []
+            weights = []
+            for (a, b), w in edge_weights.items():
+                edges.append((name_to_idx[a], name_to_idx[b]))
+                weights.append(w)
 
-        if edges:
-            ig.add_edges(edges)
-            ig.es["weight"] = weights
+            if edges:
+                ig.add_edges(edges)
+                ig.es["weight"] = weights
 
-        return ig
+            return ig
+        except MemoryError as exc:
+            logger.critical(
+                "_to_igraph failed: out of memory building igraph for %d entities "
+                "and %d edges — community detection aborted",
+                len(names) if "names" in dir() else -1,
+                len(edge_weights) if "edge_weights" in dir() else -1,
+            )
+            raise
+        except Exception as exc:
+            logger.error(
+                "_to_igraph failed with %s: %s — entities=%s edges=%s",
+                type(exc).__name__,
+                exc,
+                len(names) if "names" in dir() else -1,
+                len(edge_weights) if "edge_weights" in dir() else -1,
+            )
+            raise
 
     def _to_igraph_subset(self, member_names: List[str]) -> "igraph.Graph":
         """Build an igraph subgraph for a specific set of entity names."""
