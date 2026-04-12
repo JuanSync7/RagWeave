@@ -278,10 +278,25 @@ class CommunitySummarizer:
 
         Returns:
             Generated summary text.
+
+        Raises:
+            RuntimeError: Wraps any provider exception with model/config context.
         """
-        response = self._provider.generate(
-            messages=messages,
-            max_tokens=self._config.community_summary_output_max_tokens,
-            temperature=self._config.community_summary_temperature,
-        )
-        return response.content
+        try:
+            response = self._provider.generate(
+                messages=messages,
+                max_tokens=self._config.community_summary_output_max_tokens,
+                temperature=self._config.community_summary_temperature,
+            )
+            return response.content
+        except Exception as exc:
+            logger.error(
+                "LLM provider call failed (max_tokens=%d, temperature=%s): %s",
+                self._config.community_summary_output_max_tokens,
+                self._config.community_summary_temperature,
+                exc,
+                exc_info=True,
+            )
+            raise RuntimeError(
+                f"Community summarization LLM call failed: {exc}"
+            ) from exc
