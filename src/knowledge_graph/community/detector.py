@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from typing import Dict, List, Optional, Set, Tuple
 
 from src.knowledge_graph.backend import GraphStorageBackend
@@ -96,6 +97,7 @@ class CommunityDetector:
             )
             return {}
 
+        _t0 = time.monotonic()
         ig = self._to_igraph()
         if ig.vcount() == 0:
             logger.info("Empty graph — no communities to detect")
@@ -115,10 +117,11 @@ class CommunityDetector:
         self._assign_communities(communities)
         self._detection_complete = True
 
-        logger.info(
-            "Leiden detected %d communities (%d entities)",
+        logger.debug(
+            "CommunityDetector.detect: communities=%d entities=%d elapsed=%.3fs",
             len([c for c in communities if c != -1]),
             sum(len(m) for m in communities.values()),
+            time.monotonic() - _t0,
         )
         return communities
 
