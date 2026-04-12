@@ -250,35 +250,42 @@ class EntityMatcher:
         Returns:
             Deduplicated list of resolved canonical names.
         """
-        doc = self._nlp(query)
-        matches = self._matcher(doc)
+        try:
+            doc = self._nlp(query)
+            matches = self._matcher(doc)
 
-        matched_entities: Set[str] = set()
-        for _match_id, start, end in matches:
-            span_text: str = doc[start:end].text
+            matched_entities: Set[str] = set()
+            for _match_id, start, end in matches:
+                span_text: str = doc[start:end].text
 
-            # 1. Direct alias lookup (exact case as stored).
-            canonical: Optional[str] = self._aliases.get(span_text)
+                # 1. Direct alias lookup (exact case as stored).
+                canonical: Optional[str] = self._aliases.get(span_text)
 
-            # 2. Case-insensitive alias lookup.
-            if canonical is None:
-                span_lower = span_text.lower()
-                for alias, target in self._aliases.items():
-                    if alias.lower() == span_lower:
-                        canonical = target
-                        break
+                # 2. Case-insensitive alias lookup.
+                if canonical is None:
+                    span_lower = span_text.lower()
+                    for alias, target in self._aliases.items():
+                        if alias.lower() == span_lower:
+                            canonical = target
+                            break
 
-            # 3. Case-insensitive lookup against canonical names.
-            if canonical is None:
-                for name in self._entity_names:
-                    if name.lower() == span_text.lower():
-                        canonical = name
-                        break
+                # 3. Case-insensitive lookup against canonical names.
+                if canonical is None:
+                    for name in self._entity_names:
+                        if name.lower() == span_text.lower():
+                            canonical = name
+                            break
 
-            # 4. Last resort: use the matched span text as-is.
-            matched_entities.add(canonical if canonical is not None else span_text)
+                # 4. Last resort: use the matched span text as-is.
+                matched_entities.add(canonical if canonical is not None else span_text)
 
-        return list(matched_entities)
+            return list(matched_entities)
+        except Exception:
+            logger.exception(
+                "EntityMatcher._match_spacy() failed for query %r; returning empty match list",
+                query,
+            )
+            return []
 
     def _match_substring(self, query: str) -> List[str]:
         """Fallback: case-insensitive substring matching.
