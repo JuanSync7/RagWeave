@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Callable, Dict, List, Optional
 
 from src.knowledge_graph.backend import GraphStorageBackend
@@ -94,6 +95,8 @@ class EmbeddingResolver:
         if len(all_entities) < 2:
             return []
 
+        _t0 = time.monotonic()
+
         # Group entities by type
         type_buckets: Dict[str, List] = {}
         for entity in all_entities:
@@ -140,5 +143,9 @@ class EmbeddingResolver:
                         )
                         merged_names.add(duplicate)
 
-        logger.info("EmbeddingResolver: found %d merge candidates", len(candidates))
+        logger.debug(
+            "EmbeddingResolver.find_candidates: candidates=%d elapsed=%.3fs",
+            len(candidates),
+            time.monotonic() - _t0,
+        )
         return candidates
