@@ -525,13 +525,33 @@ class NetworkXBackend(GraphStorageBackend):
         Output format is backward-compatible with
         ``KnowledgeGraphBuilder.load()``.
         """
-        data = nx.node_link_data(self.graph, edges="edges")
-        path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+        try:
+            data = nx.node_link_data(self.graph, edges="edges")
+            path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+        except OSError as exc:
+            logger.error("save: I/O error writing graph to %s: %s", path, exc)
+            raise
+        except ValueError as exc:
+            logger.error("save: serialization error for graph at %s: %s", path, exc)
+            raise
+        except Exception as exc:
+            logger.error("save: unexpected error saving graph to %s: %s", path, exc)
+            raise
 
     def load(self, path: Path) -> None:
         """Deserialize from JSON and rebuild alias/case indices."""
-        raw = orjson.loads(path.read_bytes())
-        self.graph = nx.node_link_graph(raw, directed=True, edges="edges")
+        try:
+            raw = orjson.loads(path.read_bytes())
+            self.graph = nx.node_link_graph(raw, directed=True, edges="edges")
+        except OSError as exc:
+            logger.error("load: I/O error reading graph from %s: %s", path, exc)
+            raise
+        except (orjson.JSONDecodeError, ValueError) as exc:
+            logger.error("load: JSON decode error for graph at %s: %s", path, exc)
+            raise
+        except Exception as exc:
+            logger.error("load: unexpected error loading graph from %s: %s", path, exc)
+            raise
 
         # Rebuild indices from loaded node data
         self._aliases.clear()
