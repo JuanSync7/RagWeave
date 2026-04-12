@@ -1,0 +1,2 @@
+iteration	commit	hypothesis	score	status	change_summary
+001	3d01d3b	—	0/7	keep	baseline — no changes; sanitizer.py and regex_extractor.py have no logger; expand()/detect()/find_candidates() have no timing
