@@ -1,7 +1,7 @@
 # @summary
 # Rule-based entity and relationship extractor migrated from src/core/knowledge_graph.py.
 # Exports: RegexEntityExtractor, STOPWORDS
-# Deps: re, typing, src.knowledge_graph.common.schemas, src.knowledge_graph.common.types
+# Deps: logging, re, typing, src.knowledge_graph.common.schemas, src.knowledge_graph.common.types
 # @end-summary
 """Rule-based entity and relationship extractor using regex patterns.
 
@@ -21,6 +21,7 @@ Key changes from the monolith:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Dict, List, Optional, Set
 
@@ -31,6 +32,8 @@ from src.knowledge_graph.common import (
 )
 from src.knowledge_graph.common import SchemaDefinition
 
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["RegexEntityExtractor", "STOPWORDS"]
 
@@ -174,6 +177,12 @@ class RegexEntityExtractor:
             triple.source = source
             triple.extractor_source = self.extractor_name
 
+        logger.debug(
+            "RegexEntityExtractor.extract: source=%r entities=%d triples=%d",
+            source,
+            len(entity_list),
+            len(raw_relations),
+        )
         return ExtractionResult(entities=entity_list, triples=raw_relations)
 
     # ------------------------------------------------------------------
