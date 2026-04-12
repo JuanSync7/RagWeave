@@ -94,7 +94,7 @@ class GraphQueryExpander:
         """
         try:
             depth = depth if depth is not None else self._max_depth
-        _t0 = time.monotonic()
+            _t0 = time.monotonic()
 
             # Normalise query for matching
             normalized = self._sanitizer.normalize(query)
