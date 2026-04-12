@@ -91,78 +91,85 @@ class GraphQueryExpander:
         Returns:
             List of related entity names.
         """
-        depth = depth if depth is not None else self._max_depth
+        try:
+            depth = depth if depth is not None else self._max_depth
 
-        # Normalise query for matching
-        normalized = self._sanitizer.normalize(query)
+            # Normalise query for matching
+            normalized = self._sanitizer.normalize(query)
 
-        # Tier 1: spaCy / substring match
-        seed_entities = self._matcher.match(normalized)
+            # Tier 1: spaCy / substring match
+            seed_entities = self._matcher.match(normalized)
 
-        # Tier 2: LLM fallback (Phase 1b)
-        if not seed_entities:
-            seed_entities = self._matcher.match_with_llm_fallback(normalized)
+            # Tier 2: LLM fallback (Phase 1b)
+            if not seed_entities:
+                seed_entities = self._matcher.match_with_llm_fallback(normalized)
 
-        if not seed_entities:
-            return []
+            if not seed_entities:
+                return []
 
-        # Phase 3: Multi-hop for connects_to edges
-        effective_depth = depth
-        if effective_depth < 2:
+            # Phase 3: Multi-hop for connects_to edges
+            effective_depth = depth
+            if effective_depth < 2:
+                for entity in seed_entities:
+                    out_edges = self._backend.get_outgoing_edges(entity)
+                    if any(e.predicate == "connects_to" for e in out_edges):
+                        effective_depth = max(effective_depth, 2)
+                        logger.debug(
+                            "Increased expansion depth to %d for connects_to edges on %s",
+                            effective_depth, entity,
+                        )
+                        break
+
+            # Expand via graph neighbours
+            expanded: set[str] = set(seed_entities)
+
             for entity in seed_entities:
-                out_edges = self._backend.get_outgoing_edges(entity)
-                if any(e.predicate == "connects_to" for e in out_edges):
-                    effective_depth = max(effective_depth, 2)
-                    logger.debug(
-                        "Increased expansion depth to %d for connects_to edges on %s",
-                        effective_depth, entity,
+                # Forward + backward neighbours within depth hops
+                neighbours = self._backend.query_neighbors(entity, depth=effective_depth)
+                for neighbour in neighbours:
+                    expanded.add(neighbour.name)
+
+                # Explicit predecessors (entities that point at this one)
+                predecessors = self._backend.get_predecessors(entity)
+                for pred in predecessors:
+                    expanded.add(pred.name)
+
+            # Filter out terms already in the query
+            query_lower = query.lower()
+            local_terms = [e for e in expanded if e.lower() not in query_lower]
+
+            # Phase 2: Community-aware global retrieval
+            community_terms: List[str] = []
+            if self._enable_global_retrieval and self._community_detector is not None:
+                if self._community_detector.is_ready:
+                    community_terms = self._expand_with_communities(
+                        seed_entities, set(local_terms) | expanded
                     )
-                    break
+                    # Filter community terms not already in query
+                    community_terms = [
+                        t for t in community_terms if t.lower() not in query_lower
+                    ]
+                elif not self._global_retrieval_warned:
+                    logger.warning(
+                        "Global retrieval enabled but CommunityDetector is not ready "
+                        "(detection or summarization incomplete). "
+                        "Falling back to local-only expansion."
+                    )
+                    self._global_retrieval_warned = True
 
-        # Expand via graph neighbours
-        expanded: set[str] = set(seed_entities)
+            # Merge: local terms first, community terms fill remaining slots
+            result = local_terms[: self._max_terms]
+            remaining = self._max_terms - len(result)
+            if remaining > 0 and community_terms:
+                result.extend(community_terms[:remaining])
 
-        for entity in seed_entities:
-            # Forward + backward neighbours within depth hops
-            neighbours = self._backend.query_neighbors(entity, depth=effective_depth)
-            for neighbour in neighbours:
-                expanded.add(neighbour.name)
-
-            # Explicit predecessors (entities that point at this one)
-            predecessors = self._backend.get_predecessors(entity)
-            for pred in predecessors:
-                expanded.add(pred.name)
-
-        # Filter out terms already in the query
-        query_lower = query.lower()
-        local_terms = [e for e in expanded if e.lower() not in query_lower]
-
-        # Phase 2: Community-aware global retrieval
-        community_terms: List[str] = []
-        if self._enable_global_retrieval and self._community_detector is not None:
-            if self._community_detector.is_ready:
-                community_terms = self._expand_with_communities(
-                    seed_entities, set(local_terms) | expanded
-                )
-                # Filter community terms not already in query
-                community_terms = [
-                    t for t in community_terms if t.lower() not in query_lower
-                ]
-            elif not self._global_retrieval_warned:
-                logger.warning(
-                    "Global retrieval enabled but CommunityDetector is not ready "
-                    "(detection or summarization incomplete). "
-                    "Falling back to local-only expansion."
-                )
-                self._global_retrieval_warned = True
-
-        # Merge: local terms first, community terms fill remaining slots
-        result = local_terms[: self._max_terms]
-        remaining = self._max_terms - len(result)
-        if remaining > 0 and community_terms:
-            result.extend(community_terms[:remaining])
-
-        return result
+            return result
+        except Exception:
+            logger.exception(
+                "GraphQueryExpander.expand() failed for query %r; returning empty expansion",
+                query,
+            )
+            return []
 
     def get_context_summary(
         self, entities: List[str], max_lines: int = 5
