@@ -23,6 +23,7 @@ Dispatcher pattern:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -262,6 +263,9 @@ def run_post_ingestion_steps(
     if config is None:
         config = _build_kg_config()
 
+    _pipeline_t0 = time.monotonic()
+    logger.info("KG post-ingestion steps starting (update_mode=%s)", update_mode)
+
     # Step 1: SV connectivity batch
     if config.sv_filelist:
         try:
@@ -297,20 +301,24 @@ def run_post_ingestion_steps(
 
     # Step 2: Entity resolution
     if config.enable_entity_resolution:
+        _step_t0 = time.monotonic()
+        logger.info("KG step 2/3: entity resolution starting")
         try:
             from src.knowledge_graph.resolution import EntityResolver
 
             resolver = EntityResolver(backend=backend, config=config)
             report = resolver.resolve()
-            if report.total_merged > 0:
-                logger.info(
-                    "Entity resolution: merged %d entities", report.total_merged
-                )
+            logger.info(
+                "KG step 2/3: entity resolution complete — merged=%d elapsed=%.1fs",
+                report.total_merged, time.monotonic() - _step_t0,
+            )
         except Exception as exc:
             logger.warning("Entity resolution failed: %s", exc)
 
     # Step 3: Community detection (hierarchical if max_levels > 1)
     if config.enable_global_retrieval:
+        _step_t0 = time.monotonic()
+        logger.info("KG step 3/3: community detection starting")
         try:
             from src.knowledge_graph.community import CommunityDetector
             from src.knowledge_graph.community import CommunitySummarizer
@@ -329,8 +337,17 @@ def run_post_ingestion_steps(
                     summaries = summarizer.summarize_all(communities, backend)
                     detector.summaries = summaries
                     detector.save_sidecar()
+            logger.info(
+                "KG step 3/3: community detection complete — elapsed=%.1fs",
+                time.monotonic() - _step_t0,
+            )
         except Exception as exc:
             logger.warning("Community detection failed: %s", exc)
+
+    logger.info(
+        "KG post-ingestion steps complete — total elapsed=%.1fs",
+        time.monotonic() - _pipeline_t0,
+    )
 
 
 def reset_singletons() -> None:

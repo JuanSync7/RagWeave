@@ -117,11 +117,16 @@ class CommunityDetector:
         self._assign_communities(communities)
         self._detection_complete = True
 
+        n_communities = len([c for c in communities if c != -1])
+        n_entities = sum(len(m) for m in communities.values())
+        elapsed = time.monotonic() - _t0
+        logger.info(
+            "CommunityDetector.detect: %d communities, %d entities, elapsed=%.1fs",
+            n_communities, n_entities, elapsed,
+        )
         logger.debug(
             "CommunityDetector.detect: communities=%d entities=%d elapsed=%.3fs",
-            len([c for c in communities if c != -1]),
-            sum(len(m) for m in communities.values()),
-            time.monotonic() - _t0,
+            n_communities, n_entities, elapsed,
         )
         return communities
 

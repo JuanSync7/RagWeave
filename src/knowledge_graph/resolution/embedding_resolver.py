@@ -143,9 +143,13 @@ class EmbeddingResolver:
                         )
                         merged_names.add(duplicate)
 
+        elapsed = time.monotonic() - _t0
+        logger.info(
+            "EmbeddingResolver.find_candidates: %d merge candidates, elapsed=%.1fs",
+            len(candidates), elapsed,
+        )
         logger.debug(
             "EmbeddingResolver.find_candidates: candidates=%d elapsed=%.3fs",
-            len(candidates),
-            time.monotonic() - _t0,
+            len(candidates), elapsed,
         )
         return candidates
