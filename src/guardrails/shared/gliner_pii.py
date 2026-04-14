@@ -21,7 +21,6 @@ ImportError at instantiation time, and the caller falls back gracefully.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Tuple
 
 from src.guardrails.shared.pii import PIIDetection
 
@@ -33,7 +32,7 @@ logger = logging.getLogger("rag.guardrails.gliner_pii")
 _PII_LABELS = ["person", "organization", "location", "address"]
 
 # Map GLiNER labels to standardized PII type names
-_LABEL_TO_PII_TYPE: Dict[str, str] = {
+_LABEL_TO_PII_TYPE: dict[str, str] = {
     "person": "PERSON",
     "organization": "ORGANIZATION",
     "location": "LOCATION",
@@ -55,7 +54,7 @@ class GLiNERPIIDetector:
 
     def __init__(
         self,
-        model_path: str = None,
+        model_path: str | None = None,
         threshold: float = 0.5,
     ) -> None:
         """Initialize the GLiNER PII detector.
@@ -81,7 +80,7 @@ class GLiNERPIIDetector:
             self._labels,
         )
 
-    def detect(self, text: str) -> List[PIIDetection]:
+    def detect(self, text: str) -> list[PIIDetection]:
         """Detect entity-based PII using GLiNER zero-shot NER.
 
         Args:
@@ -129,7 +128,7 @@ class GLiNERPIIDetector:
         detections.sort(key=lambda d: d.start, reverse=True)
 
         if detections:
-            type_counts: Dict[str, int] = {}
+            type_counts: dict[str, int] = {}
             for d in detections:
                 type_counts[d.pii_type] = type_counts.get(d.pii_type, 0) + 1
             logger.info(
@@ -141,9 +140,9 @@ class GLiNERPIIDetector:
 
 
 def merge_detections(
-    primary: List[PIIDetection],
-    supplementary: List[PIIDetection],
-) -> List[PIIDetection]:
+    primary: list[PIIDetection],
+    supplementary: list[PIIDetection],
+) -> list[PIIDetection]:
     """Merge PII detections from primary and supplementary layers.
 
     When detections from both layers overlap (share any character

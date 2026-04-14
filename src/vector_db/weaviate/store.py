@@ -14,12 +14,14 @@ that defaults to ``WEAVIATE_COLLECTION_NAME``. This module is imported only
 by ``WeaviateBackend`` — pipeline code accesses these capabilities through
 ``src.vector_db`` instead.
 """
+from __future__ import annotations
+
 
 import hashlib
 import logging
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional
+from typing import Optional
 
 import weaviate
 from weaviate.classes.config import Configure, Property, DataType
@@ -40,9 +42,16 @@ tracer = get_tracer()
 def create_persistent_client() -> weaviate.WeaviateClient:
     """Create a long-lived Weaviate embedded client."""
     span = tracer.start_span("vector_store.create_persistent_client")
-    client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
-    span.end(status="ok")
-    return client
+    client: Optional[weaviate.WeaviateClient] = None
+    try:
+        client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
+        span.end(status="ok")
+        return client
+    except Exception:
+        span.end(status="error")
+        if client is not None:
+            client.close()
+        raise
 
 
 @contextmanager
@@ -121,9 +130,9 @@ def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text
 
 def add_documents(
     client: weaviate.WeaviateClient,
-    texts: List[str],
-    embeddings: List[List[float]],
-    metadatas: Optional[List[dict]] = None,
+    texts: list[str],
+    embeddings: list[list[float]],
+    metadatas: Optional[list[dict]] = None,
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Add documents with pre-computed embeddings to the named collection."""
@@ -194,12 +203,12 @@ def add_documents(
 def hybrid_search(
     client: weaviate.WeaviateClient,
     query: str,
-    query_embedding: List[float],
+    query_embedding: list[float],
     alpha: float = HYBRID_SEARCH_ALPHA,
     limit: int = SEARCH_LIMIT,
     filters: Optional[Filter] = None,
     collection: str = WEAVIATE_COLLECTION_NAME,
-) -> List[dict]:
+) -> list[dict]:
     """Perform hybrid search (BM25 + vector) on the named collection.
 
     Returns:

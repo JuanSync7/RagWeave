@@ -14,7 +14,6 @@ reference to the RAG chain (e.g., for Colang action handlers).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple
 
 from src.guardrails.common import (
     InputRailResult,
@@ -44,7 +43,7 @@ class GuardrailBackend(ABC):
         ...
 
     @abstractmethod
-    def run_output_rails(self, answer: str, context_chunks: List[str]) -> OutputRailResult:
+    def run_output_rails(self, answer: str, context_chunks: list[str]) -> OutputRailResult:
         """Run all output rails (faithfulness, PII, toxicity).
 
         Args:
@@ -57,7 +56,7 @@ class GuardrailBackend(ABC):
         ...
 
     @abstractmethod
-    def redact_pii(self, text: str) -> Tuple[str, list]:
+    def redact_pii(self, text: str) -> tuple[str, list]:
         """Redact PII from text before it is forwarded to the LLM.
 
         Used by the pre-LLM PII gate in ``rag_chain.run()``. Called

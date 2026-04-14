@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import orjson
 import os
 import shutil
@@ -17,6 +18,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 from urllib import parse, request
+
+logger = logging.getLogger(__name__)
 
 
 def _detect_container_runtime() -> str:
@@ -46,6 +49,7 @@ def _query_prometheus(base_url: str, promql: str, timeout_s: int = 5) -> Optiona
         with request.urlopen(endpoint, timeout=timeout_s) as resp:
             payload = orjson.loads(resp.read())
     except Exception:
+        logger.debug("Prometheus query failed for %s", promql, exc_info=True)
         return None
     if payload.get("status") != "success":
         return None
@@ -55,6 +59,7 @@ def _query_prometheus(base_url: str, promql: str, timeout_s: int = 5) -> Optiona
     try:
         return float(results[0]["value"][1])
     except Exception:
+        logger.debug("Failed to parse Prometheus result value", exc_info=True)
         return None
 
 
@@ -67,6 +72,7 @@ def _current_replicas() -> int:
             text=True,
         )
     except Exception:
+        logger.debug("Failed to list container replicas", exc_info=True)
         return 0
     return sum(1 for line in proc.stdout.splitlines() if "rag-rag-worker-" in line.strip())
 
@@ -86,6 +92,7 @@ def _worker_max_mem_pct() -> Optional[float]:
             text=True,
         )
     except Exception:
+        logger.debug("Failed to query container memory stats", exc_info=True)
         return None
     vals: list[float] = []
     for line in proc.stdout.splitlines():

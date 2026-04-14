@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from html import escape
 from pathlib import Path
@@ -16,6 +17,8 @@ from fastapi import HTTPException
 
 from config.settings import DOCUMENTS_DIR, OLLAMA_BASE_URL
 from server.schemas import ConsoleLogsResponse
+
+logger = logging.getLogger(__name__)
 
 _CONSOLE_DIR = Path(__file__).resolve().parent
 
@@ -81,6 +84,7 @@ def is_ollama_reachable() -> bool:
         with urlopen(req, timeout=3):
             return True
     except Exception:
+        logger.debug("Ollama reachability probe failed", exc_info=True)
         return False
 
 

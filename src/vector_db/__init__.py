@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, Optional
 
 from src.vector_db.backend import VectorBackend
 from src.vector_db.common import (
@@ -139,7 +139,7 @@ def delete_collection(client: Any, collection: Optional[str] = None) -> None:
 
 def add_documents(
     client: Any,
-    documents: List[DocumentRecord],
+    documents: list[DocumentRecord],
     collection: Optional[str] = None,
 ) -> int:
     """Insert documents with pre-computed embeddings.
@@ -202,12 +202,12 @@ def delete_by_source_key(
 def search(
     client: Any,
     query: str,
-    query_embedding: List[float],
+    query_embedding: list[float],
     alpha: float,
     limit: int,
-    filters: Optional[List[SearchFilter]] = None,
+    filters: Optional[list[SearchFilter]] = None,
     collection: Optional[str] = None,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Perform a hybrid (keyword + vector) search against one collection.
 
     Args:
@@ -230,12 +230,12 @@ def search(
 def multi_search(
     client: Any,
     query: str,
-    query_embedding: List[float],
+    query_embedding: list[float],
     alpha: float,
     limit: int,
-    collections: Optional[List[str]] = None,
-    filters: Optional[List[SearchFilter]] = None,
-) -> List[SearchResult]:
+    collections: Optional[list[str]] = None,
+    filters: Optional[list[SearchFilter]] = None,
+) -> list[SearchResult]:
     """Fan-out hybrid search across multiple collections.
 
     Issues one search per collection in parallel, deduplicates results by
@@ -262,12 +262,12 @@ def multi_search(
 
     backend = _get_vector_backend()
 
-    def _search_one(col: str) -> List[SearchResult]:
+    def _search_one(col: str) -> list[SearchResult]:
         return backend.search(
             client, query, query_embedding, alpha, limit, filters, col
         )
 
-    all_results: List[SearchResult] = []
+    all_results: list[SearchResult] = []
     with ThreadPoolExecutor(max_workers=len(collections)) as pool:
         futures = {pool.submit(_search_one, col): col for col in collections}
         for future in as_completed(futures):
@@ -344,7 +344,7 @@ def ensure_visual_collection(
 
 def add_visual_documents(
     client: Any,
-    documents: List[dict[str, Any]],
+    documents: list[dict[str, Any]],
     collection: Optional[str] = None,
 ) -> int:
     """Batch-insert visual page objects into the visual collection.

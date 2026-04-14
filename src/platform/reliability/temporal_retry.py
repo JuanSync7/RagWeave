@@ -3,11 +3,13 @@
 This implementation keeps Temporal optional and fail-open. When a Temporal
 client or worker is not available, execution falls back to direct invocation.
 """
+from __future__ import annotations
+
 
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 
 from config.settings import TEMPORAL_TARGET_HOST, TEMPORAL_TASK_QUEUE
 from src.platform.reliability.contracts import RetryProvider
@@ -16,7 +18,7 @@ from src.platform.schemas import RetryPolicy
 T = TypeVar("T")
 logger = logging.getLogger("rag.reliability.temporal")
 
-_OPERATION_REGISTRY: Dict[str, Callable[[], object]] = {}
+_OPERATION_REGISTRY: dict[str, Callable[[], object]] = {}
 
 
 @dataclass(frozen=True)
@@ -119,11 +121,14 @@ class TemporalRetryProvider(RetryProvider):
             f"rag-retry-{payload.operation_name}-"
             f"{payload.idempotency_key or 'no-idempotency-key'}"
         )
-        result = await client.execute_workflow(
-            "RetryWorkflow",
-            payload.__dict__,
-            id=workflow_id,
-            task_queue=self.task_queue,
-        )
+        try:
+            result = await client.execute_workflow(
+                "RetryWorkflow",
+                payload.__dict__,
+                id=workflow_id,
+                task_queue=self.task_queue,
+            )
+        finally:
+            await client.close()
         return result
 

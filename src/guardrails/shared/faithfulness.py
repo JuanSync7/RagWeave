@@ -20,14 +20,14 @@ import orjson
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 from src.guardrails.common import RailVerdict
 
 logger = logging.getLogger("rag.guardrails.faithfulness")
 
 
-def _format_numbered_chunks(chunks: List[str]) -> str:
+def _format_numbered_chunks(chunks: list[str]) -> str:
     """Format context chunks as numbered evidence text.
 
     Args:
@@ -106,8 +106,8 @@ class FaithfulnessResult:
     overall_score: float
     verdict: RailVerdict
     warning: bool = False
-    claim_scores: List[ClaimScore] = field(default_factory=list)
-    hallucinated_entities: List[str] = field(default_factory=list)
+    claim_scores: list[ClaimScore] = field(default_factory=list)
+    hallucinated_entities: list[str] = field(default_factory=list)
     fallback_message: Optional[str] = None
 
 
@@ -145,7 +145,7 @@ class FaithfulnessChecker:
     def check(
         self,
         answer: str,
-        context_chunks: List[str],
+        context_chunks: list[str],
     ) -> FaithfulnessResult:
         """Evaluate faithfulness of answer against context.
 
@@ -167,7 +167,7 @@ class FaithfulnessChecker:
 
         # Phases 1-3: Run LLM calls in parallel, entity detection is CPU-only
         self_check_score = None
-        claim_scores: List[ClaimScore] = []
+        claim_scores: list[ClaimScore] = []
         hallucinated = self._detect_hallucinated_entities(answer, context_chunks)
 
         # Format once, reuse in both parallel tasks
@@ -276,7 +276,7 @@ class FaithfulnessChecker:
 
     def _score_claims(
         self, answer: str, formatted_context: str
-    ) -> List[ClaimScore]:
+    ) -> list[ClaimScore]:
         """Use an LLM to score each claim against context.
 
         Args:
@@ -336,8 +336,8 @@ class FaithfulnessChecker:
     def _detect_hallucinated_entities(
         self,
         answer: str,
-        context_chunks: List[str],
-    ) -> List[str]:
+        context_chunks: list[str],
+    ) -> list[str]:
         """Check for entities/dates/numbers in answer not in any context chunk.
 
         Lightweight deterministic check — no LLM needed (REQ-505).
@@ -350,7 +350,7 @@ class FaithfulnessChecker:
             List of lightweight hallucination signals (e.g., ``year:2024``).
         """
         context_text = " ".join(context_chunks).lower()
-        hallucinated: List[str] = []
+        hallucinated: list[str] = []
 
         # Check for years (4-digit numbers starting with 19 or 20)
         date_pattern = re.compile(r"\b(?:19|20)\d{2}\b")

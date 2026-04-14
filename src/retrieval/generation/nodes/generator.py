@@ -3,10 +3,12 @@
 # Main exports: OllamaGenerator, _get_system_prompt. Deps: typing, config.settings, src.platform.llm
 # @end-summary
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
+from __future__ import annotations
+
 
 import logging
 import re
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from config.settings import (
     GENERATION_MAX_TOKENS,
@@ -115,15 +117,16 @@ class OllamaGenerator:
                 self._response_format = _RAG_RESPONSE_FORMAT_BASIC
                 logger.info("Model %s uses json_object — using basic response format", self.model)
         except Exception:
+            logger.debug("Response format detection failed; falling back to basic format", exc_info=True)
             self._response_format = _RAG_RESPONSE_FORMAT_BASIC
 
     def _build_messages(
         self,
         query: str,
-        context_chunks: List[str],
-        scores: Optional[List[float]] = None,
+        context_chunks: list[str],
+        scores: Optional[list[float]] = None,
         memory_context: Optional[str] = None,
-        recent_turns: Optional[List[dict]] = None,
+        recent_turns: Optional[list[dict]] = None,
     ) -> list[dict]:
         if scores:
             context = "\n\n".join(
@@ -160,10 +163,10 @@ class OllamaGenerator:
     def generate(
         self,
         query: str,
-        context_chunks: List[str],
-        scores: Optional[List[float]] = None,
+        context_chunks: list[str],
+        scores: Optional[list[float]] = None,
         memory_context: Optional[str] = None,
-        recent_turns: Optional[List[dict]] = None,
+        recent_turns: Optional[list[dict]] = None,
     ) -> Optional[str]:
         """Generate an answer using retrieved context chunks.
 
@@ -213,7 +216,7 @@ class OllamaGenerator:
                 return None
 
     @staticmethod
-    def _parse_structured_response(response_text: str) -> Tuple[str, str]:
+    def _parse_structured_response(response_text: str) -> tuple[str, str]:
         """Parse the LLM response as structured JSON with answer + confidence.
 
         The LLM is called with response_format=json_schema, which constrains
@@ -239,7 +242,7 @@ class OllamaGenerator:
             return OllamaGenerator._extract_confidence_from_text(response_text)
 
     @staticmethod
-    def _extract_confidence_from_text(response_text: str) -> Tuple[str, str]:
+    def _extract_confidence_from_text(response_text: str) -> tuple[str, str]:
         """Fallback extraction when structured output is not available.
 
         Scans for "CONFIDENCE: high|medium|low" anywhere in the text and
@@ -261,10 +264,10 @@ class OllamaGenerator:
     def generate_stream(
         self,
         query: str,
-        context_chunks: List[str],
-        scores: Optional[List[float]] = None,
+        context_chunks: list[str],
+        scores: Optional[list[float]] = None,
         memory_context: Optional[str] = None,
-        recent_turns: Optional[List[dict]] = None,
+        recent_turns: Optional[list[dict]] = None,
     ):
         """Stream tokens from LLM. Yields content strings as they arrive.
 
@@ -299,4 +302,5 @@ class OllamaGenerator:
             try:
                 return self._provider.is_available(model_alias="default")
             except Exception:
+                logger.debug("LLM provider availability check failed", exc_info=True)
                 return False

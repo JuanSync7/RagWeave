@@ -10,6 +10,7 @@ Instead of stripping section markers, normalizes all heading formats
 chunks using MarkdownHeaderTextSplitter to preserve document structure.
 """
 
+import logging
 import re
 
 import numpy as np
@@ -33,6 +34,8 @@ from src.ingest.support.document import (
     clean_whitespace,
     strip_trailing_short_lines,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Module-level pre-compiled regex patterns
@@ -121,6 +124,7 @@ def _semantic_split(
     try:
         embeddings = embedder.encode_sentences(sentences)
     except Exception:
+        logger.debug("Semantic sentence embedding failed; falling back to plain sentences", exc_info=True)
         return sentences
 
     # Cosine similarity between consecutive sentences (dot product on normalized vectors)

@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.platform.token_budget import TokenBudgetSnapshot
@@ -63,10 +63,10 @@ class RAGRequest:
     skip_generation: bool = False
     fast_path: Optional[bool] = None
     memory_context: Optional[str] = None
-    memory_recent_turns: Optional[List[Dict[str, str]]] = None
+    memory_recent_turns: Optional[list[dict[str, str]]] = None
     conversation_id: Optional[str] = None
     overall_timeout_ms: Optional[int] = None
-    stage_budget_overrides: Optional[Dict[str, int]] = None
+    stage_budget_overrides: Optional[dict[str, int]] = None
     max_query_iterations: Optional[int] = None
 
 
@@ -78,27 +78,27 @@ class RAGResponse:
     processed_query: str
     query_confidence: float
     action: str
-    results: List[RankedResult] = field(default_factory=list)
+    results: list[RankedResult] = field(default_factory=list)
     clarification_message: Optional[str] = None
-    kg_expanded_terms: Optional[List[str]] = None
+    kg_expanded_terms: Optional[list[str]] = None
     generated_answer: Optional[str] = None
-    stage_timings: List[Dict[str, Any]] = field(default_factory=list)
-    timing_totals: Dict[str, float] = field(default_factory=dict)
+    stage_timings: list[dict[str, Any]] = field(default_factory=list)
+    timing_totals: dict[str, float] = field(default_factory=dict)
     budget_exhausted: bool = False
     budget_exhausted_stage: Optional[str] = None
     conversation_id: Optional[str] = None
-    guardrails: Optional[Dict[str, Any]] = None
+    guardrails: Optional[dict[str, Any]] = None
     token_budget: Optional["TokenBudgetSnapshot"] = None
     composite_confidence: Optional[float] = None
-    confidence_breakdown: Optional[Dict[str, Any]] = None
+    confidence_breakdown: Optional[dict[str, Any]] = None
     post_guardrail_action: Optional[str] = None
-    version_conflicts: Optional[List[Dict[str, Any]]] = None
+    version_conflicts: Optional[list[dict[str, Any]]] = None
     retry_count: int = 0
     verification_warning: Optional[str] = None
     retrieval_quality: Optional[str] = None  # "strong" | "moderate" | "weak" | "insufficient"
     retrieval_quality_note: Optional[str] = None
     re_retrieval_suggested: bool = False
-    re_retrieval_params: Optional[Dict[str, Any]] = None
-    visual_results: Optional[List["VisualPageResult"]] = None  # FR-503
+    re_retrieval_params: Optional[dict[str, Any]] = None
+    visual_results: Optional[list["VisualPageResult"]] = None  # FR-503
     generation_source: Optional[str] = None       # "retrieval" | "memory" | "retrieval+memory" | None (REQ-1209)
     llm_confidence: Optional[str] = None            # "high" | "medium" | "low" | None — LLM self-reported confidence (REQ-604)

@@ -3,13 +3,15 @@
 These dataclasses define structured tracing payloads used by observability
 providers and in-memory logging/export.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from time import time
-from typing import Dict, Optional
+from typing import Optional
 
 
-Attributes = Dict[str, object]
+Attributes = dict[str, object]
 
 
 @dataclass
@@ -24,10 +26,3 @@ class SpanRecord:
     end_ts: Optional[float] = None
     status: str = "ok"
     error_message: Optional[str] = None
-
-
-# Backward-compatible re-exports from the canonical location
-from src.platform.observability import (
-    GenerationRecord,
-    TraceRecord,
-)

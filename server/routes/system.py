@@ -41,6 +41,7 @@ async def build_health_response(
                 )
                 temporal_ok = True
         except Exception:
+            logger.warning("Temporal health check failed", exc_info=True)
             temporal_ok = False
         if temporal_ok:
             try:

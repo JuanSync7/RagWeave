@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("rag.timing")
 
@@ -48,14 +48,14 @@ class TimingPool:
         pool.is_budget_exhausted()  # True if overall elapsed > overall_budget_ms
 
         # Export for RAGResponse
-        pool.entries()   # List[Dict] for stage_timings field
+        pool.entries()   # list[Dict] for stage_timings field
         pool.totals()    # Dict for timing_totals field
     """
 
     def __init__(
         self,
         overall_budget_ms: float = 30_000,
-        stage_budgets: Optional[Dict[str, float]] = None,
+        stage_budgets: Optional[dict[str, float]] = None,
     ) -> None:
         """Create a timing pool.
 
@@ -63,7 +63,7 @@ class TimingPool:
             overall_budget_ms: Max allowed wall-clock time for the whole request.
             stage_budgets: Optional per-stage budgets (milliseconds) keyed by stage name.
         """
-        self._entries: List[Dict[str, Any]] = []
+        self._entries: list[dict[str, Any]] = []
         self._overall_budget_ms = overall_budget_ms
         self._stage_budgets = stage_budgets or {}
         self._pipeline_start = time.perf_counter()
@@ -79,7 +79,7 @@ class TimingPool:
         started_at: Optional[float] = None,
         ms: Optional[float] = None,
         budget_ms: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Record a stage timing entry.
 
         Provide either `started_at` (perf_counter timestamp) or `ms` (duration).
@@ -108,7 +108,7 @@ class TimingPool:
         effective_budget = budget_ms if budget_ms is not None else self._stage_budgets.get(stage)
         within_budget = ms <= float(effective_budget) if effective_budget is not None else True
 
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "stage": stage,
             "bucket": bucket,
             "ms": ms,
@@ -123,18 +123,18 @@ class TimingPool:
 
         return entry
 
-    def totals(self) -> Dict[str, float]:
+    def totals(self) -> dict[str, float]:
         """Aggregate milliseconds by bucket, plus overall total.
 
         Returns:
             A mapping like `{"retrieval_ms": 12.3, "generation_ms": 45.6, "total_ms": 57.9}`.
         """
-        buckets: Dict[str, float] = {}
+        buckets: dict[str, float] = {}
         for entry in self._entries:
             bkt = entry["bucket"]
             buckets[bkt] = buckets.get(bkt, 0.0) + float(entry["ms"])
 
-        result: Dict[str, float] = {}
+        result: dict[str, float] = {}
         total = 0.0
         for bkt, val in sorted(buckets.items()):
             key = f"{bkt}_ms"
@@ -143,7 +143,7 @@ class TimingPool:
         result["total_ms"] = round(total, 1)
         return result
 
-    def entries(self) -> List[Dict[str, Any]]:
+    def entries(self) -> list[dict[str, Any]]:
         """Return all recorded timing entries.
 
         Returns:

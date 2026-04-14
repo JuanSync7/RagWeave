@@ -5,14 +5,14 @@
 # Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
 #   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
 #   stored_count, errors, processing_log, docling_document (Optional[Any]),
-#   visual_stored_count (int, FR-602), page_images (Optional[List[Any]], FR-602)
+#   visual_stored_count (int, FR-602), page_images (Optional[list[Any]], FR-602)
 # @end-summary
 
 """State contract for the Embedding Pipeline (Phase 2, nodes 6–13)."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 from src.ingest.common import ProcessedChunk
 from src.ingest.common import Runtime
@@ -83,15 +83,15 @@ class EmbeddingPipelineState(TypedDict, total=False):
     refactored_text: Optional[str]
     clean_hash: str
     document_id: str
-    chunks: List[ProcessedChunk]
-    enriched_chunks: List[ProcessedChunk]
+    chunks: list[ProcessedChunk]
+    enriched_chunks: list[ProcessedChunk]
     metadata_summary: str
-    metadata_keywords: List[str]
-    cross_references: List[Dict[str, str]]
-    kg_triples: List[Dict[str, Any]]
+    metadata_keywords: list[str]
+    cross_references: list[dict[str, str]]
+    kg_triples: list[dict[str, Any]]
     stored_count: int
-    errors: List[str]
-    processing_log: List[str]
+    errors: list[str]
+    processing_log: list[str]
     docling_document: Optional[Any]
     """Native DoclingDocument object loaded from CleanDocumentStore at
     Phase 2 initialization. None if no .docling.json was stored (fallback
@@ -100,4 +100,4 @@ class EmbeddingPipelineState(TypedDict, total=False):
 
     # -- Visual embedding extensions (FR-602) --
     visual_stored_count: int  # FR-602: number of visual page objects stored; default 0
-    page_images: Optional[List[Any]]  # FR-602: PIL.Image objects; cleared after node (FR-606)
+    page_images: Optional[list[Any]]  # FR-602: PIL.Image objects; cleared after node (FR-606)

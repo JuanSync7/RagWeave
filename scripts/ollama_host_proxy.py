@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -33,6 +36,7 @@ async def _handle_client(
     try:
         target_reader, target_writer = await asyncio.open_connection(target_host, target_port)
     except Exception:
+        logger.debug("Failed to connect to target %s:%d", target_host, target_port, exc_info=True)
         client_writer.close()
         await client_writer.wait_closed()
         return

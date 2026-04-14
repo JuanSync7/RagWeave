@@ -11,11 +11,12 @@
 Uses transformers directly instead of FlagEmbedding to avoid compatibility
 issues with transformers >= 5.x.
 """
+from __future__ import annotations
+
 
 import logging
 import math
 import time
-from typing import List
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -127,9 +128,9 @@ class LocalBGEReranker:
     def rerank(
         self,
         query: str,
-        documents: List[SearchResult],
+        documents: list[SearchResult],
         top_k: int = RERANK_TOP_K,
-    ) -> List[RankedResult]:
+    ) -> list[RankedResult]:
         """Rerank documents against a query.
 
         Args:
@@ -168,7 +169,7 @@ class LocalBGEReranker:
 
             # Process in fixed-size batches to bound peak VRAM usage when
             # SEARCH_LIMIT is large (RERANKER_BATCH_SIZE, default 32).
-            scores: List[float] = []
+            scores: list[float] = []
             for i in range(0, len(pairs), RERANKER_BATCH_SIZE):
                 batch = pairs[i : i + RERANKER_BATCH_SIZE]
                 inputs = self.tokenizer(
@@ -185,7 +186,7 @@ class LocalBGEReranker:
                 scores_raw = logits.cpu().tolist()
                 if isinstance(scores_raw, float):
                     scores_raw = [scores_raw]
-                batch_scores: List[float] = [1.0 / (1.0 + math.exp(-x)) for x in scores_raw]
+                batch_scores: list[float] = [1.0 / (1.0 + math.exp(-x)) for x in scores_raw]
                 scores.extend(batch_scores)
 
             results = [

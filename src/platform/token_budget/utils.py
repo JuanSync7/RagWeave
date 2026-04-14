@@ -13,7 +13,7 @@ Falls back to a character-based heuristic when litellm cannot resolve the model.
 from __future__ import annotations
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Optional
 
 import litellm
 
@@ -24,7 +24,7 @@ logger = logging.getLogger("rag.token_budget")
 
 def count_tokens(
     text: Optional[str] = None,
-    messages: Optional[List[Dict[str, Any]]] = None,
+    messages: Optional[list[dict[str, Any]]] = None,
     model: Optional[str] = None,
 ) -> int:
     """Count tokens using litellm.token_counter(), falling back to heuristic.

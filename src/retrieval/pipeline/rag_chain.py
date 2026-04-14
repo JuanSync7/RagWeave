@@ -4,8 +4,10 @@
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
+from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+
+from typing import Any, Optional
 import logging
 import statistics
 import time
@@ -259,7 +261,7 @@ class RAGChain:
 
     def _run_visual_retrieval(
         self, processed_query: str, tenant_id: Optional[str]
-    ) -> List[VisualPageResult]:
+    ) -> list[VisualPageResult]:
         """Execute the visual retrieval track. FR-601, FR-605, FR-607, FR-609
 
         Encodes the processed query via ColQwen2, searches the visual collection,
@@ -310,7 +312,7 @@ class RAGChain:
             get_page_image_url,
         )
 
-        results: List[VisualPageResult] = []
+        results: list[VisualPageResult] = []
         with self.tracer.span("visual_retrieval.presigned_urls"):
             minio_client = create_client()
             for record in page_records:
@@ -383,7 +385,7 @@ class RAGChain:
             raise
 
     @staticmethod
-    def _ranked_from_search_results(search_results, top_k: int) -> List[RankedResult]:
+    def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
         """Convert search results into a sorted RankedResult list."""
         _t0 = time.perf_counter()
         ranked = [
@@ -411,9 +413,9 @@ class RAGChain:
         max_query_iterations: int = MAX_SANITIZATION_ITERATIONS,
         fast_path: Optional[bool] = None,
         overall_timeout_ms: int = RAG_RETRIEVAL_TIMEOUT_MS,
-        stage_budget_overrides: Optional[Dict[str, int]] = None,
+        stage_budget_overrides: Optional[dict[str, int]] = None,
         memory_context: Optional[str] = None,
-        memory_recent_turns: Optional[List[Dict[str, str]]] = None,
+        memory_recent_turns: Optional[list[dict[str, str]]] = None,
         conversation_id: Optional[str] = None,
         retry_count: int = 0,
     ) -> RAGResponse:
@@ -1253,7 +1255,6 @@ class RAGChain:
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
             )
-
 
 
 __all__ = ["RAGChain", "RAGResponse"]

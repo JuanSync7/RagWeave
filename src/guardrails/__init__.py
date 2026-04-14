@@ -21,7 +21,6 @@ Dispatcher pattern:
 from __future__ import annotations
 
 import logging
-from typing import List, Tuple
 
 from src.guardrails.backend import GuardrailBackend
 from src.guardrails.common import RailMergeGate
@@ -48,10 +47,10 @@ class _NoOpBackend(GuardrailBackend):
     def run_input_rails(self, query: str, tenant_id: str = "") -> InputRailResult:
         return InputRailResult()
 
-    def run_output_rails(self, answer: str, context_chunks: List[str]) -> OutputRailResult:
+    def run_output_rails(self, answer: str, context_chunks: list[str]) -> OutputRailResult:
         return OutputRailResult(final_answer=answer)
 
-    def redact_pii(self, text: str) -> Tuple[str, list]:
+    def redact_pii(self, text: str) -> tuple[str, list]:
         return text, []
 
 
@@ -95,7 +94,7 @@ def run_input_rails(query: str, tenant_id: str = "") -> InputRailResult:
     return _get_guardrail_backend().run_input_rails(query, tenant_id)
 
 
-def run_output_rails(answer: str, context_chunks: List[str]) -> OutputRailResult:
+def run_output_rails(answer: str, context_chunks: list[str]) -> OutputRailResult:
     """Run all output rails through the active backend.
 
     Args:
@@ -108,7 +107,7 @@ def run_output_rails(answer: str, context_chunks: List[str]) -> OutputRailResult
     return _get_guardrail_backend().run_output_rails(answer, context_chunks)
 
 
-def redact_pii(text: str) -> Tuple[str, list]:
+def redact_pii(text: str) -> tuple[str, list]:
     """Redact PII from text using the active backend.
 
     Args:
