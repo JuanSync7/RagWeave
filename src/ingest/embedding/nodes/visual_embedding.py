@@ -186,6 +186,18 @@ def _run_visual_embedding(
     minio_client = runtime.db_client  # Optional[Any]; None if not configured
     weaviate_client = runtime.weaviate_client
     document_id: str = state.get("document_id", "")
+    if not document_id:
+        logger.error(
+            "visual_embedding_node: document_id is empty — skipping MinIO operations"
+        )
+        return {
+            "visual_stored_count": 0,
+            "page_images": None,
+            "errors": [*(state.get("errors") or []), "visual_embedding:missing_document_id"],
+            "processing_log": append_processing_log(
+                state, "visual_embedding:error:no_document_id"
+            ),
+        }
     source_key: str = state.get("source_key", "")
     total_pages = len(page_data)
 

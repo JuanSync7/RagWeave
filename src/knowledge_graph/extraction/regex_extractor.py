@@ -172,18 +172,26 @@ class RegexEntityExtractor:
             for e in raw_entities
         ]
 
-        # raw_relations already returns List[Triple] from extract_relations
-        for triple in raw_relations:
-            triple.source = source
-            triple.extractor_source = self.extractor_name
+        # Construct new Triple objects to avoid mutating shared references.
+        triples: List[Triple] = [
+            Triple(
+                subject=t.subject,
+                predicate=t.predicate,
+                object=t.object,
+                source=source,
+                weight=t.weight,
+                extractor_source=self.extractor_name,
+            )
+            for t in raw_relations
+        ]
 
         logger.debug(
             "RegexEntityExtractor.extract: source=%r entities=%d triples=%d",
             source,
             len(entity_list),
-            len(raw_relations),
+            len(triples),
         )
-        return ExtractionResult(entities=entity_list, triples=raw_relations)
+        return ExtractionResult(entities=entity_list, triples=triples)
 
     # ------------------------------------------------------------------
     # Entity extraction
