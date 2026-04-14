@@ -1,7 +1,7 @@
 # @summary
 # Pure utility functions for 3-signal composite confidence scoring.
 # Exports: compute_retrieval_confidence, parse_llm_confidence, compute_citation_coverage, compute_composite_confidence
-# Deps: re, src.retrieval.generation.confidence.schemas
+# Deps: re, config.settings, src.retrieval.generation.confidence.schemas
 # @end-summary
 """Pure utility functions for composite confidence scoring.
 
@@ -10,7 +10,7 @@ They implement the 3-signal confidence model from the retrieval spec:
 
   composite = (W_r * retrieval) + (W_l * llm) + (W_c * citation)
 
-Default weights: retrieval=0.50, llm=0.25, citation=0.25.
+Default weights are read from config (see config/settings.py).
 """
 
 from __future__ import annotations
@@ -18,15 +18,24 @@ from __future__ import annotations
 import re
 from typing import List
 
+from config.settings import (
+    RAG_CONFIDENCE_CITATION_WEIGHT,
+    RAG_CONFIDENCE_LLM_HIGH_SCORE,
+    RAG_CONFIDENCE_LLM_LOW_SCORE,
+    RAG_CONFIDENCE_LLM_MEDIUM_SCORE,
+    RAG_CONFIDENCE_LLM_WEIGHT,
+    RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+)
 from src.retrieval.generation.confidence.schemas import ConfidenceBreakdown
 
 # Downward correction map for LLM overconfidence bias.
 # LLMs tend to report "high" even when evidence is weak,
-# so we map conservatively.
+# so we map conservatively.  Values are read from config so
+# operators can tune without code changes.
 LLM_CONFIDENCE_MAP = {
-    "high": 0.85,
-    "medium": 0.55,
-    "low": 0.25,
+    "high": RAG_CONFIDENCE_LLM_HIGH_SCORE,
+    "medium": RAG_CONFIDENCE_LLM_MEDIUM_SCORE,
+    "low": RAG_CONFIDENCE_LLM_LOW_SCORE,
 }
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -175,9 +184,9 @@ def compute_composite_confidence(
     llm_confidence_text: str,
     answer: str,
     retrieved_texts: List[str],
-    retrieval_weight: float = 0.50,
-    llm_weight: float = 0.25,
-    citation_weight: float = 0.25,
+    retrieval_weight: float = RAG_CONFIDENCE_RETRIEVAL_WEIGHT,
+    llm_weight: float = RAG_CONFIDENCE_LLM_WEIGHT,
+    citation_weight: float = RAG_CONFIDENCE_CITATION_WEIGHT,
 ) -> ConfidenceBreakdown:
     """Compute the 3-signal composite confidence score.
 

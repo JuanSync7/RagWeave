@@ -546,6 +546,15 @@ RAG_CONFIDENCE_CITATION_WEIGHT = float(
 RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES = int(
     os.environ.get("RAG_CONFIDENCE_RE_RETRIEVE_MAX_RETRIES", "1")
 )
+RAG_CONFIDENCE_LLM_HIGH_SCORE = float(
+    os.environ.get("RAG_CONFIDENCE_LLM_HIGH_SCORE", "0.85")
+)
+RAG_CONFIDENCE_LLM_MEDIUM_SCORE = float(
+    os.environ.get("RAG_CONFIDENCE_LLM_MEDIUM_SCORE", "0.55")
+)
+RAG_CONFIDENCE_LLM_LOW_SCORE = float(
+    os.environ.get("RAG_CONFIDENCE_LLM_LOW_SCORE", "0.25")
+)
 
 # --- Retrieval quality classification thresholds ---
 # Reranker best-score thresholds that map to the four retrieval_quality
