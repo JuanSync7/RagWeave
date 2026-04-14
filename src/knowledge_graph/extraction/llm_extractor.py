@@ -4,7 +4,8 @@
 # Validates results against SchemaDefinition, handles retries and rate limits.
 # Exports: LLMEntityExtractor
 # Deps: json, logging, time, src.knowledge_graph.common.schemas,
-#        src.knowledge_graph.common.types, src.platform.llm.provider
+#        src.knowledge_graph.common.types, src.platform.llm.provider,
+#        config.settings
 # @end-summary
 """LLM-based entity and relationship extraction.
 
@@ -297,8 +298,9 @@ class LLMEntityExtractor:
         Raises:
             Exception: Re-raises non-rate-limit errors after logging.
         """
-        max_rate_limit_retries = 3
-        backoff_seconds = 1.0
+        from config.settings import RAG_KG_LLM_RATE_LIMIT_RETRIES, RAG_KG_LLM_RATE_LIMIT_BACKOFF_S
+        max_rate_limit_retries = RAG_KG_LLM_RATE_LIMIT_RETRIES
+        backoff_seconds = RAG_KG_LLM_RATE_LIMIT_BACKOFF_S
 
         for attempt in range(max_rate_limit_retries + 1):
             try:
