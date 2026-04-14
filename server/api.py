@@ -63,7 +63,6 @@ from server.schemas import (
     QueryRequest,
 )
 import src.db as _db
-import src.vector_db as _vector_db
 
 # Use uvicorn's logger/formatter so API logs match server output
 # (INFO prefix + colorized level formatting).

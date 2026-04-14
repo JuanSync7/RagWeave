@@ -62,7 +62,6 @@ from src.ingest.common import (
     save_manifest,
     sha256_path,
 )
-from src.ingest.common import extract_keywords_fallback
 from src.ingest.common import (
     IngestFileResult,
     IngestionConfig,
