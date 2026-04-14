@@ -2,7 +2,7 @@
 # Output sanitization for generated answers: removes system prompt leakage,
 # document boundary markers, and template artifacts.
 # Exports: sanitize_answer
-# Deps: logging
+# Deps: logging, config.settings
 # @end-summary
 """Output sanitization for generated answers (REQ-704).
 
@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 from typing import List, Optional
+
+from config.settings import RAG_OUTPUT_SANITIZER_MIN_FRAGMENT
 
 logger = logging.getLogger("rag.output_sanitizer")
 
@@ -107,7 +109,7 @@ def _is_template_artifact(line: str) -> bool:
 def _is_prompt_fragment(
     line: str,
     system_prompt: str,
-    min_fragment_length: int = 40,
+    min_fragment_length: int = RAG_OUTPUT_SANITIZER_MIN_FRAGMENT,
 ) -> bool:
     """Check if a line is a leaked fragment of the system prompt.
 

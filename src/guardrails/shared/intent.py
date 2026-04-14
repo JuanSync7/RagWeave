@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from config.settings import RAG_NEMO_RAIL_TIMEOUT_SECONDS
+
 logger = logging.getLogger("rag.guardrails.intent")
 
 # Keyword-based fallback patterns for when LLM is unavailable
@@ -132,7 +134,7 @@ class IntentClassifier:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(asyncio.run, runtime.generate_async(messages))
-                    response = future.result(timeout=10)
+                    response = future.result(timeout=RAG_NEMO_RAIL_TIMEOUT_SECONDS)
             else:
                 response = asyncio.run(runtime.generate_async(messages))
         except RuntimeError:
