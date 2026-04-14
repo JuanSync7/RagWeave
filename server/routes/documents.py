@@ -111,7 +111,8 @@ def create_documents_router(
         collection: Optional[str] = Query(None, max_length=128),
         principal: Principal = Depends(authenticate_request),
     ) -> DocumentListResponse:
-        resolve_tenant_id(principal)
+        # Resolve effective tenant (captured for future multi-tenant filtering)
+        tenant_id = resolve_tenant_id(principal, None)
         try:
             minio_docs = db.list_documents(db_client, limit=1000)
         except Exception as exc:
@@ -182,7 +183,7 @@ def create_documents_router(
         document_id: str,
         principal: Principal = Depends(authenticate_request),
     ) -> DocumentDetailResponse:
-        resolve_tenant_id(principal)
+        tenant_id = resolve_tenant_id(principal, None)
         try:
             doc = db.get_document(db_client, document_id)
         except Exception as exc:
@@ -228,7 +229,7 @@ def create_documents_router(
         expires_in: int = Query(3600, ge=60, le=86400),
         principal: Principal = Depends(authenticate_request),
     ) -> DocumentUrlResponse:
-        resolve_tenant_id(principal)
+        tenant_id = resolve_tenant_id(principal, None)
         try:
             exists = db.document_exists(db_client, document_id)
         except Exception as exc:
@@ -266,7 +267,7 @@ def create_documents_router(
         collection: Optional[str] = Query(None, max_length=128),
         principal: Principal = Depends(authenticate_request),
     ) -> SourceListResponse:
-        resolve_tenant_id(principal)
+        tenant_id = resolve_tenant_id(principal, None)
         try:
             agg_rows = vector_db.aggregate_by_source(
                 vector_client,
@@ -313,7 +314,7 @@ def create_documents_router(
     async def list_collections_endpoint(
         principal: Principal = Depends(authenticate_request),
     ) -> CollectionListResponse:
-        resolve_tenant_id(principal)
+        tenant_id = resolve_tenant_id(principal, None)
         try:
             rows = vector_db.list_collections(vector_client)
         except Exception as exc:
@@ -337,7 +338,7 @@ def create_documents_router(
         collection_name: str,
         principal: Principal = Depends(authenticate_request),
     ) -> CollectionStatsResponse:
-        resolve_tenant_id(principal)
+        tenant_id = resolve_tenant_id(principal, None)
         try:
             stats = vector_db.get_collection_stats(
                 vector_client, collection=collection_name
