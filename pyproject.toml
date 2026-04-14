@@ -159,6 +159,9 @@ DEP003 = [
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+markers = [
+    "benchmark: performance benchmarks (deselect with '-m not benchmark')",
+]
 
 [dependency-groups]
 dev = [
