@@ -1,8 +1,10 @@
 # @summary
-# Empty file. Provides no purpose, exports, or dependencies.
+# Core package public API: local BGE embeddings and legacy knowledge graph builder.
+# Exports: LocalBGEEmbeddings, EntityExtractor, GraphQueryExpander, KnowledgeGraphBuilder, export_obsidian
+# Deps: src.core.embeddings, src.core.knowledge_graph
 # @end-summary
+"""Core subsystem — local embedding models and legacy knowledge graph."""
 
-# --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.core.embeddings import LocalBGEEmbeddings
 from src.core.knowledge_graph import (
     EntityExtractor,
@@ -10,3 +12,11 @@ from src.core.knowledge_graph import (
     KnowledgeGraphBuilder,
     export_obsidian,
 )
+
+__all__ = [
+    "LocalBGEEmbeddings",
+    "EntityExtractor",
+    "GraphQueryExpander",
+    "KnowledgeGraphBuilder",
+    "export_obsidian",
+]
