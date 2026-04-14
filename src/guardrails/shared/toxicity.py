@@ -2,7 +2,7 @@
 # Toxicity detection rail using NeMo self-check prompts with keyword fallback.
 # Runtime injected at construction — no direct GuardrailsRuntime.get() call.
 # Exports: ToxicityFilter, ToxicityResult
-# Deps: src.guardrails.common.schemas, config.settings, logging, re
+# Deps: src.guardrails.common.schemas, config.settings, src.retrieval, logging, re
 # @end-summary
 """Toxicity filtering rail.
 
@@ -147,9 +147,9 @@ class ToxicityFilter:
         else:
             prompt = _SELF_CHECK_INPUT_PROMPT.format(text=text)
 
-        from src.retrieval.query.nodes import _call_ollama
+        from src.retrieval import call_ollama
 
-        result = _call_ollama(
+        result = call_ollama(
             prompt,
             system="You are a content safety classifier. Output only 'yes' or 'no'.",
         )

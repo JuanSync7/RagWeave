@@ -2,7 +2,7 @@
 # Temporal worker that preloads RAGChain at startup, then processes query
 # activities. Models load once (~22s) and stay in GPU memory for all requests.
 # Exports: main
-# Deps: temporalio, server.activities, server.workflows, config.settings
+# Deps: temporalio, server.activities, server.workflows, config.settings, src.retrieval
 # @end-summary
 """Temporal worker — the process where GPU models live.
 
@@ -72,7 +72,7 @@ async def main() -> None:
     logger.info("Models loaded in %.1fs — ready to serve queries", time.time() - start)
 
     # Phase 1b: Pre-warm Ollama so the first query doesn't pay cold-start cost
-    from src.retrieval.query.nodes import warm_up_ollama
+    from src.retrieval import warm_up_ollama
     warm_up_ollama()
 
     # Phase 2: Connect to Temporal

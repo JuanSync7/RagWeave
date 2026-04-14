@@ -2,7 +2,7 @@
 # Faithfulness and hallucination detection rail using NeMo self-check-facts
 # approach with claim scoring, entity hallucination detection, and LLM fallback.
 # Exports: FaithfulnessChecker, FaithfulnessResult, ClaimScore
-# Deps: config.settings, logging, re, json
+# Deps: config.settings, src.retrieval, src.common, logging, re, json
 # @end-summary
 """Faithfulness and hallucination detection rail.
 
@@ -250,9 +250,9 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query.nodes import _call_ollama
+            from src.retrieval import call_ollama
 
-            response = _call_ollama(
+            response = call_ollama(
                 prompt,
                 system=(
                     "You are a faithfulness evaluator. Output only a number "
@@ -298,10 +298,10 @@ class FaithfulnessChecker:
         )
 
         try:
-            from src.retrieval.query.nodes import _call_ollama
+            from src.retrieval import call_ollama
             from src.common import parse_json_object
 
-            response = _call_ollama(
+            response = call_ollama(
                 prompt,
                 system="You are a faithfulness evaluator. Output only JSON.",
             )

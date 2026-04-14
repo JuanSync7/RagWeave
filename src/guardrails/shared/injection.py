@@ -3,7 +3,7 @@
 # classifier, regex patterns, and LLM fallback. Defense-in-depth layered approach.
 # Runtime injected at construction — no direct GuardrailsRuntime.get() call.
 # Exports: InjectionDetector, InjectionResult
-# Deps: src.guardrails.common.schemas, config.settings, logging, hashlib, re
+# Deps: src.guardrails.common.schemas, config.settings, src.retrieval, src.common, logging, hashlib, re
 # @end-summary
 """Injection and jailbreak detection rail.
 
@@ -301,10 +301,10 @@ class InjectionDetector:
             f"<msg>{query}</msg>"
         )
 
-        from src.retrieval.query.nodes import _call_ollama
+        from src.retrieval import call_ollama
         from src.common import parse_json_object
 
-        result = _call_ollama(
+        result = call_ollama(
             prompt, system="You are a security classifier. Output only JSON."
         )
         if result:

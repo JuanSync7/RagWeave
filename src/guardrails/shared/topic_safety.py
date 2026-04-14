@@ -3,7 +3,7 @@
 # Adapted from NeMo's built-in topic_safety library action.
 # Runtime injected at construction — no direct GuardrailsRuntime.get() call.
 # Exports: TopicSafetyChecker, TopicSafetyResult
-# Deps: src.guardrails.common.schemas, logging
+# Deps: src.guardrails.common.schemas, src.retrieval, logging
 # @end-summary
 """Topic safety rail for off-topic query detection.
 
@@ -132,9 +132,9 @@ class TopicSafetyChecker:
             `TopicSafetyResult` derived from the LLM's "on-topic"/"off-topic"
             response.
         """
-        from src.retrieval.query.nodes import _call_ollama
+        from src.retrieval import call_ollama
 
-        result = _call_ollama(
+        result = call_ollama(
             f"User message: {query}",
             system=self._system_prompt,
         )
