@@ -2,6 +2,7 @@
 # GraphStorageBackend ABC: formal swappable backend contract for all KG storage implementations.
 # Exports: GraphStorageBackend, RemovalStats, MergeReport
 # Deps: abc, dataclasses, pathlib, typing, src.knowledge_graph.common.schemas
+# Notable: query_neighbors_typed added (REQ-KG-760) for edge-type-filtered traversal.
 # @end-summary
 """GraphStorageBackend — abstract base class for all KG storage backends.
 
@@ -195,6 +196,30 @@ class GraphStorageBackend(ABC):
 
         Returns:
             Deduplicated list of neighbour ``Entity`` objects (seed excluded).
+        """
+        ...
+
+    @abstractmethod
+    def query_neighbors_typed(
+        self,
+        entity: str,
+        edge_types: List[str],
+        depth: int = 1,
+    ) -> List["Entity"]:
+        """Return neighbors reachable via edges whose type is in edge_types.
+
+        REQ-KG-760: Backends filter by edge type natively when possible.
+
+        Args:
+            entity: Name of the seed entity.
+            edge_types: Non-empty whitelist of edge type labels.
+            depth: Maximum hop depth (>= 1).
+
+        Returns:
+            Deduplicated Entity list within depth hops via matching edges.
+
+        Raises:
+            ValueError: If edge_types is empty or depth < 1.
         """
         ...
 

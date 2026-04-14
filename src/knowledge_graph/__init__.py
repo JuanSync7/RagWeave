@@ -8,6 +8,10 @@
 # Deps: config.settings, src.knowledge_graph.backend,
 #       src.knowledge_graph.backends.*, src.knowledge_graph.query.*,
 #       src.knowledge_graph.community.*, src.knowledge_graph.export.obsidian
+# Retrieval settings (REQ-KG-1200..1206) loaded from config.settings when present.
+# Retrieval config validated at startup via common.validation (REQ-KG-1208).
+# get_query_expander passes full KGConfig to GraphQueryExpander (REQ-KG-762) so
+# typed traversal dispatch is available.
 # @end-summary
 """Public API for the knowledge graph subsystem.
 
@@ -120,6 +124,43 @@ def _build_kg_config() -> KGConfig:
             _kg_config.community_max_levels = RAG_KG_COMMUNITY_MAX_LEVELS
         except ImportError:
             pass  # Phase 3 settings not yet in config
+        # Load Retrieval settings if available
+        try:
+            from config.settings import (
+                RAG_KG_RETRIEVAL_EDGE_TYPES,
+                RAG_KG_RETRIEVAL_PATH_PATTERNS,
+                RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET,
+                RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION,
+            )
+            _kg_config.retrieval_edge_types = RAG_KG_RETRIEVAL_EDGE_TYPES
+            _kg_config.retrieval_path_patterns = RAG_KG_RETRIEVAL_PATH_PATTERNS
+            _kg_config.graph_context_token_budget = RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET
+            _kg_config.enable_graph_context_injection = RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION
+        except ImportError:
+            pass  # Retrieval settings not yet in config
+        # Validate retrieval config at startup (REQ-KG-1208)
+        if _kg_config.enable_graph_context_injection:
+            try:
+                from src.knowledge_graph.common.validation import (
+                    validate_edge_types,
+                    validate_path_patterns,
+                )
+                if _kg_config.retrieval_edge_types:
+                    validate_edge_types(
+                        _kg_config.retrieval_edge_types,
+                        _kg_config.schema_path,
+                    )
+                if _kg_config.retrieval_path_patterns:
+                    warnings = validate_path_patterns(
+                        _kg_config.retrieval_path_patterns,
+                        _kg_config.schema_path,
+                    )
+                    for w in warnings:
+                        logger.warning(
+                            "Path pattern validation: %s", w.message
+                        )
+            except ImportError:
+                pass  # Validation module not available
     except ImportError:
         _kg_config = KGConfig()
     return _kg_config
@@ -238,6 +279,7 @@ def get_query_expander(
         max_terms=config.max_expansion_terms,
         community_detector=community_detector,
         enable_global_retrieval=config.enable_global_retrieval,
+        config=config,
     )
 
 

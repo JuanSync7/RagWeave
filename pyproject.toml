@@ -156,6 +156,9 @@ DEP003 = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "benchmark: performance benchmarks (deselect with '-m not benchmark')",
+]
 
 [dependency-groups]
 dev = [

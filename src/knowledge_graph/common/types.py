@@ -2,6 +2,9 @@
 # Configuration types and YAML schema loader for the KG subsystem.
 # Exports: NodeTypeDefinition, EdgeTypeDefinition, SchemaDefinition, KGConfig, load_schema
 # Deps: dataclasses, typing, yaml, logging
+# New retrieval fields on KGConfig: retrieval_edge_types, retrieval_path_patterns,
+#   graph_context_token_budget, enable_graph_context_injection (REQ-KG-1200..1206),
+#   strict_path_validation (REQ-KG-778)
 # @end-summary
 """Configuration and schema types for the KG subsystem.
 
@@ -216,6 +219,22 @@ class KGConfig:
     community_max_levels: int = 3
     """Maximum recursion depth for hierarchical Leiden community detection."""
 
+    # Retrieval enhancements
+    retrieval_edge_types: List[str] = field(default_factory=list)
+    """REQ-KG-1200: Edge type whitelist for typed traversal. Empty = untyped."""
+
+    retrieval_path_patterns: List[List[str]] = field(default_factory=list)
+    """REQ-KG-1202: Ordered edge type sequences for path pattern matching."""
+
+    graph_context_token_budget: int = 500
+    """REQ-KG-1204: Max tokens for graph context block in generation prompt."""
+
+    enable_graph_context_injection: bool = False
+    """REQ-KG-1206: Master toggle. False = skip all retrieval enhancements."""
+
+    strict_path_validation: bool = False
+    """REQ-KG-778: When True, PatternWarning promoted to KGConfigValidationError."""
+
     def __post_init__(self) -> None:
         if self.community_min_size < 1:
             raise ValueError(f"community_min_size must be >= 1, got {self.community_min_size}")
@@ -230,6 +249,8 @@ class KGConfig:
             raise ValueError(
                 f"community_max_levels must be >= 1, got {self.community_max_levels}"
             )
+        if self.graph_context_token_budget < 0:
+            raise ValueError("graph_context_token_budget must be >= 0")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 # @summary
 # LLM generator for RAG answer synthesis, backed by LiteLLM Router.
-# Main exports: OllamaGenerator, _get_system_prompt. Deps: typing, config.settings, src.platform.llm
+# Main exports: OllamaGenerator, _get_system_prompt, _render_graph_context_section.
+# Deps: typing, config.settings, src.platform.llm
 # @end-summary
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
 
@@ -71,6 +72,21 @@ _RAG_RESPONSE_FORMAT_STRICT = {
 # The prompt instructs the schema; validation catches bad values.
 _RAG_RESPONSE_FORMAT_BASIC = {"type": "json_object"}
 
+def _render_graph_context_section(graph_context: str) -> str:
+    """Render graph context for prompt injection.
+
+    REQ-KG-794: Positioned before document chunks.
+    REQ-KG-796: When empty, returns "" — no placeholder, no heading.
+
+    The graph_context string already includes section markers from
+    GraphContextFormatter (e.g. "## Graph Context\\n### Entities\\n..."),
+    so this helper simply passes it through when non-empty.
+    """
+    if not graph_context:
+        return ""
+    return graph_context
+
+
 def _build_user_prompt(context: str, question: str) -> str:
     """Build user prompt via concatenation — safe against curly braces in documents.
 
@@ -124,16 +140,24 @@ class OllamaGenerator:
         scores: Optional[List[float]] = None,
         memory_context: Optional[str] = None,
         recent_turns: Optional[List[dict]] = None,
+        graph_context: str = "",
     ) -> list[dict]:
         if scores:
-            context = "\n\n".join(
+            doc_context = "\n\n".join(
                 f"[{i+1}] (relevance: {score:.0%}) {chunk}"
                 for i, (chunk, score) in enumerate(zip(context_chunks, scores))
             )
         else:
-            context = "\n\n".join(
+            doc_context = "\n\n".join(
                 f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks)
             )
+        # REQ-KG-794: graph context section positioned before document chunks.
+        # REQ-KG-796: omitted entirely when empty — no placeholder or heading.
+        graph_section = _render_graph_context_section(graph_context)
+        if graph_section:
+            context = graph_section + "\n\n" + doc_context
+        else:
+            context = doc_context
         user_message = _build_user_prompt(context, query)
         messages: list[dict] = [{"role": "system", "content": _get_system_prompt()}]
         if memory_context:
@@ -164,6 +188,7 @@ class OllamaGenerator:
         scores: Optional[List[float]] = None,
         memory_context: Optional[str] = None,
         recent_turns: Optional[List[dict]] = None,
+        graph_context: str = "",
     ) -> Optional[str]:
         """Generate an answer using retrieved context chunks.
 
@@ -171,6 +196,10 @@ class OllamaGenerator:
             query: The user's question.
             context_chunks: List of relevant text chunks from retrieval.
             scores: Optional reranker scores (0.0-1.0) for each chunk.
+            graph_context: Optional pre-formatted KG context string.
+                When non-empty it is placed before document chunks in the
+                prompt (REQ-KG-794).  When empty, it is omitted entirely
+                with no placeholder or heading (REQ-KG-796).
 
         Returns:
             Generated answer string, or None if generation fails.
@@ -184,6 +213,7 @@ class OllamaGenerator:
             scores,
             memory_context=memory_context,
             recent_turns=recent_turns,
+            graph_context=graph_context,
         )
 
         with get_tracer().span(
@@ -265,11 +295,13 @@ class OllamaGenerator:
         scores: Optional[List[float]] = None,
         memory_context: Optional[str] = None,
         recent_turns: Optional[List[dict]] = None,
+        graph_context: str = "",
     ):
         """Stream tokens from LLM. Yields content strings as they arrive.
 
         Same prompt as generate(), but uses streaming mode so callers
-        can display tokens incrementally.
+        can display tokens incrementally.  Accepts graph_context for
+        consistency with generate() (REQ-KG-794, REQ-KG-796).
         """
         if not context_chunks:
             return
@@ -280,6 +312,7 @@ class OllamaGenerator:
             scores,
             memory_context=memory_context,
             recent_turns=recent_turns,
+            graph_context=graph_context,
         )
 
         try:

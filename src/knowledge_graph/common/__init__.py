@@ -13,3 +13,9 @@ from src.knowledge_graph.common.types import (
     load_schema,
 )
 from src.knowledge_graph.common.utils import derive_gliner_labels
+from src.knowledge_graph.common.validation import (
+    KGConfigValidationError,
+    PatternWarning,
+    validate_edge_types,
+    validate_path_patterns,
+)

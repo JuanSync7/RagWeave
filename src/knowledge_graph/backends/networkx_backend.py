@@ -2,6 +2,7 @@
 # NetworkX-based concrete implementation of GraphStorageBackend.
 # Exports: NetworkXBackend
 # Deps: networkx, orjson, src.knowledge_graph.backend, src.knowledge_graph.common.schemas
+# Notable: query_neighbors_typed added (REQ-KG-760) — BFS filtered by edge predicate whitelist.
 # @end-summary
 """NetworkX-based graph storage backend.
 
@@ -440,6 +441,76 @@ class NetworkXBackend(GraphStorageBackend):
 
         # Exclude the seed entity itself
         neighbor_names.discard(canonical)
+
+        entities: List[Entity] = []
+        for n in neighbor_names:
+            ent = self.get_entity(n)
+            if ent is not None:
+                entities.append(ent)
+        return entities
+
+    def query_neighbors_typed(
+        self,
+        entity: str,
+        edge_types: List[str],
+        depth: int = 1,
+    ) -> List[Entity]:
+        """Return neighbors reachable via edges whose type is in edge_types.
+
+        Performs BFS up to *depth* hops, traversing both outgoing and incoming
+        edges.  Only edges whose ``relation`` predicate appears in *edge_types*
+        are followed.
+
+        REQ-KG-760: edge-type filtering applied natively on the NetworkX graph.
+
+        Args:
+            entity: Name of the seed entity.
+            edge_types: Non-empty whitelist of edge type labels.
+            depth: Maximum hop depth (>= 1).
+
+        Returns:
+            Deduplicated Entity list within depth hops via matching edges.
+
+        Raises:
+            ValueError: If edge_types is empty or depth < 1.
+        """
+        if not edge_types:
+            raise ValueError("edge_types must be a non-empty list")
+        if depth < 1:
+            raise ValueError("depth must be >= 1")
+
+        edge_types_set: set[str] = set(edge_types)
+        canonical = self._resolve(entity)
+        if not self.graph.has_node(canonical):
+            return []
+
+        visited: set[str] = {canonical}
+        # BFS queue: (node_name, current_depth)
+        queue: list[tuple[str, int]] = [(canonical, 0)]
+        neighbor_names: set[str] = set()
+
+        while queue:
+            current, current_depth = queue.pop(0)
+            if current_depth >= depth:
+                continue
+
+            # Outgoing edges
+            for triple in self.get_outgoing_edges(current):
+                if triple.predicate in edge_types_set:
+                    neighbor = triple.object
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        neighbor_names.add(neighbor)
+                        queue.append((neighbor, current_depth + 1))
+
+            # Incoming edges
+            for triple in self.get_incoming_edges(current):
+                if triple.predicate in edge_types_set:
+                    neighbor = triple.subject
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        neighbor_names.add(neighbor)
+                        queue.append((neighbor, current_depth + 1))
 
         entities: List[Entity] = []
         for n in neighbor_names:

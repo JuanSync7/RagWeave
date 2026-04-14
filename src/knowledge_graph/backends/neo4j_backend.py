@@ -5,6 +5,7 @@
 # Exports: Neo4jBackend
 # Deps: neo4j, orjson, logging, src.knowledge_graph.backend,
 #        src.knowledge_graph.common.schemas, src.knowledge_graph.common.types
+# Notable: query_neighbors_typed added (REQ-KG-760) — Cypher filters by r.relation whitelist.
 # @end-summary
 """Neo4j-based graph storage backend.
 
@@ -680,6 +681,68 @@ class Neo4jBackend(GraphStorageBackend):
             if ent.name not in seen:
                 entities.append(ent)
                 seen.add(ent.name)
+        return entities
+
+    def query_neighbors_typed(
+        self,
+        entity: str,
+        edge_types: List[str],
+        depth: int = 1,
+    ) -> List[Entity]:
+        """Return neighbors reachable via edges whose type is in edge_types.
+
+        Issues two Cypher queries (outgoing and incoming) with a variable-length
+        path that constrains every relationship's ``relation`` property to the
+        provided whitelist.  The depth literal is embedded directly in the query
+        string because Neo4j does not accept parameters in ``[*m..n]`` ranges.
+
+        REQ-KG-760: edge-type filtering applied natively via Cypher WHERE clause.
+
+        Args:
+            entity: Name of the seed entity.
+            edge_types: Non-empty whitelist of edge type labels.
+            depth: Maximum hop depth (>= 1).
+
+        Returns:
+            Deduplicated Entity list within depth hops via matching edges.
+
+        Raises:
+            ValueError: If edge_types is empty or depth < 1.
+        """
+        if not edge_types:
+            raise ValueError("edge_types must be a non-empty list")
+        if depth < 1:
+            raise ValueError("depth must be >= 1")
+
+        safe_depth = int(depth)
+
+        # Outgoing: seed --> ... --> neighbor, all hops must match edge_types
+        outgoing_query = f"""
+        MATCH (seed:Entity {{name_lower: toLower($entity)}})-[r*1..{safe_depth}]->(neighbor:Entity)
+        WHERE ALL(rel IN r WHERE rel.relation IN $edge_types)
+          AND neighbor <> seed
+        RETURN DISTINCT neighbor AS e
+        """
+
+        # Incoming: neighbor --> ... --> seed, all hops must match edge_types
+        incoming_query = f"""
+        MATCH (neighbor:Entity)-[r*1..{safe_depth}]->(seed:Entity {{name_lower: toLower($entity)}})
+        WHERE ALL(rel IN r WHERE rel.relation IN $edge_types)
+          AND neighbor <> seed
+        RETURN DISTINCT neighbor AS e
+        """
+
+        seen: set = set()
+        entities: List[Entity] = []
+
+        for query in (outgoing_query, incoming_query):
+            records = self._run_read(query, entity=entity, edge_types=list(edge_types))
+            for rec in records:
+                ent = self._to_entity(rec)
+                if ent.name not in seen:
+                    entities.append(ent)
+                    seen.add(ent.name)
+
         return entities
 
     def get_predecessors(self, entity: str) -> List[Entity]:

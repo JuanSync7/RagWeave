@@ -1,6 +1,8 @@
 # @summary
 # End-to-end RAG pipeline for query processing, KG expansion, hybrid search, reranking,
-# visual retrieval, and LLM generation.
+# visual retrieval, and LLM generation.  KG graph_context (REQ-KG-794, REQ-KG-796) is
+# threaded from expansion to the generator prompt, placed before document chunks when
+# non-empty and omitted entirely when empty.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
@@ -643,9 +645,17 @@ class RAGChain:
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
                 kg_expanded_terms = []
+                graph_context = ""
                 if self._kg_expander:
-                    kg_expanded_terms = self._kg_expander.expand(processed_query, depth=1)
+                    expansion_result = self._kg_expander.expand(processed_query, depth=1)
+                    kg_expanded_terms = (
+                        expansion_result.terms
+                        if hasattr(expansion_result, "terms")
+                        else list(expansion_result)
+                    )
+                    graph_context = getattr(expansion_result, "graph_context", "")
                 kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
+                kg_span.set_attribute("kg_graph_context_len", len(graph_context))
             tp.record("kg_expansion", "retrieval", started_at=t0)
             if tp.check_stage_budget("kg_expansion"):
                 tp.mark_budget_exhausted("kg_expansion")
@@ -995,6 +1005,7 @@ class RAGChain:
                                 scores=None,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
+                                graph_context=graph_context,
                             )
                         else:
                             generated_answer = self._generator.generate(
@@ -1003,6 +1014,7 @@ class RAGChain:
                                 scores=scores,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
+                                graph_context=graph_context,
                             )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 tp.record("generation", "generation", started_at=t0)
