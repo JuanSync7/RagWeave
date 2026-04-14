@@ -229,11 +229,12 @@ class OllamaGenerator:
                     model_alias="default",
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
+                    response_format=self._response_format,
                 )
                 self._last_response = response
                 raw_content = response.content or None
                 if raw_content:
-                    answer, confidence = self._extract_confidence_from_text(raw_content)
+                    answer, confidence = self._parse_structured_response(raw_content)
                     self._last_llm_confidence = confidence
                     span.set_attribute("llm_confidence", confidence)
                     return answer

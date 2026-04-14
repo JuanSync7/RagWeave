@@ -74,8 +74,14 @@ class GLiNEREntityExtractor:
     detection and relation extraction to the regex-based EntityExtractor.
     """
 
-    def __init__(self, model_path: str = None):
-        from gliner import GLiNER
+    def __init__(self, model_path: str | None = None):
+        try:
+            from gliner import GLiNER
+        except ImportError:
+            raise ImportError(
+                "GLiNER is required for GLiNEREntityExtractor. "
+                "Install it with: pip install ragweave[gliner]"
+            ) from None
         from config.settings import GLINER_MODEL_PATH, GLINER_ENTITY_LABELS
 
         model_path = model_path or GLINER_MODEL_PATH

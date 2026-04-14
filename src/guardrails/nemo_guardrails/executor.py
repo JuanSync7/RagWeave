@@ -42,29 +42,25 @@ from src.platform import measure_ms
 logger = logging.getLogger("rag.guardrails.executor")
 
 # Prometheus metrics for guardrails (REQ-905)
-try:
-    from prometheus_client import Counter, Histogram
+# prometheus_client is a main dependency and already loaded via src.platform above.
+from prometheus_client import Counter, Histogram
 
-    GUARDRAIL_EXECUTIONS = Counter(
-        "rag_guardrail_executions_total",
-        "Total guardrail executions",
-        ["rail_name", "verdict"],
-    )
-    GUARDRAIL_EXECUTION_MS = Histogram(
-        "rag_guardrail_execution_ms",
-        "Guardrail execution time in milliseconds",
-        ["rail_name"],
-        buckets=[10, 50, 100, 250, 500, 1000, 2000, 5000, 10000],
-    )
-    GUARDRAIL_REJECTIONS = Counter(
-        "rag_guardrail_rejections_total",
-        "Total guardrail rejections",
-        ["rail_name", "reason"],
-    )
-except ImportError:
-    GUARDRAIL_EXECUTIONS = None
-    GUARDRAIL_EXECUTION_MS = None
-    GUARDRAIL_REJECTIONS = None
+GUARDRAIL_EXECUTIONS = Counter(
+    "rag_guardrail_executions_total",
+    "Total guardrail executions",
+    ["rail_name", "verdict"],
+)
+GUARDRAIL_EXECUTION_MS = Histogram(
+    "rag_guardrail_execution_ms",
+    "Guardrail execution time in milliseconds",
+    ["rail_name"],
+    buckets=[10, 50, 100, 250, 500, 1000, 2000, 5000, 10000],
+)
+GUARDRAIL_REJECTIONS = Counter(
+    "rag_guardrail_rejections_total",
+    "Total guardrail rejections",
+    ["rail_name", "reason"],
+)
 
 
 def _record_metric(rail_name: str, verdict: RailVerdict, ms: float) -> None:

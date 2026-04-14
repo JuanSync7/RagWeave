@@ -28,7 +28,7 @@ def text_cleaning_node(state: DocumentProcessingState) -> dict[str, Any]:
         ``processing_log``.
     """
     cleaned = clean_document(state["raw_text"])
-    if state["multimodal_notes"]:
+    if state.get("multimodal_notes"):
         cleaned += _FIGURE_NOTES_HEADER + "\n".join(
             f"- {note}" for note in state["multimodal_notes"]
         )

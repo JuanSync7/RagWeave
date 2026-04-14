@@ -32,8 +32,8 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         updated ``processing_log``.
     """
     config = state["runtime"].config
-    original_text = state["raw_text"]
-    refactored_text = state["refactored_text"] or state["cleaned_text"] or state["raw_text"]
+    original_text = state.get("raw_text", "")
+    refactored_text = state.get("refactored_text") or state.get("cleaned_text") or state.get("raw_text", "")
     origin_label = "refactored" if config.enable_document_refactoring else "original"
     original_cursor = 0
     refactored_cursor = 0

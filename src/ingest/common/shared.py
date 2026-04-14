@@ -108,7 +108,7 @@ def append_processing_log(state: IngestState, message: str) -> list[str]:
     config = getattr(runtime, "config", None)
     if bool(getattr(config, "verbose_stage_logs", False)):
         logger.info("source=%s stage=%s", state.get("source_name", "<unknown>"), message)
-    return [*state["processing_log"], message]
+    return [*state.get("processing_log", []), message]
 
 
 def _locate_span(haystack: str, needle: str, cursor: int) -> tuple[int, int, str]:

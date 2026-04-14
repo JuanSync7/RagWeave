@@ -71,6 +71,7 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
                 parser_model=config.docling_model,
                 artifacts_path=config.docling_artifacts_path,
                 vlm_mode=config.vlm_mode,
+                generate_page_images=config.generate_page_images,
             )
             parsed_text = parsed.text_markdown
             figures = list(parsed.figures)

@@ -58,7 +58,7 @@ from server.routes import (
     create_query_router,
     create_system_router,
 )
-from server.utils import console_ok as _console_ok, error_payload as _error_payload, validate_startup_config as _validate_startup_config
+from server.utils import console_ok as _console_ok, error_payload as _error_payload, validate_optional_dependencies as _validate_optional_dependencies, validate_startup_config as _validate_startup_config
 from server.schemas import (
     QueryRequest,
 )
@@ -151,6 +151,7 @@ def _release_request_slot(acquired: bool) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_startup_config()
+    _validate_optional_dependencies()
     global _temporal_client
     logger.info("Connecting to Temporal at %s", TEMPORAL_TARGET_HOST)
     _temporal_client = await Client.connect(TEMPORAL_TARGET_HOST)

@@ -260,13 +260,13 @@ class GLiNEREntityExtractor:
 
         triples: List[Triple] = [
             Triple(
-                subject=subj,
-                predicate=pred,
-                object=obj,
+                subject=t.subject,
+                predicate=t.predicate,
+                object=t.object,
                 source=source,
                 extractor_source=_EXTRACTOR_NAME,
             )
-            for subj, pred, obj in raw_triples
+            for t in raw_triples
         ]
 
         return ExtractionResult(entities=entities, triples=triples)
