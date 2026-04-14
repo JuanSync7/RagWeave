@@ -305,10 +305,7 @@ class RAGChain:
             vs_span.set_attribute("result_count", len(page_records))
 
         # FR-607: generate presigned URLs per result (per-page isolation — NFR-905)
-        from src.db.minio import (
-            create_client,
-            get_page_image_url,
-        )
+        from src.db import create_client, get_page_image_url
 
         results: List[VisualPageResult] = []
         with self.tracer.span("visual_retrieval.presigned_urls"):

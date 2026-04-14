@@ -3,7 +3,7 @@
 # Extracts page images via Docling, stores in MinIO, embeds via ColQwen2,
 # indexes in Weaviate visual collection.
 # Exports: visual_embedding_node
-# Deps: src.ingest.support.colqwen, src.db.minio.store,
+# Deps: src.ingest.support.colqwen, src.db,
 #       src.vector_db.weaviate.visual_store, src.ingest.common.shared
 # @end-summary
 
@@ -35,10 +35,7 @@ from typing import Any
 
 from PIL import Image
 
-from src.db.minio import (
-    delete_page_images,
-    store_page_images,
-)
+from src.db import delete_page_images, store_page_images
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 from src.ingest.support import (

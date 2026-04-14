@@ -2,7 +2,8 @@
 # Public API for the db subsystem: config-driven backend dispatcher and document store functions.
 # Exports: create_persistent_client, get_client, close_client, ensure_bucket,
 #          put_document, get_document, delete_document, document_exists, get_document_url,
-#          list_documents, build_document_id, StoredDocument
+#          list_documents, build_document_id, StoredDocument,
+#          create_client, store_page_images, delete_page_images, get_page_image_url
 # Deps: config.settings, src.db.backend, src.db.common.schemas, src.db.minio.store
 # @end-summary
 """Public API for the document store subsystem (MinIO and future backends).
@@ -19,7 +20,14 @@ from typing import Any, Generator, Optional
 
 from src.db.backend import DocumentBackend
 from src.db.common import StoredDocument
-from src.db.minio import build_document_id
+from src.db.minio import (
+    build_document_id,
+    # Visual image operations
+    create_client,
+    delete_page_images,
+    get_page_image_url,
+    store_page_images,
+)
 
 logger = logging.getLogger("rag.db")
 
@@ -168,6 +176,11 @@ __all__ = [
     "document_exists",
     "get_document_url",
     "list_documents",
+    # Visual image operations
+    "create_client",
+    "delete_page_images",
+    "get_page_image_url",
+    "store_page_images",
     # Re-exported schemas and utilities
     "StoredDocument",
     "build_document_id",

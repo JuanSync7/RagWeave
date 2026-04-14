@@ -3,7 +3,7 @@
 # Key exports: LocalBGEReranker, RankedResult
 # Deps: transformers, torch, config.settings (RERANKER_MODEL_PATH, RERANK_TOP_K,
 #       RERANKER_MAX_LENGTH, RERANKER_BATCH_SIZE, RERANKER_PRECISION),
-#       src.vector_db.common.schemas, src.retrieval.common.schemas,
+#       src.vector_db, src.retrieval.common.schemas,
 #       src.retrieval.common.exceptions
 # @end-summary
 """Local BAAI bge-reranker-v2-m3 wrapper for reranking search results.
@@ -28,7 +28,7 @@ from config.settings import (
     RERANKER_PRECISION,
 )
 from src.platform.observability import get_tracer
-from src.vector_db.common import SearchResult
+from src.vector_db import SearchResult
 from src.retrieval.common import RankedResult
 from src.retrieval.common import ModelLoadError
 
