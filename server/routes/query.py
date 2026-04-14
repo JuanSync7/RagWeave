@@ -489,8 +489,8 @@ def create_query_router(
                     )
                     return
 
-                context_texts = [c["text"] for c in chunks]
-                scores = [c["score"] for c in chunks]
+                context_texts = [c.get("text", "") for c in chunks]
+                scores = [c.get("score", 0.0) for c in chunks]
                 gen_start = time.perf_counter()
                 token_count = 0
                 generation_stages: list[dict] = []
@@ -531,7 +531,7 @@ def create_query_router(
                         "token_budget": _stream_token_budget,
                     },
                 )
-                if request.memory_enabled:
+                if request.memory_enabled and stream_error_message is None:
                     mem_start = time.perf_counter()
                     memory.append_turn(
                         tenant_id=tenant_id,

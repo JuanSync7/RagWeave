@@ -63,6 +63,10 @@ class LocalRetryProvider(RetryProvider):
                 time.sleep(backoff)
                 backoff = min(backoff * policy.backoff_multiplier, policy.max_backoff_seconds)
 
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError(
+                f"Unexpected state: {operation_name} exhausted {policy.max_attempts} "
+                "attempts but no exception was raised"
+            )
         raise last_error
 
