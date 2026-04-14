@@ -117,6 +117,11 @@ RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET: int = int(
 RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION: bool = os.environ.get(
     "RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION", "false"
 ).lower() in ("true", "1", "yes")
+# LLM extraction rate-limit retry policy
+RAG_KG_LLM_RATE_LIMIT_RETRIES = int(os.environ.get("RAG_KG_LLM_RATE_LIMIT_RETRIES", "3"))
+RAG_KG_LLM_RATE_LIMIT_BACKOFF_S = float(os.environ.get("RAG_KG_LLM_RATE_LIMIT_BACKOFF_S", "1.0"))
+# GLiNER entity prediction confidence threshold
+RAG_KG_GLINER_THRESHOLD = float(os.environ.get("RAG_KG_GLINER_THRESHOLD", "0.5"))
 
 # --- Semantic Chunking ---
 SEMANTIC_CHUNKING_ENABLED = os.environ.get(

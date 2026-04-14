@@ -2,7 +2,8 @@
 # GLiNER-based zero-shot NER entity extractor for the KG subsystem.
 # Exports: GLiNEREntityExtractor
 # Deps: re, logging, typing, src.knowledge_graph.common.schemas, src.knowledge_graph.common.types,
-#       src.knowledge_graph.common.utils, src.knowledge_graph.extraction.regex_extractor
+#       src.knowledge_graph.common.utils, src.knowledge_graph.extraction.regex_extractor,
+#       config.settings
 # @end-summary
 """GLiNER entity extractor for the KG subsystem.
 
@@ -171,7 +172,8 @@ class GLiNEREntityExtractor:
         entities: List[str] = []
         seen: set[str] = set()
 
-        predictions = self._model.predict_entities(clean, self._labels, threshold=0.5)
+        from config.settings import RAG_KG_GLINER_THRESHOLD
+        predictions = self._model.predict_entities(clean, self._labels, threshold=RAG_KG_GLINER_THRESHOLD)
         for pred in predictions:
             entity_text = pred["text"].strip()
             if len(entity_text) <= 2:
