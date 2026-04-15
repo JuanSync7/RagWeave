@@ -111,11 +111,12 @@ services:
       args:
         RAG_API_PORT: ${RAG_API_PORT:-8000}
     container_name: rag-api
-    command: uvicorn server.api:app --host 0.0.0.0 --port ${RAG_API_PORT:-8000} --proxy-headers --forwarded-allow-ips='*'
+    command: uvicorn server.api:app --host 0.0.0.0 --port ${RAG_API_PORT:-8000} --workers ${RAG_API_WORKERS:-1} --proxy-headers --forwarded-allow-ips='*'
     ports:
       - "${RAG_API_HOST_PORT:-8000}:${RAG_API_PORT:-8000}"
     environment:
       - RAG_API_PORT=${RAG_API_PORT:-8000}
+      - RAG_API_WORKERS=${RAG_API_WORKERS:-1}
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
       # API stream-generation needs Ollama access too.
       - RAG_OLLAMA_URL=http://host.docker.internal:${RAG_OLLAMA_PROXY_PORT:-11435}
@@ -147,6 +148,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./.runtime:/app/.runtime
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
     healthcheck:
       # Uses Python stdlib (curl was removed from the image in the 2026-04-10 optimization).
       # Works identically under docker-compose and podman-compose.
@@ -196,6 +202,11 @@ services:
       - ./.weaviate_data:/seed_weaviate:ro
       # Host model cache (read-only) for containerized worker startup.
       - ${RAG_MODEL_ROOT:-./models}:/models:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
     # GPU note: if needed, run with NVIDIA container runtime enabled.
     # Example: set `gpus: all` here when your Docker setup supports it.
 

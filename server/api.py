@@ -35,6 +35,7 @@ from config.settings import (
     RAG_API_MAX_INFLIGHT_REQUESTS,
     RAG_API_OVERLOAD_QUEUE_TIMEOUT_MS,
     RAG_API_CORS_ORIGINS,
+    RAG_API_WORKERS,
     RAG_WORKFLOW_DEFAULT_TIMEOUT_MS,
     RATE_LIMIT_ENABLED,
     RATE_LIMIT_REQUESTS_PER_MINUTE,
@@ -151,6 +152,7 @@ def _release_request_slot(acquired: bool) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_startup_config()
+    logger.info("API starting with %d uvicorn worker(s)", RAG_API_WORKERS)
     global _temporal_client
     logger.info("Connecting to Temporal at %s", TEMPORAL_TARGET_HOST)
     _temporal_client = await Client.connect(TEMPORAL_TARGET_HOST)

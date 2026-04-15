@@ -200,6 +200,7 @@ TEMPORAL_TASK_QUEUE = os.environ.get("RAG_TEMPORAL_TASK_QUEUE", "rag-reliability
 
 # --- Server ---
 RAG_API_PORT = int(os.environ.get("RAG_API_PORT", "8000"))
+RAG_API_WORKERS = int(os.environ.get("RAG_API_WORKERS", "1"))
 RAG_API_URL = os.environ.get("RAG_API_URL", f"http://localhost:{RAG_API_PORT}")
 RAG_WORKER_CONCURRENCY = int(os.environ.get("RAG_WORKER_CONCURRENCY", "4"))
 RAG_API_MAX_INFLIGHT_REQUESTS = int(os.environ.get("RAG_API_MAX_INFLIGHT_REQUESTS", "64"))
