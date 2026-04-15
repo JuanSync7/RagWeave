@@ -37,10 +37,12 @@ from config.settings import (
     RAG_API_CORS_ORIGINS,
     RAG_WORKFLOW_DEFAULT_TIMEOUT_MS,
     RATE_LIMIT_ENABLED,
+    RATE_LIMIT_PROVIDER,
+    RATE_LIMIT_REDIS_URL,
     RATE_LIMIT_REQUESTS_PER_MINUTE,
     RATE_LIMIT_WINDOW_SECONDS,
 )
-from src.platform.limits import InMemoryRateLimiter
+from src.platform.limits import InMemoryRateLimiter, RedisRateLimiter
 from src.platform import (
     INFLIGHT_REQUESTS,
     OVERLOAD_REJECTS,
@@ -84,10 +86,33 @@ except Exception as _exc:
 # The API container does not run embedded Weaviate — chunk counts are unavailable here.
 _vector_client = None
 _obs_tracer = get_tracer()
-_rate_limiter = InMemoryRateLimiter(
-    limit=RATE_LIMIT_REQUESTS_PER_MINUTE,
-    window_seconds=RATE_LIMIT_WINDOW_SECONDS,
-)
+
+
+def _create_rate_limiter():
+    """Select rate-limiter backend from configuration.
+
+    Falls back to in-memory if Redis is requested but unavailable.
+    """
+    if RATE_LIMIT_PROVIDER == "redis":
+        try:
+            limiter = RedisRateLimiter(
+                redis_url=RATE_LIMIT_REDIS_URL,
+                limit=RATE_LIMIT_REQUESTS_PER_MINUTE,
+                window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+            )
+            logger.info("Rate limiter: Redis-backed (%s)", RATE_LIMIT_REDIS_URL)
+            return limiter
+        except Exception as exc:
+            logger.warning(
+                "Redis rate limiter unavailable, falling back to in-memory: %s", exc
+            )
+    return InMemoryRateLimiter(
+        limit=RATE_LIMIT_REQUESTS_PER_MINUTE,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+    )
+
+
+_rate_limiter = _create_rate_limiter()
 _api_inflight_semaphore = (
     asyncio.Semaphore(RAG_API_MAX_INFLIGHT_REQUESTS)
     if RAG_API_MAX_INFLIGHT_REQUESTS > 0

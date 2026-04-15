@@ -128,6 +128,8 @@ services:
       - RAG_MEMORY_PROVIDER=redis
       - RAG_MEMORY_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - RAG_RATE_LIMIT_ENABLED=${RAG_RATE_LIMIT_ENABLED:-true}
+      - RAG_RATE_LIMIT_PROVIDER=redis
+      - RAG_RATE_LIMIT_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - DATABASE_URL=postgresql://litellm:litellm@rag-postgres:5432/litellm
       - RAG_AUTH_OIDC_ENABLED=${RAG_AUTH_OIDC_ENABLED:-false}
       - RAG_AUTH_OIDC_ISSUER=${RAG_AUTH_OIDC_ISSUER:-}
