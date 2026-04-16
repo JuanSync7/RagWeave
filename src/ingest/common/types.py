@@ -5,9 +5,13 @@
 # IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool),
 #   enable_visual_embedding (bool), visual_target_collection (str), colqwen_model_name (str),
 #   colqwen_batch_size (int), page_image_quality (int), page_image_max_dimension (int)
+# IngestionConfig new fields (Data Lifecycle T1, T4): clean_store_bucket (str), gc_mode (str),
+#   gc_retention_days (int), gc_schedule (str)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
 # PIPELINE_NODE_NAMES includes "visual_embedding" between "embedding_storage" and "knowledge_graph_storage" (FR-604)
 # IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
+# IngestFileResult new fields (Data Lifecycle T3, T6): trace_id (str, default ""), validation (dict, default {})
+# IngestionRunSummary new fields (Data Lifecycle T4): gc_soft_deleted, gc_hard_deleted, gc_retention_purged (int, default 0)
 # @end-summary
 
 """Shared ingestion pipeline types, configuration, and state contracts.
@@ -181,6 +185,18 @@ class IngestionConfig:
     page_image_max_dimension: int = RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION
     """Max pixel dimension (longer edge) for page images. Range: 256-4096. Default: 1024. FR-106"""
 
+    # -- Data Lifecycle: MinIO clean store (Task 1) --
+    clean_store_bucket: str = ""
+    """MinIO bucket for clean store objects. Empty string reuses target_bucket."""
+
+    # -- Data Lifecycle: GC / Lifecycle (Task 4) --
+    gc_mode: str = "soft"
+    """Default GC delete mode: "soft" (default) or "hard"."""
+    gc_retention_days: int = 30
+    """Retention period in days for soft-deleted data before hard deletion."""
+    gc_schedule: str = ""
+    """Cron expression for scheduled GC runs. Empty string disables."""
+
     @property
     def generate_page_images(self) -> bool:
         """Derived flag: True when visual embedding is enabled. FR-107"""
@@ -223,6 +239,9 @@ class IngestFileResult:
     clean_hash: str
     # -- Visual embedding extension (FR-605) --
     visual_stored_count: int = 0  # FR-605: number of visual page objects stored
+    # -- Data Lifecycle additions (Task 3, Task 6) --
+    trace_id: str = ""                               # UUID v4 for manifest recording (FR-3050)
+    validation: dict = field(default_factory=dict)   # E2E validation result (FR-3061)
 
 
 @dataclass
@@ -245,6 +264,10 @@ class IngestionRunSummary:
     removed_sources: int
     errors: list[str]
     design_warnings: list[str] = field(default_factory=list)
+    # -- Data Lifecycle additions (Task 4) --
+    gc_soft_deleted: int = 0       # Number of sources soft-deleted during this run
+    gc_hard_deleted: int = 0       # Number of sources hard-deleted during this run
+    gc_retention_purged: int = 0   # Number of expired soft-deleted entries purged
 
 
 @dataclass

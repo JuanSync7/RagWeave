@@ -2,6 +2,7 @@
 # Phase 2 orchestrator: compiles and invokes the Embedding Pipeline LangGraph.
 # Exports: run_embedding_pipeline
 # Deps: src.ingest.embedding.workflow, src.ingest.embedding.state, src.ingest.common.types
+# trace_id (FR-3052) and batch_id (FR-3053): accepted and injected into initial state.
 # @end-summary
 
 """Phase 2 runtime implementation for the embedding pipeline."""
@@ -29,6 +30,8 @@ def run_embedding_pipeline(
     clean_hash: str,
     refactored_text: Optional[str] = None,
     docling_document: Optional[Any] = None,
+    trace_id: str = "",
+    batch_id: str = "",
 ) -> EmbeddingPipelineState:
     """Run the Phase 2 Embedding Pipeline for a single clean document.
 
@@ -46,6 +49,10 @@ def run_embedding_pipeline(
         docling_document: Native DoclingDocument loaded from CleanDocumentStore,
             or ``None`` if not persisted. Read by chunking_node to select
             HybridChunker vs markdown path.
+        trace_id: UUID v4 trace ID propagated from Phase 1 (FR-3052). Empty
+            string when not provided (backward-compatible default).
+        batch_id: Optional batch grouping ID (FR-3053). Empty string when not
+            part of a batch run.
 
     Returns:
         Final ``EmbeddingPipelineState`` after all nodes have run.
@@ -72,6 +79,8 @@ def run_embedding_pipeline(
         "stored_count": 0,
         "errors": [],
         "processing_log": [],
+        "trace_id": trace_id,
+        "batch_id": batch_id,
     }
     try:
         final_state = _GRAPH.invoke(initial_state)

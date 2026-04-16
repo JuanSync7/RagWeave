@@ -26,6 +26,7 @@ import hashlib
 import orjson
 import logging
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,6 +58,7 @@ from src.ingest.common import (
     ManifestEntry,
     SourceIdentity,
 )
+from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.common import (
     load_manifest,
     save_manifest,
@@ -211,6 +213,14 @@ def _normalize_manifest_entries(
                 source_key = f"legacy_name:{key_text}"
                 entry.setdefault("legacy_name", key_text)
         entry["source_key"] = source_key
+        # Ensure lifecycle fields have safe defaults for pre-1.0.0 manifests (FR-3114).
+        entry.setdefault("schema_version", "0.0.0")
+        entry.setdefault("trace_id", "")
+        entry.setdefault("batch_id", "")
+        entry.setdefault("deleted", False)
+        entry.setdefault("deleted_at", "")
+        entry.setdefault("validation", {})
+        entry.setdefault("clean_hash", "")
         normalized[source_key] = entry
     return normalized
 
@@ -405,6 +415,7 @@ def ingest_file(
     source_version: str,
     existing_hash: str = "",
     existing_source_uri: str = "",
+    batch_id: str = "",
 ) -> IngestFileResult:
     """Run the two-phase ingestion pipeline for a single source file.
 
@@ -423,12 +434,23 @@ def ingest_file(
         source_version: Source version string.
         existing_hash: Previously stored content hash (for incremental updates).
         existing_source_uri: Previously stored URI (for incremental updates).
+        batch_id: Optional batch grouping ID (FR-3053). Empty string when not
+            part of a named batch run.
 
     Returns:
         ``IngestFileResult`` describing errors, stored chunk count, metadata,
-        processing log, and content hashes for both the source and clean text.
+        processing log, content hashes, and trace_id for the ingestion run.
     """
     config = runtime.config
+
+    # ── Trace ID generation (FR-3050) ─────────────────────────────────────
+    trace_id = str(uuid.uuid4())
+    logger.info(
+        "ingest_file_start trace_id=%s source_key=%s batch_id=%s",
+        trace_id,
+        source_key,
+        batch_id,
+    )
 
     # ── Phase 1 ──────────────────────────────────────────────────────────
     phase1 = run_document_processing(
@@ -440,6 +462,7 @@ def ingest_file(
         source_id=source_id,
         connector=connector,
         source_version=source_version,
+        trace_id=trace_id,
     )
 
     # run_document_processing always returns a DocumentProcessingState TypedDict (never None).
@@ -452,6 +475,7 @@ def ingest_file(
             processing_log=phase1.get("processing_log", []),
             source_hash=phase1.get("source_hash", ""),
             clean_hash="",
+            trace_id=trace_id,
         )
 
     # Determine final clean text
@@ -491,6 +515,10 @@ def ingest_file(
         _write_refactor_mirror_artifacts(source_identity, phase1, config)
 
     # ── Phase 2 (DoclingDocument passed in-memory from Phase 1) ──────────
+    # Propagate trace_id from Phase 1 state to Phase 2 (FR-3052).
+    # phase1.get("trace_id") will be the same value we injected above, but we
+    # read it from the state to stay consistent with the contract that Phase 2
+    # receives trace_id via state, not as a free variable.
     phase2 = run_embedding_pipeline(
         runtime=runtime,
         source_key=source_key,
@@ -503,6 +531,8 @@ def ingest_file(
         clean_hash=clean_hash,
         refactored_text=phase1.get("refactored_text"),
         docling_document=phase1.get("docling_document"),
+        trace_id=phase1.get("trace_id", trace_id),
+        batch_id=batch_id,
     )
 
     return IngestFileResult(
@@ -513,6 +543,7 @@ def ingest_file(
         processing_log=phase1.get("processing_log", []) + phase2.get("processing_log", []),
         source_hash=phase1.get("source_hash", ""),
         clean_hash=clean_hash,
+        trace_id=trace_id,
     )
 
 
@@ -523,6 +554,7 @@ def ingest_directory(
     update: bool = False,
     obsidian_export: bool = False,
     selected_sources: Optional[list[Path]] = None,
+    batch_id: str = "",
 ) -> IngestionRunSummary:
     """Ingest a directory of documents and persist vectors/KG artifacts.
 
@@ -533,6 +565,9 @@ def ingest_directory(
         update: Whether to run in incremental mode using the manifest.
         obsidian_export: Whether to export the knowledge graph to an Obsidian vault.
         selected_sources: Optional explicit list of files to ingest.
+        batch_id: Optional batch grouping ID (FR-3053). When provided, all files in
+            this run share the same batch_id in their manifests and Weaviate metadata.
+            Empty string (default) means no batch grouping.
 
     Returns:
         An `IngestionRunSummary` describing the run outcome.
@@ -672,6 +707,7 @@ def ingest_directory(
                     source_version=source["source_version"],
                     existing_hash=previous_hash if update else "",
                     existing_source_uri=previous_uri if update else "",
+                    batch_id=batch_id,
                 )
                 if result.errors:
                     failed += 1
@@ -705,11 +741,19 @@ def ingest_directory(
                     "connector": source["connector"],
                     "source_version": source["source_version"],
                     "content_hash": result.source_hash,
+                    "clean_hash": result.clean_hash,
                     "chunk_count": result.stored_count,
                     "summary": result.metadata_summary,
                     "keywords": result.metadata_keywords,
                     "processing_log": result.processing_log[-12:],
                     "mirror_stem": stem,
+                    # -- Data Lifecycle fields (FR-3050, FR-3053, FR-3100) --
+                    "schema_version": PIPELINE_SCHEMA_VERSION,
+                    "trace_id": result.trace_id,
+                    "batch_id": batch_id,
+                    "deleted": False,
+                    "deleted_at": "",
+                    "validation": result.validation,
                 }
                 save_manifest(manifest)
 

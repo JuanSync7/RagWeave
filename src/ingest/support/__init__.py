@@ -14,6 +14,15 @@ This package contains optional helpers used by ingestion pipeline nodes, such as
 - Text normalization and markdown-aware chunking utilities
 """
 
+# --- Parser base contracts ---
+from src.ingest.support.parser_base import (
+    Chunk,
+    DocumentParser,
+    ParseResult,
+    chunk_with_markdown,
+    validate_extra_metadata,
+)
+
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.ingest.support.colqwen import (
     ColQwen2LoadError,

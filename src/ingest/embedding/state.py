@@ -5,7 +5,8 @@
 # Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
 #   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
 #   stored_count, errors, processing_log, docling_document (Optional[Any]),
-#   visual_stored_count (int, FR-602), page_images (Optional[list[Any]], FR-602)
+#   visual_stored_count (int, FR-602), page_images (Optional[list[Any]], FR-602),
+#   trace_id (str, FR-3052), batch_id (str, FR-3053)
 # @end-summary
 
 """State contract for the Embedding Pipeline (Phase 2, nodes 6–13)."""
@@ -101,3 +102,9 @@ class EmbeddingPipelineState(TypedDict, total=False):
     # -- Visual embedding extensions (FR-602) --
     visual_stored_count: int  # FR-602: number of visual page objects stored; default 0
     page_images: Optional[list[Any]]  # FR-602: PIL.Image objects; cleared after node (FR-606)
+
+    # -- Data Lifecycle trace / batch (FR-3052, FR-3053) --
+    trace_id: str
+    """UUID v4 trace ID propagated from Phase 1 (FR-3052). Empty string = absent/legacy."""
+    batch_id: str
+    """Optional batch grouping ID (FR-3053). Empty string when not part of a batch."""

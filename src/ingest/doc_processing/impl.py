@@ -2,6 +2,7 @@
 # Phase 1 orchestrator: compiles and invokes the Document Processing LangGraph.
 # Exports: run_document_processing
 # Deps: src.ingest.doc_processing.workflow, src.ingest.doc_processing.state, src.ingest.common.types
+# trace_id (FR-3051): accepted and injected into initial state for propagation through nodes.
 # @end-summary
 
 """Phase 1 runtime implementation for document processing."""
@@ -24,6 +25,7 @@ def run_document_processing(
     source_id: str,
     connector: str,
     source_version: str,
+    trace_id: str = "",
 ) -> DocumentProcessingState:
     """Run the Phase 1 Document Processing pipeline for a single source file.
 
@@ -40,6 +42,8 @@ def run_document_processing(
         source_id: OS-level stable identity.
         connector: Connector identifier.
         source_version: Source version string (mtime nanoseconds).
+        trace_id: UUID v4 trace ID for this ingestion run (FR-3051). Empty
+            string when not provided (backward-compatible default).
 
     Returns:
         Final ``DocumentProcessingState`` after all nodes have run.
@@ -61,5 +65,6 @@ def run_document_processing(
         "refactored_text": None,
         "errors": [],
         "processing_log": [],
+        "trace_id": trace_id,
     }
     return _GRAPH.invoke(initial_state)

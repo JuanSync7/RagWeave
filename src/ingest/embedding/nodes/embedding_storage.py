@@ -1,7 +1,9 @@
 # @summary
 # LangGraph node for embedding generation and vector store persistence.
 # Exports: embedding_storage_node
-# Deps: src.vector_db, src.ingest.embedding.state, src.ingest.common.shared
+# Deps: src.vector_db, src.ingest.embedding.state, src.ingest.common.shared,
+#   src.ingest.common.schemas (PIPELINE_SCHEMA_VERSION)
+# trace_id, schema_version, batch_id attached to every chunk payload (FR-3052, FR-3053, FR-3100).
 # @end-summary
 
 """Embedding-storage node implementation."""
@@ -17,6 +19,7 @@ from src.vector_db import (
     DocumentRecord,
 )
 from src.ingest.common import append_processing_log
+from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.embedding.state import EmbeddingPipelineState
 
 
@@ -47,10 +50,23 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                 legacy_source=state["source_name"],
             )
 
+        # Attach trace/schema/batch metadata to every chunk (FR-3052, FR-3053, FR-3100).
+        # These three keys are merged into a copy of each chunk's metadata so that
+        # existing keys are preserved and the original chunk objects are not mutated.
+        lifecycle_meta = {
+            "trace_id": state.get("trace_id", ""),
+            "schema_version": PIPELINE_SCHEMA_VERSION,
+            "batch_id": state.get("batch_id", ""),
+        }
+
         texts = [chunk.metadata.get("enriched_content", chunk.text) for chunk in state["chunks"]]
         vectors = runtime.embedder.embed_documents(texts)
         records = [
-            DocumentRecord(text=text, embedding=vector, metadata=chunk.metadata)
+            DocumentRecord(
+                text=text,
+                embedding=vector,
+                metadata={**chunk.metadata, **lifecycle_meta},
+            )
             for text, vector, chunk in zip(texts, vectors, state["chunks"])
         ]
         stored_count = add_documents(
