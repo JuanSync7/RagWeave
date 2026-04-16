@@ -2,8 +2,10 @@
 # Content hash infrastructure for cross-document deduplication (Tier 1).
 # Exports: normalise_chunk_text, compute_content_hash,
 #          find_chunk_by_content_hash, append_source_document,
-#          remove_source_document_refs
+#          remove_source_document_refs, revert_merge, build_fuzzy_fingerprint
 # Deps: hashlib, re, logging
+# revert_merge added (Phase 3.3 / T7): operational helper to undo a merge event
+#   by detaching a source_key from a canonical chunk's source_documents array.
 # @end-summary
 """Content hash infrastructure for cross-document deduplication (Tier 1).
 
@@ -17,7 +19,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from src.ingest.embedding.common.types import MergeEvent
 
 logger = logging.getLogger("rag.ingest.embedding.dedup_utils")
 
@@ -168,6 +173,90 @@ def remove_source_document_refs(client: Any, source_key: str) -> None:
             source_key,
             exc_info=True,
         )
+
+
+def revert_merge(
+    client: Any,
+    event: MergeEvent,
+    *,
+    collection: Optional[str] = None,
+) -> bool:
+    """Revert a specific dedup merge by detaching a source_key from the canonical chunk.
+
+    Given a MergeEvent, removes ``event["merged_source_key"]`` from the canonical
+    chunk's ``source_documents`` array. If the array becomes empty after removal
+    the canonical chunk is deleted from Weaviate (no remaining provenance).
+
+    Idempotent: if ``merged_source_key`` is not present in ``source_documents``
+    this is a no-op and returns ``False`` (FR-3451 AC-5).
+
+    This function is intended for operational / CLI use — it is NOT called
+    automatically during ingestion.
+
+    Args:
+        client: Weaviate client handle.
+        event: A ``MergeEvent`` dict produced by ``cross_document_dedup_node``.
+            Must contain ``canonical_content_hash`` and ``merged_source_key``.
+        collection: Weaviate collection name. Defaults to ``"Chunk"``.
+
+    Returns:
+        ``True`` if a revert was performed (source_key was detached or canonical
+        deleted), ``False`` on no-op or error.
+    """
+    collection_name = collection or "Chunk"
+    canonical_content_hash: str = event["canonical_content_hash"]
+    source_key: str = event["merged_source_key"]
+
+    # Locate the canonical chunk by content hash.
+    chunk = find_chunk_by_content_hash(client, canonical_content_hash)
+    if chunk is None:
+        logger.warning(
+            "revert_merge: no chunk found for content_hash=%s",
+            canonical_content_hash[:16],
+        )
+        return False
+
+    sources: list = chunk.get("source_documents", [])
+    if source_key not in sources:
+        logger.info(
+            "revert_merge: source_key=%s not in source_documents for hash=%s — no-op",
+            source_key,
+            canonical_content_hash[:16],
+        )
+        return False
+
+    updated = [s for s in sources if s != source_key]
+
+    try:
+        coll = client.collections.get(collection_name)
+        if not updated:
+            # No remaining provenance — delete the canonical chunk.
+            coll.data.delete_by_id(chunk["uuid"])
+            logger.info(
+                "revert_merge: canonical chunk %s deleted (no remaining source_documents)",
+                chunk["uuid"],
+            )
+        else:
+            coll.data.update(
+                uuid=chunk["uuid"],
+                properties={"source_documents": updated},
+            )
+            logger.info(
+                "revert_merge: source_key=%s detached from chunk %s; "
+                "remaining sources=%d",
+                source_key,
+                chunk["uuid"],
+                len(updated),
+            )
+        return True
+    except Exception:
+        logger.error(
+            "revert_merge: failed to update chunk %s for source_key=%s",
+            chunk.get("uuid"),
+            source_key,
+            exc_info=True,
+        )
+        return False
 
 
 def build_fuzzy_fingerprint(text: str, config: Any = None) -> str:

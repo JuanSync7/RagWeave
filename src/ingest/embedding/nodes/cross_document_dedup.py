@@ -1,7 +1,9 @@
 # @summary
-# Cross-document deduplication node for the Embedding Pipeline.
+# Cross-document deduplication node for the Embedding Pipeline (Phase 3.3).
 # Detects and eliminates duplicate chunks across documents using
 # Tier 1 (SHA-256 exact hash) and optional Tier 2 (MinHash fuzzy) matching.
+# Override path: when source_key is in config.dedup_override_sources, all chunks
+# are stored independently and an "override_skipped" MergeEvent is emitted per chunk.
 # Exports: cross_document_dedup_node
 # Deps: src.ingest.common, src.ingest.embedding.common.dedup_utils,
 #       src.ingest.embedding.common.types, src.ingest.embedding.state,
@@ -101,8 +103,21 @@ def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             chunk.metadata["content_hash"] = content_hash
 
             if skip_lookup:
-                # Override: store independently but still compute hash
+                # Override: store independently but still compute hash (FR-3450).
+                # Emit an override_skipped event so the merge report is queryable.
                 chunk.metadata.setdefault("source_documents", [source_key])
+                merge_report.append(
+                    create_merge_event(
+                        canonical_content_hash=content_hash,
+                        canonical_chunk_id="",
+                        merged_source_key=source_key,
+                        merged_section=chunk.metadata.get("heading_path", ""),
+                        match_tier="override",
+                        similarity_score=0.0,
+                        canonical_replaced=False,
+                        action="override_skipped",
+                    )
+                )
                 novel_chunks.append(chunk)
                 continue
 
@@ -119,6 +134,7 @@ def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
                         match_tier="exact",
                         similarity_score=1.0,
                         canonical_replaced=False,
+                        action="merged",
                     )
                 )
                 exact_matches += 1
@@ -228,6 +244,7 @@ def _try_fuzzy_dedup(
             match_tier="fuzzy",
             similarity_score=match["similarity"],
             canonical_replaced=canonical_replaced,
+            action="replaced" if canonical_replaced else "merged",
         )
     )
     return True

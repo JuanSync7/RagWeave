@@ -1,11 +1,16 @@
 # @summary
 # Public package init for the data lifecycle subsystem. Stable import surface
 # for GCEngine, SyncEngine, OrphanReport, GCReport, StoreInventory, LifecycleConfig,
-# and factory helpers build_gc_engine / build_sync_engine.
+# MigrationEngine, MigrationPlan, MigrationReport, E2EValidator, ValidationReport,
+# SchemaVersion, MigrationStrategy, load_changelog, and factory helpers.
 # Exports: GCEngine, SyncEngine, OrphanReport, GCReport, StoreInventory,
-#          LifecycleConfig, build_gc_engine, build_sync_engine
+#          LifecycleConfig, build_gc_engine, build_sync_engine,
+#          MigrationEngine, MigrationPlan, MigrationReport, MigrationTask,
+#          E2EValidator, ValidationReport, ValidationFinding,
+#          SchemaVersion, MigrationStrategy, load_changelog
 # Deps: src.ingest.lifecycle.gc, src.ingest.lifecycle.sync,
-#       src.ingest.lifecycle.schemas
+#       src.ingest.lifecycle.schemas, src.ingest.lifecycle.changelog,
+#       src.ingest.lifecycle.migration, src.ingest.lifecycle.validation
 # @end-summary
 """Public API for the data lifecycle subsystem.
 
@@ -15,27 +20,50 @@ internal sub-modules, so that internal refactors do not break callers.
 Typical usage::
 
     from src.ingest.lifecycle import (
-        SyncEngine, GCEngine, OrphanReport, LifecycleConfig
+        SyncEngine, GCEngine, OrphanReport, LifecycleConfig,
+        MigrationEngine, E2EValidator, load_changelog,
     )
 
+    # Orphan detection + GC
     engine = SyncEngine(manifest=manifest, weaviate_client=client, ...)
     inventory = engine.inventory()
     orphan_report = engine.diff(inventory)
-
     gc = GCEngine(manifest=manifest, weaviate_client=client, ...)
     gc_report = gc.collect(orphan_report, mode="soft", dry_run=True)
+
+    # Schema migration
+    changelog = load_changelog("config/schema_changelog.yaml")
+    migrator = MigrationEngine(client=weaviate_client, changelog=changelog)
+    plan = migrator.plan(from_version="0.0.0", to_version="1.0.0")
+    report = migrator.execute(plan, confirm=True)
+
+    # E2E validation
+    validator = E2EValidator(client=weaviate_client, minio=clean_store)
+    vreport = validator.validate_by_trace_id(trace_id)
 """
 
+from src.ingest.lifecycle.changelog import (
+    MigrationStrategy,
+    SchemaVersion,
+    load_changelog,
+)
 from src.ingest.lifecycle.gc import GCEngine
+from src.ingest.lifecycle.migration import MigrationEngine
 from src.ingest.lifecycle.schemas import (
     GCReport,
     LifecycleConfig,
+    MigrationPlan,
+    MigrationReport,
+    MigrationTask,
     OrphanReport,
     StoreCleanupStatus,
     StoreInventory,
     SyncResult,
+    ValidationFinding,
+    ValidationReport,
 )
 from src.ingest.lifecycle.sync import SyncEngine
+from src.ingest.lifecycle.validation import E2EValidator
 
 
 # ---------------------------------------------------------------------------
@@ -112,13 +140,26 @@ __all__ = [
     # Engines
     "GCEngine",
     "SyncEngine",
-    # Schemas
+    "MigrationEngine",
+    "E2EValidator",
+    # Schemas — GC/Sync
     "GCReport",
     "LifecycleConfig",
     "OrphanReport",
     "StoreCleanupStatus",
     "StoreInventory",
     "SyncResult",
+    # Schemas — Migration
+    "MigrationPlan",
+    "MigrationReport",
+    "MigrationTask",
+    # Schemas — Validation
+    "ValidationReport",
+    "ValidationFinding",
+    # Changelog
+    "SchemaVersion",
+    "MigrationStrategy",
+    "load_changelog",
     # Factories
     "build_gc_engine",
     "build_sync_engine",

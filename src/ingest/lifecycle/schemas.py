@@ -1,7 +1,10 @@
 # @summary
 # Typed contracts for the data lifecycle subsystem: OrphanReport, GCReport,
-# StoreInventory, StoreCleanupStatus, SyncResult, and LifecycleConfig.
-# Exports: OrphanReport, GCReport, StoreInventory, StoreCleanupStatus, SyncResult, LifecycleConfig
+# StoreInventory, StoreCleanupStatus, SyncResult, LifecycleConfig, MigrationPlan,
+# MigrationReport, MigrationTask, ValidationReport, ValidationFinding.
+# Exports: OrphanReport, GCReport, StoreInventory, StoreCleanupStatus, SyncResult,
+#          LifecycleConfig, MigrationPlan, MigrationReport, MigrationTask,
+#          ValidationReport, ValidationFinding
 # Deps: dataclasses, typing
 # @end-summary
 """Typed contracts for the data lifecycle subsystem.
@@ -13,7 +16,7 @@ module import-free of heavy runtime dependencies.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -138,3 +141,125 @@ class LifecycleConfig:
     gc_retention_days: int = 30
     gc_schedule: str = ""
     minio_bucket: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Schema migration contracts (T5)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MigrationTask:
+    """A single per-entry migration sub-task inside a :class:`MigrationPlan`.
+
+    Attributes:
+        source_key: Stable source identity key for the document.
+        trace_id: Current trace_id from the manifest (informational).
+        from_version: Schema version the document is currently at.
+        to_version: Target schema version.
+        strategy: Migration strategy to apply.
+    """
+
+    source_key: str
+    trace_id: str = ""
+    from_version: str = "0.0.0"
+    to_version: str = ""
+    strategy: str = "none"
+
+
+@dataclass
+class MigrationPlan:
+    """Dry-run migration plan produced by :meth:`MigrationEngine.plan`.
+
+    Attributes:
+        to_version: Target schema version for this plan.
+        tasks: Per-entry sub-tasks to execute.
+        skipped_count: Number of entries skipped (already at target, or
+            strategy is ``none``).
+    """
+
+    to_version: str = ""
+    tasks: list[MigrationTask] = field(default_factory=list)
+    skipped_count: int = 0
+
+
+@dataclass
+class MigrationReport:
+    """Result of a completed migration run from :meth:`MigrationEngine.execute`.
+
+    Attributes:
+        to_version: Target schema version that was applied.
+        total_eligible: Number of entries included in the plan.
+        succeeded: Number of entries successfully migrated.
+        failed: Number of entries that failed (errors isolated per entry).
+        skipped: Number of entries skipped during execution (idempotency).
+        per_entry: Per-source_key outcome dict.  Each value has at minimum
+            ``{"status": "ok" | "failed" | "skipped", "strategy": <str>}``.
+    """
+
+    to_version: str = ""
+    total_eligible: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped: int = 0
+    per_entry: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# E2E validation contracts (T6)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ValidationFinding:
+    """Per-trace_id cross-store consistency finding.
+
+    Attributes:
+        trace_id: The trace_id being validated.
+        source_key: Resolved source_key (from manifest lookup).
+        checked_at: ISO 8601 timestamp of when the check was run.
+        consistent: ``True`` when all enabled stores reported data.
+        manifest_ok: Whether the manifest has an entry for this trace_id.
+        weaviate_ok: Whether Weaviate has >= 1 chunk for this trace_id.
+            ``None`` if Weaviate was unavailable.
+        weaviate_chunk_count: Raw chunk count from Weaviate.  ``None`` on error.
+        minio_ok: Whether MinIO has a clean document for the source_key.
+            ``None`` if MinIO is not configured.
+        neo4j_ok: Whether the KG has >= 1 triple for this trace_id.
+            ``None`` if the KG is disabled (FR-3062).
+        kg_triple_count: Raw triple count from the KG.  ``None`` on error or
+            when KG is disabled.
+        missing_stores: List of store names that are missing data.
+    """
+
+    trace_id: str
+    source_key: str = ""
+    checked_at: str = ""
+    consistent: bool = False
+    manifest_ok: Optional[bool] = None
+    weaviate_ok: Optional[bool] = None
+    weaviate_chunk_count: Optional[int] = None
+    minio_ok: Optional[bool] = None
+    neo4j_ok: Optional[bool] = None
+    kg_triple_count: Optional[int] = None
+    missing_stores: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ValidationReport:
+    """Aggregate E2E validation report from :class:`E2EValidator`.
+
+    Attributes:
+        validated_at: ISO 8601 timestamp of when the report was produced.
+        findings: Per-trace_id finding list.
+        consistent: ``True`` when every finding in *findings* is consistent.
+        total_checked: Number of trace_ids checked (equals ``len(findings)``
+            for single-trace_id runs).
+        inconsistent_count: Number of inconsistent findings.
+    """
+
+    validated_at: str = ""
+    findings: list[ValidationFinding] = field(default_factory=list)
+    consistent: bool = True
+    total_checked: int = 0
+    inconsistent_count: int = 0
