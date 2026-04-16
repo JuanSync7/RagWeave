@@ -68,3 +68,6 @@ certs/*
 
 # Auto Research
 auto-research
+
+# Tooling binaries downloaded ad-hoc (not project source)
+git-filter-repo
