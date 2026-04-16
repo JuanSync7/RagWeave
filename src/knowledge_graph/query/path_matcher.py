@@ -41,9 +41,11 @@ class PathMatcher:
         self,
         backend: GraphStorageBackend,
         schema_path: Optional[str] = None,
+        max_hop_fanout: int = _MAX_HOP_FANOUT,
     ) -> None:
         self._backend = backend
         self._schema_path = schema_path
+        self._max_hop_fanout = max_hop_fanout
 
     def evaluate(
         self, seed_entity: str, patterns: List[List[str]]
@@ -135,14 +137,14 @@ class PathMatcher:
                     )
 
             # Fan-out guard (REQ-KG-776 bounded complexity)
-            if len(next_frontier) > _MAX_HOP_FANOUT:
+            if len(next_frontier) > self._max_hop_fanout:
                 logger.debug(
                     "Fan-out guard: truncating frontier from %d to %d at edge_type=%s",
                     len(next_frontier),
-                    _MAX_HOP_FANOUT,
+                    self._max_hop_fanout,
                     edge_type,
                 )
-                next_frontier = next_frontier[:_MAX_HOP_FANOUT]
+                next_frontier = next_frontier[:self._max_hop_fanout]
 
             frontier = next_frontier
             if not frontier:
