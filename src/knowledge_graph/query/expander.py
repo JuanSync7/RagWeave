@@ -33,20 +33,23 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from src.knowledge_graph.community import CommunityDetector
     from src.knowledge_graph.common.types import KGConfig
 
 from src.knowledge_graph.backend import GraphStorageBackend
-from src.knowledge_graph.query.context_formatter import GraphContextFormatter
+from src.knowledge_graph.query.context_formatter import (
+    GraphContextFormatter,
+    format_community_section,
+)
 from src.knowledge_graph.query.entity_matcher import EntityMatcher
 from src.knowledge_graph.query.path_matcher import PathMatcher
 from src.knowledge_graph.query.sanitizer import QuerySanitizer
 from src.knowledge_graph.query.schemas import ExpansionResult
 
-__all__ = ["GraphQueryExpander"]
+__all__ = ["GraphQueryExpander", "collect_community_ids"]
 
 logger = logging.getLogger("rag.knowledge_graph.query")
 
@@ -105,9 +108,18 @@ class GraphQueryExpander:
         self._path_matcher: Optional[PathMatcher] = None
         self._formatter: Optional[GraphContextFormatter] = None
         if config is not None and getattr(config, "enable_graph_context_injection", False):
-            self._path_matcher = PathMatcher(backend)
+            self._path_matcher = PathMatcher(
+                backend,
+                max_hop_fanout=getattr(config, "max_hop_fanout", 50),
+            )
             token_budget: int = getattr(config, "graph_context_token_budget", 500)
-            self._formatter = GraphContextFormatter(token_budget=token_budget)
+            marker_style: str = getattr(config, "graph_context_marker_style", "markdown")
+            schema_path: Optional[str] = getattr(config, "schema_path", None)
+            self._formatter = GraphContextFormatter(
+                token_budget=token_budget,
+                marker_style=marker_style,
+                schema_path=schema_path,
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -283,6 +295,45 @@ class GraphQueryExpander:
                     )
                     graph_context = ""
 
+                # Phase 2: Community context injection (REQ-KG-1300..1308)
+                # Appends pre-built community summaries for all communities
+                # touched by traversal. Independent token budget. Zero LLM cost.
+                community_budget = getattr(self._config, "community_context_token_budget", 0)
+                if (
+                    community_budget > 0
+                    and self._community_detector is not None
+                    and self._community_detector.is_ready
+                ):
+                    try:
+                        cids, entity_counts = collect_community_ids(
+                            entities=entities_for_context,
+                            paths=all_paths,
+                            backend=self._backend,
+                        )
+                        summaries = {}
+                        for cid in cids:
+                            summary = self._community_detector.get_summary(cid)
+                            if summary is not None:
+                                summaries[cid] = summary
+                        if summaries and self._formatter is not None:
+                            community_section = format_community_section(
+                                summaries=summaries,
+                                entity_counts=entity_counts,
+                                token_budget=community_budget,
+                                section_markers=self._formatter._section_markers,
+                            )
+                            if community_section:
+                                graph_context = (
+                                    graph_context + "\n" + community_section
+                                    if graph_context
+                                    else community_section
+                                )
+                    except Exception:
+                        logger.warning(
+                            "Community context injection failed; proceeding without",
+                            exc_info=True,
+                        )
+
             logger.debug(
                 "GraphQueryExpander.expand: query=%r depth=%d terms=%d "
                 "graph_context_len=%d elapsed=%.3fs",
@@ -403,3 +454,103 @@ class GraphQueryExpander:
 
         self._matcher = EntityMatcher(entity_names, alias_index)
         self._sanitizer = QuerySanitizer(alias_index)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def collect_community_ids(
+    entities: List["Entity"],
+    paths: List["PathResult"],
+    backend: "GraphStorageBackend",
+) -> Tuple[Set[int], Dict[int, int]]:
+    """Collect community IDs from all entities encountered during traversal.
+
+    Scans seed entities and every hop in every path.  Entities not carrying a
+    ``community_id`` attribute (or whose ``community_id`` is ``None`` / ``-1``)
+    are silently skipped.
+
+    Args:
+        entities: Seed and expanded :class:`Entity` objects already in hand.
+        paths: :class:`PathResult` objects from path-pattern evaluation.
+        backend: Graph storage backend used to resolve hop entity names that
+            are not already present in *entities*.
+
+    Returns:
+        A 2-tuple of:
+        - ``community_ids``: deduplicated :class:`set` of valid community IDs.
+        - ``entity_counts``: mapping of community ID → number of unique entity
+          names that belong to it across the full traversal.
+    """
+    from src.knowledge_graph.common.schemas import Entity  # local import to avoid circularity
+
+    # Build a name → Entity lookup from the already-resolved entities list so
+    # we avoid redundant backend round-trips for hops that appear in seeds.
+    name_to_entity: Dict[str, "Entity"] = {}
+    for ent in entities:
+        try:
+            name_to_entity[ent.name] = ent
+        except Exception:
+            pass
+
+    community_ids: Set[int] = set()
+    # Maps community_id → set of unique entity names counted so far.
+    _community_members: Dict[int, set] = {}
+
+    def _register(ent_obj: "Entity") -> None:
+        """Record the community membership of a single entity object."""
+        try:
+            cid = getattr(ent_obj, "community_id", None)
+        except Exception:
+            return
+        if cid is None or cid == -1:
+            return
+        try:
+            cid = int(cid)
+        except (TypeError, ValueError):
+            return
+        community_ids.add(cid)
+        _community_members.setdefault(cid, set()).add(ent_obj.name)
+
+    def _resolve_and_register(name: str) -> None:
+        """Look up *name* in the pre-built map or fall back to the backend."""
+        ent_obj = name_to_entity.get(name)
+        if ent_obj is not None:
+            _register(ent_obj)
+            return
+        # Attempt backend lookup; skip silently on any error.
+        try:
+            fetched = backend.get_entity(name)
+            if fetched is not None:
+                name_to_entity[name] = fetched  # cache for repeated hops
+                _register(fetched)
+        except Exception:
+            pass
+
+    # --- seed entities -------------------------------------------------------
+    for ent in entities:
+        try:
+            _register(ent)
+        except Exception:
+            pass
+
+    # --- path hops -----------------------------------------------------------
+    for path in paths:
+        try:
+            hops = path.hops
+        except Exception:
+            continue
+        for hop in hops:
+            try:
+                from_name = hop.from_entity
+                to_name = hop.to_entity
+            except Exception:
+                continue
+            if from_name:
+                _resolve_and_register(from_name)
+            if to_name:
+                _resolve_and_register(to_name)
+
+    entity_counts: Dict[int, int] = {cid: len(members) for cid, members in _community_members.items()}
+    return community_ids, entity_counts

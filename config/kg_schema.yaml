@@ -906,3 +906,32 @@ legacy_types:
     uses:
       maps_to: depends_on
       description: "Legacy usage edge (alternate form); maps to depends_on"
+
+# ---------------------------------------------------------------------------
+# Verb Normalization
+# Maps edge type labels to natural-language verb phrases for path narratives.
+# Used by: GraphContextFormatter._normalize_predicate
+# ---------------------------------------------------------------------------
+verb_normalization:
+  depends_on: "depends on"
+  contains: "contains"
+  instantiates: "instantiates"
+  connects_to: "connects to"
+  parameterized_by: "is parameterized by"
+  belongs_to_clock_domain: "belongs to clock domain"
+  implements_interface: "implements"
+  transitions_to: "transitions to"
+  drives: "drives"
+  reads: "reads"
+  specified_by: "is specified by"
+  verified_by: "is verified by"
+  authored_by: "was authored by"
+  reviewed_by: "was reviewed by"
+  blocks: "blocks"
+  supersedes: "supersedes"
+  constrained_by: "is constrained by"
+  trades_off_against: "trades off against"
+  assumes: "assumes"
+  complies_with: "complies with"
+  relates_to: "relates to"
+  design_decision_for: "has design decision for"
