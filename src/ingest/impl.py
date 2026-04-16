@@ -10,6 +10,8 @@
 #   page_image_quality 1-100, and page_image_max_dimension 256-4096.
 # verify_core_design also calls _check_parser_abstraction_config (T9) which validates
 #   parser_strategy, chunker, VLM mutual exclusion, and VLM+code incompatibility.
+# verify_core_design also calls _check_embedding_batch_config (FR-1211) which validates
+#   embedding_batch_size range [1, 2048].
 # ParserRegistry is instantiated in ingest_directory and attached to Runtime (T9).
 # @end-summary
 
@@ -371,6 +373,32 @@ def _check_visual_embedding_config(
     return errors, warnings
 
 
+def _check_embedding_batch_config(
+    config: IngestionConfig,
+) -> tuple[list[str], list[str]]:
+    """Validate embedding batch configuration. FR-1211.
+
+    Checks:
+    1. embedding_batch_size range [1, 2048] (fatal)
+
+    Args:
+        config: IngestionConfig to validate.
+
+    Returns:
+        Tuple of (errors, warnings). Errors block pipeline start.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not (1 <= config.embedding_batch_size <= 2048):
+        errors.append(
+            f"embedding_batch_size={config.embedding_batch_size} is out of range;"
+            " must be between 1 and 2048 (inclusive)"
+        )
+
+    return errors, warnings
+
+
 def _check_parser_abstraction_config(
     config: IngestionConfig,
 ) -> tuple[list[str], list[str]]:
@@ -488,6 +516,11 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     pa_errors, pa_warnings = _check_parser_abstraction_config(config)
     errors.extend(pa_errors)
     warnings.extend(pa_warnings)
+
+    # Batch embedding validation (FR-1211).
+    eb_errors, eb_warnings = _check_embedding_batch_config(config)
+    errors.extend(eb_errors)
+    warnings.extend(eb_warnings)
 
     return IngestionDesignCheck(ok=not errors, errors=errors, warnings=warnings)
 

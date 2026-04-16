@@ -75,6 +75,7 @@ from config.settings import (
     RAG_INGESTION_COLQWEN_BATCH_SIZE,
     RAG_INGESTION_PAGE_IMAGE_QUALITY,
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
+    RAG_INGESTION_EMBEDDING_BATCH_SIZE,
 )
 from src.core import LocalBGEEmbeddings
 from src.core import KnowledgeGraphBuilder
@@ -186,6 +187,10 @@ class IngestionConfig:
     """JPEG compression quality for page images. Range: 1-100. Default: 85. FR-105"""
     page_image_max_dimension: int = RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION
     """Max pixel dimension (longer edge) for page images. Range: 256-4096. Default: 1024. FR-106"""
+
+    # -- Batch embedding (FR-1211) --
+    embedding_batch_size: int = RAG_INGESTION_EMBEDDING_BATCH_SIZE
+    """Number of chunks per embedding batch. Range: 1-2048. Default: 64. FR-1211"""
 
     # -- Data Lifecycle: MinIO clean store (Task 1) --
     clean_store_bucket: str = ""
