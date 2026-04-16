@@ -3,6 +3,9 @@
 # Exports: run_embedding_pipeline
 # Deps: src.ingest.embedding.workflow, src.ingest.embedding.state, src.ingest.common.types
 # trace_id (FR-3052) and batch_id (FR-3053): accepted and injected into initial state.
+# NOTE (Phase 3.2): docling_document parameter retained for backward-compat callers but
+#   is no longer injected into EmbeddingPipelineState (field removed). parse_result and
+#   parser_instance are populated by structure_detection_node at runtime.
 # @end-summary
 
 """Phase 2 runtime implementation for the embedding pipeline."""
@@ -46,9 +49,10 @@ def run_embedding_pipeline(
         clean_text: Clean Markdown text from CleanDocumentStore.
         clean_hash: SHA-256 of ``clean_text`` for change detection.
         refactored_text: LLM-refactored text from Phase 1, if available.
-        docling_document: Native DoclingDocument loaded from CleanDocumentStore,
-            or ``None`` if not persisted. Read by chunking_node to select
-            HybridChunker vs markdown path.
+        docling_document: Retained for backward compatibility. No longer injected
+            into EmbeddingPipelineState (Phase 3.2 removed that field). Parser
+            selection and chunk generation are now handled by structure_detection_node
+            via the ParserRegistry. Passing a value here has no effect.
         trace_id: UUID v4 trace ID propagated from Phase 1 (FR-3052). Empty
             string when not provided (backward-compatible default).
         batch_id: Optional batch grouping ID (FR-3053). Empty string when not
@@ -69,7 +73,8 @@ def run_embedding_pipeline(
         "cleaned_text": clean_text,
         "refactored_text": refactored_text,
         "clean_hash": clean_hash,
-        "docling_document": docling_document,
+        # parse_result and parser_instance are populated by structure_detection_node
+        # at runtime via the ParserRegistry — not set here.
         "chunks": [],
         "enriched_chunks": [],
         "metadata_summary": "",

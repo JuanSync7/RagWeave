@@ -1,15 +1,20 @@
 # @summary
-# LangGraph node for dual-path chunk generation: Docling HybridChunker or markdown fallback.
-# Exports: chunking_node, _chunk_with_docling, _chunk_with_markdown, _normalize_chunk_text,
-#          _extract_docling_section_metadata
+# LangGraph node for parser-abstraction chunk generation with legacy markdown fallback.
+# Primary path: parse_result + parser_instance from state → parser.chunk() or
+#   chunk_with_markdown() depending on config.chunker override.
+# Legacy fallback: when no parse_result is in state, falls back to markdown chunking
+#   on refactored_text/cleaned_text (pre-Phase 3.2 behaviour).
+# Exports: chunking_node, _normalize_chunk_text
 # Deps: unicodedata, re, src.ingest.embedding.state, src.ingest.common.schemas,
-#       src.ingest.common.shared, src.ingest.support.document, src.ingest.support.markdown
+#       src.ingest.common.shared, src.ingest.support.parser_base,
+#       src.ingest.support.document, src.ingest.support.markdown
 # @end-summary
 
 """Chunking node implementation.
 
-Selects between Docling-native (HybridChunker) and markdown fallback chunking
-based on whether a DoclingDocument is present in state.
+Selects between the parser-abstraction path (parse_result + parser_instance in
+state) and the legacy markdown fallback path based on what structure_detection_node
+placed in state.
 """
 
 from __future__ import annotations
@@ -58,37 +63,18 @@ def _normalize_chunk_text(text: str) -> str:
     return _CONTROL_CHAR_RE.sub("", normalized)
 
 
-def _extract_docling_section_metadata(chunk: Any) -> dict[str, Any]:
-    """Extract section_path, heading, heading_level from a HybridChunker chunk.
-
-    HybridChunker chunks expose heading hierarchy via chunk.meta.headings
-    (list of heading strings, outermost first).
-
-    Returns:
-        {"section_path": str, "heading": str, "heading_level": int}
-        section_path = " > ".join(headings)
-        heading = headings[-1] or ""
-        heading_level = len(headings)
-    """
-    headings: list[str] = []
-    meta = getattr(chunk, "meta", None)
-    if meta is not None:
-        headings = list(getattr(meta, "headings", None) or [])
-    heading = headings[-1] if headings else ""
-    return {
-        "section_path": " > ".join(headings),
-        "heading": heading,
-        "heading_level": len(headings),
-    }
-
-
 def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
-    """Split document into chunks using HybridChunker (Docling path) or
-    MarkdownHeaderTextSplitter (fallback path).
+    """Split document into chunks using parser abstraction or legacy markdown fallback.
 
-    Path selection: if state["docling_document"] is not None → HybridChunker.
-    Otherwise → existing markdown path. HybridChunker failures auto-fallback
-    to the markdown path (non-fatal).
+    Path selection:
+    - If ``state["parse_result"]`` and ``state["parser_instance"]`` are both present
+      (set by structure_detection_node via the ParserRegistry), the parser-abstraction
+      path is used:
+      - ``config.chunker == "markdown"`` → ``chunk_with_markdown(parse_result, config)``
+      - ``config.chunker == "native"`` (default) → ``parser_instance.chunk(parse_result)``
+        with auto-fallback to markdown on native chunking failure.
+    - Otherwise the legacy path is used: markdown chunking on ``refactored_text`` or
+      ``cleaned_text`` (identical to pre-Phase 3.2 behaviour).
 
     Args:
         state: Embedding pipeline state.
@@ -112,27 +98,56 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             }
         )
 
-        docling_doc = state.get("docling_document")
-        if docling_doc is not None:
-            # Docling-native path: attempt HybridChunker, fall back on any error.
-            try:
-                chunks = _chunk_with_docling(state, config, base_metadata)
-                processing_log = append_processing_log(state, "hybrid_chunker:ok")
-            except Exception as exc:
-                logger.error(
-                    "HybridChunker failed for source=%s: %s — falling back to markdown",
-                    state.get("source_name", "<unknown>"),
-                    exc,
+        parse_result = state.get("parse_result")
+        parser_instance = state.get("parser_instance")
+
+        if parse_result is not None and parser_instance is not None:
+            # ── Parser-abstraction path (Phase 3.2) ───────────────────────
+            if config.chunker == "markdown":
+                from src.ingest.support.parser_base import chunk_with_markdown
+                raw_parser_chunks = chunk_with_markdown(parse_result, config)
+                processing_log = append_processing_log(state, "chunking:markdown_override")
+            else:
+                # config.chunker == "native" (default)
+                try:
+                    raw_parser_chunks = parser_instance.chunk(parse_result)
+                    processing_log = append_processing_log(state, "chunking:native_ok")
+                except Exception as exc:
+                    logger.error(
+                        "Native chunking failed for source=%s: %s — "
+                        "falling back to markdown",
+                        state.get("source_name", "<unknown>"), exc,
+                    )
+                    from src.ingest.support.parser_base import chunk_with_markdown
+                    raw_parser_chunks = chunk_with_markdown(parse_result, config)
+                    processing_log = append_processing_log(
+                        state, "chunking:fallback_to_markdown"
+                    )
+
+            # Map Chunk → ProcessedChunk preserving Weaviate payload shape.
+            total = len(raw_parser_chunks)
+            chunks: list[ProcessedChunk] = [
+                ProcessedChunk(
+                    text=_normalize_chunk_text(c.text),
+                    metadata={
+                        **base_metadata,
+                        "section_path": c.section_path,
+                        "heading": c.heading,
+                        "heading_level": c.heading_level,
+                        "chunk_index": c.chunk_index,
+                        "total_chunks": total,
+                        **c.extra_metadata,
+                    },
                 )
-                processing_log_tmp = append_processing_log(state, "hybrid_chunker:error")
-                # Temporarily graft the partial log so append_processing_log sees it.
-                state_with_error_log: dict[str, Any] = {**state, "processing_log": processing_log_tmp}
-                chunks = _chunk_with_markdown(state_with_error_log, config, base_metadata)
-                processing_log = append_processing_log(state_with_error_log, "chunking:fallback_to_markdown")
+                for c in raw_parser_chunks
+            ]
+
         else:
-            # Markdown fallback path (no DoclingDocument available).
-            chunks = _chunk_with_markdown(state, config, base_metadata)
-            processing_log = append_processing_log(state, "chunking:markdown_fallback")
+            # ── Legacy fallback (no parse_result in state) ─────────────────
+            # Backward-compat: markdown chunking on refactored_text/cleaned_text.
+            # Preserves pre-Phase 3.2 behaviour exactly.
+            chunks = _chunk_with_markdown_legacy(state, config, base_metadata)
+            processing_log = append_processing_log(state, "chunking:legacy_markdown")
 
     except Exception as exc:
         return {
@@ -147,64 +162,15 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     }
 
 
-def _chunk_with_docling(
-    state: EmbeddingPipelineState,
-    config: Any,
-    base_metadata: dict[str, Any],
-) -> list[ProcessedChunk]:
-    """Chunk a DoclingDocument using Docling's HybridChunker.
-
-    Args:
-        state: state["docling_document"] must be a valid DoclingDocument.
-        config: config.hybrid_chunker_max_tokens controls token size limit.
-        base_metadata: source, source_uri, source_key, source_id, connector,
-            source_version — pre-built by the caller.
-
-    Returns:
-        List of ProcessedChunk with section_path, heading, heading_level,
-        chunk_index, total_chunks, and all base_metadata keys.
-
-    Raises:
-        Any exception from HybridChunker (caller catches and falls back).
-    """
-    from docling_core.transforms.chunker import HybridChunker  # lazy import
-
-    chunker = HybridChunker(
-        max_tokens=config.hybrid_chunker_max_tokens,
-        merge_peers=True,
-    )
-    chunk_iter = chunker.chunk(dl_doc=state["docling_document"])
-    raw_chunks = list(chunk_iter)
-    total = len(raw_chunks)
-
-    chunks: list[ProcessedChunk] = []
-    for idx, chunk in enumerate(raw_chunks):
-        section_meta = _extract_docling_section_metadata(chunk)
-        normalized_text = _normalize_chunk_text(chunk.text)
-        chunks.append(
-            ProcessedChunk(
-                text=normalized_text,
-                metadata={
-                    **base_metadata,
-                    **section_meta,
-                    "chunk_index": idx,
-                    "total_chunks": total,
-                },
-            )
-        )
-    return chunks
-
-
-def _chunk_with_markdown(
+def _chunk_with_markdown_legacy(
     state: EmbeddingPipelineState,
     config: Any,
     base_metadata: dict[str, Any],
 ) -> list[ProcessedChunk]:
     """Chunk markdown text using MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter.
 
-    Behaviorally identical to the pre-redesign chunking_node body (FR-2305).
-    Output is byte-identical to pre-redesign except where _normalize_chunk_text
-    alters non-NFC sequences or removes control characters.
+    Behaviorally identical to the pre-Phase-3.2 chunking_node body. Preserves
+    semantic_chunking flag, heading normalization, and ProcessedChunk metadata shape.
 
     Args:
         state: Pipeline state; uses refactored_text or cleaned_text for chunking.
@@ -216,7 +182,7 @@ def _chunk_with_markdown(
 
     Raises:
         Any exception from the markdown splitters (propagates; markdown path
-        failure is fatal for this document unlike HybridChunker failure).
+        failure is fatal for this document).
     """
     text_for_chunking = normalize_headings_to_markdown(
         state.get("refactored_text") or state.get("cleaned_text", "")
@@ -230,7 +196,6 @@ def _chunk_with_markdown(
             embedder=state["runtime"].embedder,
         )
     else:
-        # Keep markdown section metadata even when semantic splitting is disabled.
         raw_chunks = chunk_markdown(
             text_for_chunking,
             chunk_size=config.chunk_size,

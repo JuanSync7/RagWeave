@@ -4,9 +4,13 @@
 # Deps: src.ingest.common.types, src.ingest.common.schemas
 # Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
 #   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
-#   stored_count, errors, processing_log, docling_document (Optional[Any]),
+#   stored_count, errors, processing_log,
+#   parse_result (Any, ParseResult from parser abstraction — replaces docling_document),
+#   parser_instance (Any, transient parser instance for chunk() call — never serialised),
 #   visual_stored_count (int, FR-602), page_images (Optional[list[Any]], FR-602),
 #   trace_id (str, FR-3052), batch_id (str, FR-3053)
+# NOTE: docling_document field removed (Phase 3.2 / FR-3205 AC 2). It was in-memory
+#   only and was never persisted. Replaced by parse_result + parser_instance.
 # @end-summary
 
 """State contract for the Embedding Pipeline (Phase 2, nodes 6–13)."""
@@ -70,6 +74,11 @@ class EmbeddingPipelineState(TypedDict, total=False):
         Error messages from any node.
     processing_log : list[str]
         Stage completion log entries.
+    parse_result : Any | None
+        ParseResult from the parser abstraction. None on legacy paths.
+    parser_instance : Any | None
+        Transient DocumentParser instance from structure_detection_node.
+        Never serialised. Only valid during a single document's processing.
     """
 
     runtime: Runtime
@@ -93,10 +102,19 @@ class EmbeddingPipelineState(TypedDict, total=False):
     stored_count: int
     errors: list[str]
     processing_log: list[str]
-    docling_document: Optional[Any]
-    """Native DoclingDocument object loaded from CleanDocumentStore at
-    Phase 2 initialization. None if no .docling.json was stored (fallback
-    path). Read by chunking_node to select HybridChunker vs markdown path.
+    parse_result: Optional[Any]
+    """ParseResult from the parser abstraction (Phase 3.2 / FR-3201).
+
+    Populated by structure_detection_node when a ParserRegistry is present.
+    Read by chunking_node to select the appropriate chunking path.
+    None when no parser abstraction ran (legacy regex fallback path).
+    """
+    parser_instance: Optional[Any]
+    """Transient DocumentParser instance retained from structure_detection_node
+    for use by chunking_node.chunk() (Phase 3.2 / FR-3206).
+
+    Never serialised, persisted, or checkpointed. Only valid for the duration
+    of one document's in-memory processing run.
     """
 
     # -- Visual embedding extensions (FR-602) --

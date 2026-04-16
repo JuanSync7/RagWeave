@@ -1,12 +1,16 @@
 # @summary
 # Ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
 # Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
-# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding, src.ingest.doc_processing
+# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding,
+#       src.ingest.doc_processing, src.ingest.support.parser_registry
 # verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
 #   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
 # verify_core_design also calls _check_visual_embedding_config (Task 1.1) which validates
 #   enable_visual_embedding requires enable_docling_parser, colqwen_batch_size 1-32,
 #   page_image_quality 1-100, and page_image_max_dimension 256-4096.
+# verify_core_design also calls _check_parser_abstraction_config (T9) which validates
+#   parser_strategy, chunker, VLM mutual exclusion, and VLM+code incompatibility.
+# ParserRegistry is instantiated in ingest_directory and attached to Runtime (T9).
 # @end-summary
 
 """Ingestion pipeline runtime orchestration and public implementation API.
@@ -54,6 +58,7 @@ from src.vector_db import (
 )
 from src.ingest.support import ensure_docling_ready
 from src.ingest.support import ensure_vision_ready
+from src.ingest.support.parser_registry import ParserRegistry
 from src.ingest.common import (
     ManifestEntry,
     SourceIdentity,
@@ -366,6 +371,84 @@ def _check_visual_embedding_config(
     return errors, warnings
 
 
+def _check_parser_abstraction_config(
+    config: IngestionConfig,
+) -> tuple[list[str], list[str]]:
+    """Validate parser abstraction configuration fields. FR-3301, FR-3320, FR-3340.
+
+    Checks:
+    1. ``parser_strategy`` must be one of the accepted values (FR-3301 AC 3).
+    2. ``chunker`` must be one of the accepted values (FR-3322).
+    3. ``chunker="markdown"`` emits a warning (FR-3323).
+    4. VLM mutual exclusion: ``vlm_mode="builtin"`` AND ``enable_multimodal_processing=True``
+       is an error (FR-3340, FR-3341).
+    5. ``vlm_mode="external"`` AND ``enable_multimodal_processing=True`` is a warning (FR-3342).
+    6. ``enable_vlm_enrichment=True`` AND ``parser_strategy="code"`` is an error (FR-3341).
+
+    Args:
+        config: IngestionConfig to validate.
+
+    Returns:
+        Tuple of (errors, warnings). Errors block pipeline start.
+    """
+    errors: list[str] = []
+    warnings_list: list[str] = []
+
+    # Rule 1: parser_strategy must be a recognised value.
+    _VALID_STRATEGIES = {"auto", "document", "code", "text"}
+    if config.parser_strategy not in _VALID_STRATEGIES:
+        errors.append(
+            f"parser_strategy must be 'auto', 'document', 'code', or 'text', "
+            f"got '{config.parser_strategy}'."
+        )
+
+    # Rule 2: chunker must be a recognised value.
+    _VALID_CHUNKERS = {"native", "markdown"}
+    if config.chunker not in _VALID_CHUNKERS:
+        errors.append(
+            f"chunker must be 'native' or 'markdown', got '{config.chunker}'."
+        )
+
+    # Rule 3: chunker override warning.
+    if config.chunker == "markdown":
+        warnings_list.append(
+            "Chunker override active: all parsers will use markdown-based chunking. "
+            "Native chunking (with richer heading metadata from HybridChunker / "
+            "AST-aware code splitting) is disabled."
+        )
+
+    # Rule 4: VLM mutual exclusion (builtin + multimodal).
+    if config.vlm_mode == "builtin" and config.enable_multimodal_processing:
+        errors.append(
+            "vlm_mode='builtin' and enable_multimodal_processing=True are mutually "
+            "exclusive. vlm_mode='builtin' describes figures at parse time via Docling "
+            "SmolVLM. enable_multimodal_processing describes figures in the Phase 1 "
+            "multimodal node via vision.py. Disable one to prevent double VLM "
+            "processing of figure images."
+        )
+
+    # Rule 5: VLM coexistence info (external + multimodal).
+    if config.vlm_mode == "external" and config.enable_multimodal_processing:
+        warnings_list.append(
+            "vlm_mode='external' and enable_multimodal_processing are both active. "
+            "Phase 1 multimodal node will process figures pre-chunking; "
+            "vlm_mode='external' will enrich chunks post-chunking. Both being active "
+            "is valid but means figures are processed at two pipeline stages."
+        )
+
+    # Rule 6: VLM enrichment incompatible with code parser strategy.
+    enable_vlm = getattr(config, "enable_vlm_enrichment", False)
+    if enable_vlm and config.parser_strategy == "code":
+        errors.append(
+            "VLM enrichment is incompatible with code parser strategy. "
+            "Code parser chunks contain raw source; VLM figure enrichment "
+            "is meaningless for code content. "
+            "Set parser_strategy to 'auto', 'document', or 'text' to use VLM enrichment."
+        )
+
+    return errors, warnings_list
+
+
 def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     """Validate ingestion configuration compatibility and return actionable feedback.
 
@@ -400,6 +483,11 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     ve_errors, ve_warnings = _check_visual_embedding_config(config)
     errors.extend(ve_errors)
     warnings.extend(ve_warnings)
+
+    # Parser abstraction validation (Task T9, FR-3301, FR-3320, FR-3340-FR-3342).
+    pa_errors, pa_warnings = _check_parser_abstraction_config(config)
+    errors.extend(pa_errors)
+    warnings.extend(pa_warnings)
 
     return IngestionDesignCheck(ok=not errors, errors=errors, warnings=warnings)
 
@@ -648,6 +736,18 @@ def ingest_directory(
             _db_client = _db_create_client()
             _db_ensure_bucket(_db_client, config.target_bucket or None)
 
+        # Instantiate parser registry and validate readiness (T9 / FR-3303).
+        try:
+            _parser_registry = ParserRegistry(config)
+            _parser_registry.ensure_all_ready(config)
+        except Exception as _preg_exc:
+            logger.warning(
+                "ParserRegistry initialisation failed: %s — "
+                "structure_detection_node will use legacy Docling fallback.",
+                _preg_exc,
+            )
+            _parser_registry = None
+
         runtime = Runtime(
             config=config,
             embedder=LocalBGEEmbeddings(),
@@ -656,6 +756,7 @@ def ingest_directory(
             if config.build_kg
             else None,
             db_client=_db_client,
+            parser_registry=_parser_registry,
         )
 
         if config.export_processed:
