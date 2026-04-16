@@ -108,3 +108,9 @@ class EmbeddingPipelineState(TypedDict, total=False):
     """UUID v4 trace ID propagated from Phase 1 (FR-3052). Empty string = absent/legacy."""
     batch_id: str
     """Optional batch grouping ID (FR-3053). Empty string when not part of a batch."""
+
+    # -- Cross-document dedup extensions (FR-3403) --
+    dedup_merge_report: list[dict[str, Any]]
+    """List of MergeEvent dicts emitted by cross_document_dedup_node."""
+    dedup_stats: dict[str, Any]
+    """Dedup run statistics: total_input_chunks, exact_matches, fuzzy_matches, novel_chunks, degraded."""

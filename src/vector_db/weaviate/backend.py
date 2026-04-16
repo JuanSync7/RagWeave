@@ -38,6 +38,7 @@ from src.vector_db.weaviate.store import (
     aggregate_by_source as _wv_aggregate_by_source,
     get_collection_stats as _wv_get_collection_stats,
     list_collections as _wv_list_collections,
+    update_chunk_content as _wv_update_chunk_content,
 )
 from src.vector_db.weaviate.visual_store import (
     ensure_visual_collection as _wv_ensure_visual_collection,
@@ -78,6 +79,25 @@ class WeaviateBackend(VectorBackend):
             texts=[d.text for d in documents],
             embeddings=[d.embedding for d in documents],
             metadatas=[d.metadata for d in documents],
+            collection=self._col(collection),
+        )
+
+    def update_chunk_content(
+        self,
+        client: Any,
+        chunk_uuid: str,
+        *,
+        text: str,
+        content_hash: str,
+        fuzzy_fingerprint: Optional[str] = None,
+        collection: Optional[str] = None,
+    ) -> bool:
+        return _wv_update_chunk_content(
+            client,
+            chunk_uuid,
+            text=text,
+            content_hash=content_hash,
+            fuzzy_fingerprint=fuzzy_fingerprint,
             collection=self._col(collection),
         )
 

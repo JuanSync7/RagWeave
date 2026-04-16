@@ -7,11 +7,13 @@
 #   colqwen_batch_size (int), page_image_quality (int), page_image_max_dimension (int)
 # IngestionConfig new fields (Data Lifecycle T1, T4): clean_store_bucket (str), gc_mode (str),
 #   gc_retention_days (int), gc_schedule (str)
+# IngestionConfig new fields (Parser Abstraction Phase 2.2): parser_strategy (str), chunker (str)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
 # PIPELINE_NODE_NAMES includes "visual_embedding" between "embedding_storage" and "knowledge_graph_storage" (FR-604)
 # IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
 # IngestFileResult new fields (Data Lifecycle T3, T6): trace_id (str, default ""), validation (dict, default {})
 # IngestionRunSummary new fields (Data Lifecycle T4): gc_soft_deleted, gc_hard_deleted, gc_retention_purged (int, default 0)
+# Runtime new field (Phase 2.2): parser_registry (Any, typed as Any to avoid circular import)
 # @end-summary
 
 """Shared ingestion pipeline types, configuration, and state contracts.
@@ -197,6 +199,31 @@ class IngestionConfig:
     gc_schedule: str = ""
     """Cron expression for scheduled GC runs. Empty string disables."""
 
+    # -- Cross-document deduplication (FR-3460) --
+    enable_cross_document_dedup: bool = True
+    """Enable cross-document chunk deduplication. Default: True. FR-3402, FR-3460."""
+    enable_fuzzy_dedup: bool = False
+    """Enable Tier 2 MinHash fuzzy dedup (requires enable_cross_document_dedup=True). Default: False. FR-3420."""
+    fuzzy_similarity_threshold: float = 0.95
+    """Jaccard similarity threshold for fuzzy match. Range: [0.0, 1.0]. Default: 0.95. FR-3422."""
+    fuzzy_shingle_size: int = 3
+    """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""
+    fuzzy_num_hashes: int = 128
+    """Number of MinHash permutations. Must be >= 16. Default: 128. FR-3421."""
+    dedup_override_sources: list = field(default_factory=list)
+    """List of source_keys exempt from dedup lookup (per-run). Default: []. FR-3450."""
+
+    # -- Parser Abstraction (Phase 2.2, FR-3301, FR-3320) --
+    parser_strategy: str = "auto"
+    """Parser selection: "auto" (extension-based routing), "document" (Docling),
+    "code" (tree-sitter), "text" (PlainTextParser). Default: "auto". FR-3301.
+    Env var: RAG_INGESTION_PARSER_STRATEGY"""
+    chunker: str = "native"
+    """Chunker selection: "native" (each parser's internal chunker) or
+    "markdown" (force heading-aware markdown splitting for all parsers).
+    Default: "native". FR-3320.
+    Env var: RAG_INGESTION_CHUNKER"""
+
     @property
     def generate_page_images(self) -> bool:
         """Derived flag: True when visual embedding is enabled. FR-107"""
@@ -279,12 +306,17 @@ class Runtime:
         embedder: Embedding model wrapper used by storage stages.
         weaviate_client: Client used for vector and (optionally) metadata storage.
         kg_builder: Optional knowledge graph builder used by KG stages.
+        db_client: Optional database client for metadata storage.
+        parser_registry: Optional ParserRegistry instance. Typed as Any to avoid
+            a circular import between types.py and parser_registry.py. Populated
+            during pipeline initialisation in impl.py (Phase 3.2). FR-3303.
     """
     config: IngestionConfig
     embedder: LocalBGEEmbeddings
     weaviate_client: Any
     kg_builder: Optional[KnowledgeGraphBuilder]
     db_client: Optional[Any] = None
+    parser_registry: Optional[Any] = None  # ParserRegistry; typed Any to avoid circular import
 
 
 class IngestState(TypedDict):
