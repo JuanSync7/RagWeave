@@ -131,11 +131,17 @@ def _build_kg_config() -> KGConfig:
                 RAG_KG_RETRIEVAL_PATH_PATTERNS,
                 RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET,
                 RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION,
+                RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET,
+                RAG_KG_GRAPH_CONTEXT_MARKER_STYLE,
+                RAG_KG_MAX_HOP_FANOUT,
             )
             _kg_config.retrieval_edge_types = RAG_KG_RETRIEVAL_EDGE_TYPES
             _kg_config.retrieval_path_patterns = RAG_KG_RETRIEVAL_PATH_PATTERNS
             _kg_config.graph_context_token_budget = RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET
             _kg_config.enable_graph_context_injection = RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION
+            _kg_config.community_context_token_budget = RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET
+            _kg_config.graph_context_marker_style = RAG_KG_GRAPH_CONTEXT_MARKER_STYLE
+            _kg_config.max_hop_fanout = RAG_KG_MAX_HOP_FANOUT
         except ImportError:
             pass  # Retrieval settings not yet in config
         # Validate retrieval config at startup (REQ-KG-1208)

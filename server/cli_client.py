@@ -292,30 +292,6 @@ def _truncate(text: str, max_len: int) -> str:
     return text[:max_len - 3] + "..." if len(text) > max_len else text
 
 
-def send_query(server: str, query: str, filters: dict) -> dict:
-    """Send a non-streaming query to the RAG API."""
-    payload = {
-        "query": query,
-        **filters,
-        "conversation_id": _CURRENT_CONVERSATION_ID,
-        "memory_enabled": _MEMORY_ENABLED,
-    }
-    data = orjson.dumps(payload)
-    headers = {"Content-Type": "application/json"}
-    if API_KEY:
-        headers["X-API-Key"] = API_KEY
-    elif BEARER_TOKEN:
-        headers["Authorization"] = f"Bearer {BEARER_TOKEN}"
-    req = urllib.request.Request(
-        f"{server}/query",
-        data=data,
-        headers=headers,
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return orjson.loads(resp.read())
-
-
 def send_query_stream(server: str, query: str, filters: dict):
     """Stream a query via SSE. Yields (event_type, data_dict) tuples."""
     payload = {

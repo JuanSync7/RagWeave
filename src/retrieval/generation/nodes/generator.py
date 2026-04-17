@@ -6,7 +6,6 @@
 """LLM generator for RAG answer synthesis, backed by LiteLLM Router."""
 
 import logging
-import re
 from typing import List, Optional, Tuple
 
 from config.settings import (

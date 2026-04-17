@@ -3,16 +3,17 @@
 | Field | Value |
 |-------|-------|
 | **Document** | Embedding Pipeline Design Document |
-| **Version** | 1.0.0 |
+| **Version** | 1.1.0 |
 | **Status** | Active |
-| **Spec Reference** | `EMBEDDING_PIPELINE_SPEC.md` v1.0.0 (FR-591–FR-1304) |
+| **Spec Reference** | `EMBEDDING_PIPELINE_SPEC.md` v1.1.0 (FR-591–FR-1304, FR-1210–FR-1214) |
 | **Companion Documents** | `EMBEDDING_PIPELINE_SPEC.md`, `EMBEDDING_PIPELINE_SPEC_SUMMARY.md`, `DOCUMENT_PROCESSING_DESIGN.md`, `INGESTION_PIPELINE_ENGINEERING_GUIDE.md`, `INGESTION_NEW_ENGINEER_ONBOARDING_CHECKLIST.md`, `INGESTION_PLATFORM_SPEC.md` |
 | **Created** | 2026-03-20 |
-| **Last Updated** | 2026-03-20 |
+| **Last Updated** | 2026-04-15 |
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-03-20 | Split from `INGESTION_PIPELINE_IMPLEMENTATION.md` v1.1.0 — Embedding Pipeline phase tasks only. |
+| 1.1.0 | 2026-04-15 | Added Task 1.7b — Batch Embedding Optimisation (FR-1210–FR-1214). Updated task dependency graph and task-to-requirement mapping. |
 
 > **Document Intent.** This guide translates the requirements defined in `EMBEDDING_PIPELINE_SPEC.md`
 > (FR-591–FR-1304) into a phased, task-oriented implementation plan. Each task maps to one or more
@@ -222,6 +223,87 @@ all existing chunks for the document before inserting fresh ones.
 **Testing Strategy:** Integration tests against a Weaviate test collection; verify point count
 does not increase on re-upsert; verify stale chunks are gone after re-ingestion of a changed
 document.
+
+---
+
+### Task 1.7b — Batch Embedding Optimisation
+
+**Description:** Refactor the embedding generation step in `src/ingest/nodes/embedding_storage.py`
+to group chunks into configurable batches before sending them to the embedding model, replacing
+the current single-call approach. Batch formation, configuration, partial batch handling, per-batch
+error isolation, and throughput observability are all in scope.
+
+**Requirements Covered:** FR-1210, FR-1211, FR-1212, FR-1213, FR-1214
+
+**Dependencies:** Task 1.7 (embedding generation must exist before batching is layered on)
+
+**Complexity:** M
+
+**Subtasks:**
+
+1. **Batch formation logic.** Partition the chunk list into batches of `embedding.batch_size`
+   chunks before calling `runtime.embedder.embed_documents()`. Maintain strict input ordering
+   so that output embeddings have a 1:1 positional correspondence with input chunks. Do not
+   reorder chunks across batches (FR-1210 AC-1, AC-2, AC-3).
+2. **Batch size configuration.** Add `embedding.batch_size` to the pipeline configuration with a
+   default of 64. Enforce minimum 1, maximum 2048. Support override via the
+   `RAGWEAVE_EMBEDDING_BATCH_SIZE` environment variable. If both config file and env var are
+   set, the config file value takes precedence (FR-1211 AC-1 through AC-5).
+3. **Partial batch handling.** When the total chunk count is not evenly divisible by the batch
+   size, the final batch contains the remaining chunks (fewer than `batch_size`). The embedding
+   call must handle this without error. Zero-chunk input (all chunks filtered by quality
+   validation) must produce zero embedding requests and return `stored_count: 0` (FR-1212
+   AC-1 through AC-3).
+4. **Per-batch error isolation.** If an embedding batch fails, retry only the failed batch.
+   Successfully embedded batches are not re-embedded during retry. After exhausting retries for
+   a batch (using the existing exponential backoff from Task 1.7), log the failure identifying
+   the batch index and chunk range, store embeddings from successful batches, and report the
+   partial failure in the pipeline state `errors` list. Chunks from a failed batch are not
+   written to the vector store without embeddings (FR-1213 AC-1 through AC-4).
+5. **Batch throughput observability.** Log batch-level metrics at INFO level: chunk count per
+   batch, embedding latency per batch (wall-clock milliseconds), and aggregate throughput
+   (chunks per second) across all batches for the document. Emit as structured key-value log
+   entries (FR-1214 AC-1 through AC-3).
+
+**Implementation approach:**
+
+```python
+# Pseudocode for batch embedding within embedding_storage_node
+
+batch_size = config.embedding_batch_size  # default 64
+batches = [texts[i:i+batch_size] for i in range(0, len(texts), batch_size)]
+all_vectors = []
+failed_batch_indices = []
+
+for batch_idx, batch_texts in enumerate(batches):
+    start_time = time.monotonic()
+    try:
+        vectors = runtime.embedder.embed_documents(batch_texts)
+        all_vectors.extend(vectors)
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        logger.info(
+            "batch_embedding batch_idx=%d chunks=%d latency_ms=%.1f",
+            batch_idx, len(batch_texts), elapsed_ms,
+        )
+    except Exception as exc:
+        # Retry logic (exponential backoff) for this batch only
+        # On exhaustion: log error, mark batch as failed, continue
+        failed_batch_indices.append(batch_idx)
+        all_vectors.extend([None] * len(batch_texts))  # placeholder
+
+# Filter out chunks whose batch failed before writing to vector store
+```
+
+**Testing Strategy:**
+
+- Unit test: 100 chunks with `batch_size=32` produces 4 batches (32, 32, 32, 4). Verify
+  all 100 embeddings are returned in order.
+- Unit test: 1 chunk with `batch_size=64` produces 1 batch of 1. Verify correct output.
+- Unit test: 0 chunks produces 0 embedding requests and `stored_count: 0`.
+- Unit test with mocked embedder: simulate batch 3 of 4 failing. Verify batches 1, 2, 4 are
+  stored, batch 3 chunks are excluded, and the error is reported in pipeline state.
+- Config validation test: batch_size=0 rejected, batch_size=3000 rejected, env var override
+  works, config file takes precedence over env var.
 
 ---
 
@@ -707,6 +789,7 @@ Phase 1 (Core Embedding — MVP)                                       │
 ├── Task 1.2: Embedding Pipeline DAG Skeleton ◄─── Task S.2 ────────┤ [CRITICAL]
 ├── Task 1.6: Node 6 Chunking ◄─── Task S.2, Task 1.2              │ [CRITICAL]
 ├── Task 1.7: Node 12 Embedding Generation ◄─── Task 1.6           │ [CRITICAL]
+├── Task 1.7b: Batch Embedding Optimisation ◄─── Task 1.7          │ [CRITICAL]
 ├── Task 1.8: Vector Store Upsert ◄─── Task 1.7                    │ [CRITICAL]
 ├── Task 1.9: Result Reporting ◄─── Task 1.8                        │
 └── Task 1.10: Re-Ingestion Flow ◄─── Task S.2, Task 1.8            │
@@ -745,6 +828,7 @@ Critical path (full): + 2.2a → 2.2b → 4.0 → (embedding of enriched content
 | 1.2 Embedding Pipeline DAG Skeleton | FR-591, FR-901, FR-1001, FR-1301 |
 | 1.6 Node 6: Chunking (Rule-Based) | FR-601, FR-602, FR-603, FR-604, FR-605, FR-606 |
 | 1.7 Node 12: Embedding Generation | FR-1201, FR-1202, FR-1203, FR-1204 |
+| 1.7b Batch Embedding Optimisation | FR-1210, FR-1211, FR-1212, FR-1213, FR-1214 |
 | 1.8 Vector Store Upsert | FR-1205, FR-1206, FR-1207, FR-1208, FR-1209 |
 | 1.9 Result Reporting | FR-1201 |
 | 1.10 Re-Ingestion Flow | FR-593, FR-1205, FR-1208 |
@@ -763,7 +847,7 @@ Critical path (full): + 2.2a → 2.2b → 4.0 → (embedding of enriched content
 | 4.3 Batch Processing Hardening | — (cross-cutting) |
 | 4.4 Schema Migration | — (cross-cutting) |
 
-<!-- VERIFY: All FR-591–FR-1304 requirements from EMBEDDING_PIPELINE_SPEC.md appear above. -->
+<!-- VERIFY: All FR-591–FR-1304 and FR-1210–FR-1214 requirements from EMBEDDING_PIPELINE_SPEC.md appear above. -->
 
 ---
 
