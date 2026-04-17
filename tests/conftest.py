@@ -1,5 +1,6 @@
 """Test bootstrap with lightweight stubs for optional heavy dependencies."""
 
+import contextlib
 import math
 import sys
 import types
@@ -210,6 +211,67 @@ def _install_stub_modules() -> None:
         # minio.commonconfig — sometimes imported for ObjectWriteResult etc.
         minio_commonconfig = types.ModuleType("minio.commonconfig")
         sys.modules["minio.commonconfig"] = minio_commonconfig
+
+    if "PIL" not in sys.modules:
+        pil_mod = types.ModuleType("PIL")
+        pil_image_mod = types.ModuleType("PIL.Image")
+
+        class _PILImage:
+
+            def __init__(self, *args, **kwargs):
+                self.size = (100, 100)
+                self.mode = "RGB"
+
+            @classmethod
+            def open(cls, *args, **kwargs):
+                return cls()
+
+            @classmethod
+            def fromarray(cls, *args, **kwargs):
+                return cls()
+
+            def convert(self, *args, **kwargs):
+                return self
+
+            def resize(self, *args, **kwargs):
+                return self
+
+            def save(self, *args, **kwargs):
+                pass
+
+        pil_image_mod.Image = _PILImage
+        pil_mod.Image = pil_image_mod
+        sys.modules["PIL"] = pil_mod
+        sys.modules["PIL.Image"] = pil_image_mod
+
+    if "prometheus_client" not in sys.modules:
+        prom = types.ModuleType("prometheus_client")
+
+        class _MetricStub:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def labels(self, *args, **kwargs):
+                return self
+
+            def inc(self, *args, **kwargs):
+                pass
+
+            def set(self, *args, **kwargs):
+                pass
+
+            def observe(self, *args, **kwargs):
+                pass
+
+            def time(self):
+                return contextlib.nullcontext()
+
+        prom.Counter = _MetricStub
+        prom.Gauge = _MetricStub
+        prom.Histogram = _MetricStub
+        prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+        prom.generate_latest = lambda registry=None: b""
+        sys.modules["prometheus_client"] = prom
 
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")
