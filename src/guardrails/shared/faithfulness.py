@@ -20,7 +20,7 @@ import orjson
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Optional
 
 from src.guardrails.common import RailVerdict
 
