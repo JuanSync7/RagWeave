@@ -157,3 +157,72 @@ def test_phase2_errors_propagate(tmp_path):
         )
 
     assert "embed_failed:weaviate_down" in result.errors
+
+
+def test_phase1_error_skips_phase2(tmp_path):
+    """Phase 1 error state must short-circuit before Phase 2 is invoked.
+
+    When Phase 1 returns a non-empty errors list, run_embedding_pipeline must
+    not be called at all, and the result carries Phase 1 errors with stored_count==0.
+    """
+    doc = tmp_path / "doc.txt"
+    doc.write_text("irrelevant content")
+    runtime = _make_runtime(tmp_path)
+
+    phase1_error_state = {
+        "source_hash": "",
+        "raw_text": "",
+        "cleaned_text": "",
+        "refactored_text": None,
+        "structure": {},
+        "multimodal_notes": [],
+        "errors": ["parse_failed:unsupported_format"],
+        "processing_log": ["document_ingestion:failed"],
+    }
+
+    with patch("src.ingest.impl.run_document_processing",
+               return_value=phase1_error_state), \
+         patch("src.ingest.impl.run_embedding_pipeline") as mock_phase2:
+        result = ingest_file(
+            source_path=doc, runtime=runtime,
+            source_name="doc.txt", source_uri=doc.as_uri(),
+            source_key="local_fs:test:5", source_id="test:5",
+            connector="local_fs", source_version="0",
+        )
+
+    mock_phase2.assert_not_called()
+    assert result.errors == ["parse_failed:unsupported_format"]
+    assert result.stored_count == 0
+
+
+def test_phase1_success_passes_clean_text_to_phase2(tmp_path):
+    """Phase 1 success → clean text flows through CleanDocumentStore → Phase 2.
+
+    When Phase 1 succeeds, run_embedding_pipeline must be called with the
+    clean_text produced by Phase 1 (cleaned_text when no refactored_text).
+    Phase 2 result is reflected in the returned IngestFileResult.
+    """
+    doc = tmp_path / "doc.txt"
+    doc.write_text("raw source text")
+    runtime = _make_runtime(tmp_path)
+
+    expected_clean = "polished clean text from phase 1"
+    p1 = _phase1_result(doc, cleaned=expected_clean)
+    p2 = _phase2_result()
+
+    with patch("src.ingest.impl.run_document_processing", return_value=p1), \
+         patch("src.ingest.impl.run_embedding_pipeline", return_value=p2) as mock_p2:
+        result = ingest_file(
+            source_path=doc, runtime=runtime,
+            source_name="doc.txt", source_uri=doc.as_uri(),
+            source_key="local_fs:test:6", source_id="test:6",
+            connector="local_fs", source_version="1",
+        )
+
+    # Phase 2 must have been called with the clean text from Phase 1.
+    mock_p2.assert_called_once()
+    assert mock_p2.call_args.kwargs.get("clean_text") == expected_clean
+
+    # Result must reflect Phase 2 output.
+    assert result.stored_count == p2["stored_count"]
+    assert result.errors == []

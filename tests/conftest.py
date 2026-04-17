@@ -116,10 +116,27 @@ def _install_stub_modules() -> None:
         def exp(value):
             return math.exp(value)
 
+        class _InferenceMode:
+            """Context manager stub for torch.inference_mode()."""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        def inference_mode():
+            return _InferenceMode()
+
         torch.cuda = _Cuda()
         torch.no_grad = no_grad
+        torch.inference_mode = inference_mode
         torch.tensor = tensor
         torch.exp = exp
+        # dtype stubs
+        torch.float32 = "float32"
+        torch.float16 = "float16"
+        torch.bfloat16 = "bfloat16"
         sys.modules["torch"] = torch
 
     if "transformers" not in sys.modules:
@@ -210,6 +227,71 @@ def _install_stub_modules() -> None:
         # minio.commonconfig — sometimes imported for ObjectWriteResult etc.
         minio_commonconfig = types.ModuleType("minio.commonconfig")
         sys.modules["minio.commonconfig"] = minio_commonconfig
+
+    if "PIL" not in sys.modules:
+        pil_mod = types.ModuleType("PIL")
+        pil_image_mod = types.ModuleType("PIL.Image")
+
+        class _PILImage:
+            """Minimal PIL.Image stub."""
+
+            def __init__(self, width=1, height=1, mode="RGB"):
+                self.width = width
+                self.height = height
+                self.mode = mode
+                self.size = (width, height)
+
+            def resize(self, size, resample=None):
+                return _PILImage(size[0], size[1], self.mode)
+
+            def save(self, fp, format=None, **kwargs):
+                pass
+
+        def _pil_open(*args, **kwargs):
+            return _PILImage()
+
+        pil_image_mod.Image = _PILImage
+        pil_image_mod.open = _pil_open
+        pil_image_mod.BICUBIC = 3
+        pil_image_mod.LANCZOS = 1
+        pil_mod.Image = pil_image_mod
+        sys.modules["PIL"] = pil_mod
+        sys.modules["PIL.Image"] = pil_image_mod
+
+    if "prometheus_client" not in sys.modules:
+        prom = types.ModuleType("prometheus_client")
+
+        class _MetricBase:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def labels(self, **kwargs):
+                return self
+
+            def inc(self, amount=1):
+                pass
+
+            def set(self, value):
+                pass
+
+            def observe(self, value):
+                pass
+
+        class Counter(_MetricBase):
+            pass
+
+        class Gauge(_MetricBase):
+            pass
+
+        class Histogram(_MetricBase):
+            pass
+
+        prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+        prom.generate_latest = lambda registry=None: b""
+        prom.Counter = Counter
+        prom.Gauge = Gauge
+        prom.Histogram = Histogram
+        sys.modules["prometheus_client"] = prom
 
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")
