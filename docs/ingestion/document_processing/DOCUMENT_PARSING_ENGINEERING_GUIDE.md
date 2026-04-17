@@ -1,23 +1,15 @@
-> **⚠ DRAFT — PRE-IMPLEMENTATION DESIGN RATIONALE**
->
-> This document was authored **before** source code existed and has not been validated against a running implementation. File paths, CLI syntax, error messages, and troubleshooting sections are **speculative**. Sections that claim post-implementation knowledge (Operations, Troubleshooting, exact module paths, performance numbers) are provisional until the code lands.
->
-> To be **fully rewritten post-implementation** using `/write-engineering-guide` (which now enforces a non-skippable existence check). For authoritative content prior to rewrite, consult the companion `DOCUMENT_PARSING_SPEC.md`, `DOCUMENT_PARSING_DESIGN.md`, and `DOCUMENT_PARSING_IMPLEMENTATION.md`.
->
-> **Salvage audit:** Architecture Overview (§1), Data Flow (§2), Extension Guide (§4), and Test Fixtures (§6.2) survive rewrite. Troubleshooting (§3/§5) will be regenerated from real code.
-
----
-
 > **Document type:** Engineering guide (Layer 5)
 > **Upstream:** DOCUMENT_PARSING_IMPLEMENTATION.md
-> **Last updated:** 2026-04-15
-> **Status:** DRAFT (pre-implementation)
+> **Last updated:** 2026-04-17
+> **Status:** Authoritative (post-implementation)
 
-# Document Parsing Abstraction — Engineering Guide (v1.0.0-draft)
+# Document Parsing Engineering Guide
 
-## 1. Architecture Overview
+## 1. Overview
 
-The Document Parsing Abstraction replaces the former Docling-coupled parsing path with a pluggable strategy system. Instead of every pipeline node importing `parse_with_docling()` directly and passing `DoclingDocument` through LangGraph state, all parsing now flows through a single `DocumentParser` protocol. The pipeline never sees parser-internal types.
+The Document Parsing Abstraction replaces the former Docling-coupled parsing path with a pluggable strategy system. All parsing now flows through a single `DocumentParser` protocol. Pipeline nodes never import concrete parser classes or handle parser-internal types (`DoclingDocument`, tree-sitter `Tree`).
+
+**Functional requirements covered:** FR-3200–FR-3342.
 
 Three problems drove this design:
 
@@ -25,824 +17,528 @@ Three problems drove this design:
 2. **No code or plain text support.** Source code and markdown files were forced through Docling's OCR/layout path, wasting compute and losing AST structure.
 3. **Silent double VLM processing.** `vlm_mode="builtin"` and `enable_multimodal_processing=true` could both be active with no warning.
 
-### 1.1 Parser Strategy Families
+---
 
-| Strategy | Parser Class | Input Formats | Chunking Approach | External Deps |
-|----------|-------------|---------------|-------------------|---------------|
-| **Document** | `DoclingParser` | `.pdf`, `.docx`, `.pptx`, `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp` | `HybridChunker` (Docling native) | `docling`, `docling-core` |
-| **Code** | `CodeParser` | `.py`, `.rs`, `.go`, `.ts`, `.tsx`, `.js`, `.jsx`, `.java`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.cs`, `.rb`, `.kt`, `.swift`, `.scala`, `.sh`, `.bash`, `.zsh`, `.yaml`, `.yml`, `.toml`, `.json`, `Dockerfile`, `Makefile` | One chunk per top-level function/class (AST-guided) | `tree-sitter`, language grammar packages |
-| **Plain Text** | `PlainTextParser` | `.md`, `.txt`, `.rst`, `.html`, `.htm` | Heading-aware markdown splitter | None (optional: `markdownify`, `pypandoc`) |
-
-### 1.2 Key Architecture Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| **`Protocol` over ABC** | Structural subtyping avoids forced inheritance. Parsers need only satisfy the method signatures. No base class import required. |
-| **Per-document parser instances** | Eliminates state-leakage bugs between documents. `parse()` populates internal state, `chunk()` consumes it. A new parser instance is created per document. |
-| **`parser_instance` in LangGraph state** | Transient, never serialised. Carries opaque internal state between `structure_detection_node` and `chunking_node` within a single document's processing. |
-| **Chunker override is external to parsers** | Parsers always implement native chunking. The `chunker="markdown"` override is applied by the calling node (`chunking_node`), not inside each parser. Parsers do not need to know about the override. |
-| **Backward-compatible aliases** | Existing callers of `parse_with_docling()`, `ensure_docling_ready()`, and `DoclingParseResult` continue to work. The new class is purely additive. |
-
-### 1.3 Component Map
+## 2. Module Layout
 
 ```
 src/ingest/
 ├── support/
-│   ├── parser_base.py          # Protocol, ParseResult, Chunk, chunk_with_markdown()
-│   ├── parser_registry.py      # ParserRegistry (extension routing)
-│   ├── parser_text.py          # PlainTextParser
-│   ├── parser_code.py          # CodeParser (tree-sitter)
-│   ├── docling.py              # DoclingParser + legacy standalone functions
-│   └── markdown.py             # Shared markdown chunking (used by chunk_with_markdown)
+│   ├── __init__.py                     # Re-exports: DocumentParser, ParseResult,
+│   │                                   #   Chunk, chunk_with_markdown,
+│   │                                   #   validate_extra_metadata, ParserRegistry
+│   ├── parser_base.py                  # Protocol + dataclasses + shared helpers
+│   ├── parser_registry.py              # ParserRegistry, get_parser_for(),
+│   │                                   #   ensure_all_ready()
+│   ├── parser_text.py                  # PlainTextParser (.md, .txt, .rst, .html)
+│   ├── parser_code.py                  # CodeParser (tree-sitter AST)
+│   └── docling.py                      # DoclingParser + legacy standalone functions
 ├── common/
-│   └── types.py                # IngestionConfig (parser_strategy, chunker fields), Runtime
+│   └── types.py                        # IngestionConfig (parser_strategy, chunker),
+│                                       #   Runtime (parser_registry field)
 ├── doc_processing/
 │   └── nodes/
-│       └── structure_detection.py  # Calls registry.get_parser() + parser.parse()
-├── embedding/
-│   ├── state.py                # EmbeddingPipelineState (parse_result, parser_instance)
-│   └── nodes/
-│       └── chunking.py         # Calls parser.chunk() or chunk_with_markdown()
-└── impl.py                     # Pipeline init, VLM guard, config validation
+│       └── structure_detection.py      # Calls registry.get_parser() + parser.parse()
+└── embedding/
+    └── nodes/
+        └── chunking.py                 # Calls parser.chunk() or chunk_with_markdown()
 ```
+
+| File | Exports |
+|------|---------|
+| `parser_base.py` | `DocumentParser`, `ParseResult`, `Chunk`, `chunk_with_markdown`, `validate_extra_metadata` |
+| `parser_registry.py` | `ParserRegistry`, `get_parser_for`, `ensure_all_ready` |
+| `parser_text.py` | `PlainTextParser` |
+| `parser_code.py` | `CodeParser` |
+| `docling.py` | `DoclingParser`, `DoclingParseResult`, `parse_with_docling`, `ensure_docling_ready`, `warmup_docling_models` |
 
 ---
 
-## 2. Data Flow
+## 3. Key Abstractions
 
-### 2.1 Document Parser Flow (PDF -> ParseResult -> Chunks)
-
-```
-report.pdf
-    │
-    ▼
-ParserRegistry.get_parser("report.pdf")
-    │  extension ".pdf" -> strategy "document" -> DoclingParser()
-    ▼
-DoclingParser.parse(file_path, config)
-    │  Internally calls parse_with_docling()
-    │  Stores DoclingDocument in self._docling_document (encapsulated)
-    │  Returns ParseResult(markdown, headings, has_figures, page_count)
-    ▼
-structure_detection_node stores parse_result + parser_instance in state
-    │
-    ▼
-chunking_node retrieves parse_result + parser_instance from state
-    │
-    ├── config.chunker == "native"?
-    │       │
-    │       ▼  YES
-    │   DoclingParser.chunk(parse_result)
-    │       │  Uses self._docling_document with HybridChunker
-    │       │  Maps HybridChunker output to list[Chunk]
-    │       │  section_path from meta.headings join
-    │       ▼
-    │   list[Chunk] -> map to ProcessedChunk -> downstream nodes
-    │
-    └── config.chunker == "markdown"?
-            │
-            ▼  YES
-        chunk_with_markdown(parse_result, config)
-            │  Heading-aware split on ParseResult.markdown
-            ▼
-        list[Chunk] -> map to ProcessedChunk -> downstream nodes
-```
-
-### 2.2 Code Parser Flow (source -> AST -> Chunks + KG triples)
-
-```
-utils.py
-    │
-    ▼
-ParserRegistry.get_parser("utils.py")
-    │  extension ".py" -> strategy "code" -> CodeParser()
-    ▼
-CodeParser.parse(file_path, config)
-    │  Reads file bytes
-    │  Loads tree-sitter Python grammar
-    │  Parses into AST, stores self._tree (encapsulated)
-    │  markdown = "```python\n<source>\n```"
-    │  headings = [module docstring or filename]
-    │  Returns ParseResult(markdown, headings, has_figures=False, page_count=0)
-    ▼
-CodeParser.chunk(parse_result)
-    │  Walks self._tree root children
-    │  One chunk per top-level function/class
-    │  Module-level chunk for imports/constants
-    │  extra_metadata: language, function_name, class_name, docstring,
-    │                  imports, decorators, kg_relationships
-    │
-    │  KG relationships (deterministic, no LLM):
-    │    - "import os"          -> {type: "imports", source: "module", target: "os"}
-    │    - "class Dog(Animal)"  -> {type: "inherits", source: "Dog", target: "Animal"}
-    │    - "process_data()"     -> {type: "calls", source: "run", target: "process_data"}
-    ▼
-list[Chunk] -> map to ProcessedChunk -> downstream nodes
-```
-
-### 2.3 Plain Text Parser Flow
-
-```
-README.md
-    │
-    ▼
-ParserRegistry.get_parser("README.md")
-    │  extension ".md" -> strategy "text" -> PlainTextParser()
-    ▼
-PlainTextParser.parse(file_path, config)
-    │  Reads file as UTF-8
-    │  .html -> convert with markdownify (or fallback tag stripper)
-    │  .rst -> convert with pypandoc (or fallback heading heuristic)
-    │  .md/.txt -> content as-is
-    │  Extracts headings from markdown # patterns
-    │  has_figures = scan for ![...](...)
-    │  page_count = 0
-    ▼
-PlainTextParser.chunk(parse_result)
-    │  Delegates to chunk_with_markdown(parse_result, config)
-    │  Heading-aware split with section_path from heading hierarchy
-    ▼
-list[Chunk] -> map to ProcessedChunk -> downstream nodes
-```
-
-### 2.4 Chunker Override Flow
-
-When `chunker="markdown"` is set in config, the override is applied in `chunking_node`, not inside parsers:
-
-```
-chunking_node receives parse_result + parser_instance from state
-    │
-    ├── config.chunker == "native"
-    │       ▼
-    │   parser_instance.chunk(parse_result)   # Each parser's native chunking
-    │       │
-    │       └── On failure: fall back to chunk_with_markdown()
-    │
-    └── config.chunker == "markdown"
-            ▼
-        chunk_with_markdown(parse_result, config)   # Uniform markdown splitting
-        (Parser's native chunk() is never called)
-```
-
-The override trades structural richness for uniformity. Document chunks lose HybridChunker heading metadata. Code chunks lose AST-guided function boundaries.
-
----
-
-## 3. How to Add a New Parser
-
-### 3.1 Step-by-Step Guide (with code template)
-
-**Example:** Adding a `DeepDocParser` for RAGFlow's DeepDoc backend.
-
-**Step 1.** Create `src/ingest/support/parser_deepdoc.py`:
+### 3.1 `DocumentParser` Protocol
 
 ```python
-# src/ingest/support/parser_deepdoc.py
-
-# @summary
-# DeepDoc parser for document formats using RAGFlow's DeepDoc backend.
-# Exports: DeepDocParser
-# Deps: pathlib, src.ingest.support.parser_base
-# @end-summary
-
-"""DeepDoc parser implementation."""
-
-from __future__ import annotations
-
-import logging
-from pathlib import Path
-from typing import Any
-
-from src.ingest.support.parser_base import Chunk, ParseResult
-
-logger = logging.getLogger(__name__)
-
-
-class DeepDocParser:
-    """RAGFlow DeepDoc parser implementing DocumentParser protocol."""
-
-    def __init__(self) -> None:
-        self._internal_doc: Any = None   # DeepDoc internal state (never exposed)
-        self._config: Any = None
-
-    def parse(self, file_path: Path, config: Any) -> ParseResult:
-        """Parse using DeepDoc. Returns ParseResult with no internal types."""
-        self._config = config
-
-        # --- Your parsing logic here ---
-        # result = deepdoc_convert(file_path)
-        # self._internal_doc = result.internal_document  # encapsulated
-
-        return ParseResult(
-            markdown="...",          # Document as markdown
-            headings=["..."],        # Extracted headings
-            has_figures=False,       # Whether figures were detected
-            page_count=0,           # Page count (0 if not applicable)
-        )
-
-    def chunk(self, parse_result: ParseResult) -> list[Chunk]:
-        """Chunk using DeepDoc's native chunking."""
-        if self._internal_doc is None:
-            raise RuntimeError(
-                "DeepDocParser.chunk() called before parse()."
-            )
-
-        # --- Your chunking logic here ---
-        # raw_chunks = deepdoc_chunk(self._internal_doc)
-
-        chunks: list[Chunk] = []
-        # for idx, raw in enumerate(raw_chunks):
-        #     chunks.append(Chunk(
-        #         text=raw.text,
-        #         section_path="Chapter > Section",
-        #         heading="Section Title",
-        #         heading_level=2,
-        #         chunk_index=idx,
-        #         extra_metadata={},
-        #     ))
-        return chunks
+@runtime_checkable
+class DocumentParser(Protocol):
+    def parse(self, file_path: Path, config: Any) -> ParseResult: ...
+    def chunk(self, parse_result: ParseResult) -> list[Chunk]: ...
 
     @classmethod
-    def ensure_ready(cls, config: Any) -> None:
-        """Verify DeepDoc is installed and functional."""
-        try:
-            import deepdoc  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "DeepDoc is required but not installed. "
-                "Install with: uv add ragflow-deepdoc"
-            ) from exc
+    def ensure_ready(cls, config: Any) -> None: ...
 
     @classmethod
-    def warmup(cls, config: Any) -> None:
-        """Pre-download DeepDoc models if needed."""
-        cls.ensure_ready(config)
+    def warmup(cls, config: Any) -> None: ...
 ```
 
-**Key rules for the implementation:**
-
-- `parse()` returns `ParseResult` with exactly four fields. No internal types.
-- `chunk()` returns `list[Chunk]` with exactly six fields per chunk. `extra_metadata` values must be JSON-serialisable.
-- Internal state (`self._internal_doc`) stays on the instance. It never appears in `ParseResult`, `Chunk`, or LangGraph state.
+- `parse()` may retain internal state (e.g., `DoclingDocument`, AST) on the instance between calls. That state must never appear in `ParseResult`.
 - `chunk()` before `parse()` must raise `RuntimeError`.
+- `ensure_ready()` is called at pipeline startup to validate runtime dependencies.
+- `warmup()` pre-downloads models; called during deployment. Implementations without expensive init are no-ops.
+- `isinstance(obj, DocumentParser)` works at runtime because the protocol is `@runtime_checkable`.
 
-### 3.2 Registration
-
-**Step 2.** Register the parser in `ParserRegistry.__init__()` in `src/ingest/support/parser_registry.py`:
-
-```python
-# In ParserRegistry.__init__():
-
-# Attempt to register DeepDoc parser
-if getattr(config, "enable_deepdoc_parser", False):
-    try:
-        from src.ingest.support.parser_deepdoc import DeepDocParser
-        self._strategy_map["document"] = DeepDocParser  # Replaces DoclingParser
-    except ImportError:
-        logger.info("DeepDoc not available; skipping.")
-```
-
-If DeepDoc should coexist with Docling as a separate strategy (rather than replacing it), use a distinct strategy name:
+### 3.2 `ParseResult` Dataclass
 
 ```python
-self._strategy_map["deepdoc"] = DeepDocParser
+@dataclass
+class ParseResult:
+    markdown: str
+    headings: list[str]
+    has_figures: bool
+    page_count: int
 ```
 
-And add extension mappings if needed, or use `parser_strategy="deepdoc"` as a config override.
+All fields are JSON-serialisable. No parser-internal types may appear here (FR-3201).
 
-**Step 3.** Add a config field if the parser needs a toggle:
+### 3.3 `Chunk` Dataclass
 
 ```python
-# config/settings.py
-RAG_INGESTION_ENABLE_DEEPDOC_PARSER: bool = os.getenv(
-    "RAG_INGESTION_ENABLE_DEEPDOC_PARSER", "false"
-).lower() == "true"
-
-# src/ingest/common/types.py, in IngestionConfig
-enable_deepdoc_parser: bool = RAG_INGESTION_ENABLE_DEEPDOC_PARSER
+@dataclass
+class Chunk:
+    text: str
+    section_path: str
+    heading: str
+    heading_level: int
+    chunk_index: int
+    extra_metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-### 3.3 Testing Your Parser
+`extra_metadata` values must be JSON-serialisable. Code parser chunks carry `language`, `function_name`, `class_name`, `docstring`, `imports`, `decorators`, `kg_relationships`. Document parser chunks typically leave `extra_metadata` empty (FR-3202).
 
-Write tests in `tests/ingest/test_parser_deepdoc.py`:
+### 3.4 `DoclingParser`
+
+`src/ingest/support/docling.py`
 
 ```python
-import json
-from dataclasses import asdict
-from pathlib import Path
-
-from src.ingest.support.parser_base import DocumentParser, ParseResult, Chunk
-
-
-class TestDeepDocParserContract:
-    """Verify DeepDocParser satisfies the DocumentParser protocol."""
-
-    def test_satisfies_protocol(self):
-        from src.ingest.support.parser_deepdoc import DeepDocParser
-        parser = DeepDocParser()
-        assert isinstance(parser, DocumentParser)
-
-    def test_parse_result_has_no_internal_types(self, sample_pdf, mock_config):
-        from src.ingest.support.parser_deepdoc import DeepDocParser
-        parser = DeepDocParser()
-        result = parser.parse(sample_pdf, mock_config)
-
-        assert isinstance(result, ParseResult)
-        assert not hasattr(result, "internal_doc")
-        assert not hasattr(result, "deepdoc_document")
-        # Must be JSON-serialisable
-        json.dumps(asdict(result))
-
-    def test_chunk_produces_valid_chunks(self, sample_pdf, mock_config):
-        from src.ingest.support.parser_deepdoc import DeepDocParser
-        parser = DeepDocParser()
-        result = parser.parse(sample_pdf, mock_config)
-        chunks = parser.chunk(result)
-
-        assert all(isinstance(c, Chunk) for c in chunks)
-        for c in chunks:
-            json.dumps(asdict(c))  # All fields serialisable
-
-    def test_chunk_before_parse_raises(self, mock_config):
-        from src.ingest.support.parser_deepdoc import DeepDocParser
-        parser = DeepDocParser()
-        dummy = ParseResult(markdown="x", headings=[], has_figures=False, page_count=0)
-        with pytest.raises(RuntimeError, match="before parse"):
-            parser.chunk(dummy)
+class DoclingParser:
+    def __init__(self) -> None: ...
+    def parse(self, file_path: Path, config: Any) -> ParseResult: ...
+    def chunk(self, parse_result: ParseResult) -> list[Chunk]: ...
+    @classmethod
+    def ensure_ready(cls, config: Any) -> None: ...
+    @classmethod
+    def warmup(cls, config: Any) -> None: ...
 ```
 
-### 3.4 Common Pitfalls
+- `parse()` calls `parse_with_docling()` internally, stores the `DoclingDocument` in `self._docling_document`. Returns `ParseResult` with no `docling_document` attribute.
+- `chunk()` uses Docling's `HybridChunker(max_tokens=self._max_tokens, merge_peers=True)`. Heading hierarchy is derived from `HybridChunker` metadata's `headings` list: the last entry becomes `heading`, the full join becomes `section_path`, and the list length becomes `heading_level`.
+- `ensure_ready()` delegates to `ensure_docling_ready()`.
+- `warmup()` delegates to `warmup_docling_models()`. When `vlm_mode="builtin"`, `with_smolvlm=True` is passed.
 
-| Pitfall | Symptom | Fix |
-|---------|---------|-----|
-| Leaking internal types into `ParseResult` | Downstream nodes crash with `AttributeError` when a different parser is swapped in | Return only the four `ParseResult` fields. Store internals on `self`. |
-| Forgetting `extra_metadata` serialisability | `json.dumps()` fails on `Chunk` | Run `validate_extra_metadata()` in tests. No callables, no opaque objects. |
-| Not raising on `chunk()` before `parse()` | Silent None dereference or stale state from a previous document | Check `self._internal_state is None` at the top of `chunk()`. |
-| Importing concrete parser in pipeline nodes | Defeats the strategy pattern; breaks when parser is swapped | Pipeline nodes must use `registry.get_parser()` only. Never `from ... import DoclingParser`. |
-| Singleton parser instance across documents | Headings from document A leak into document B's chunks | Always create a new parser instance per document (the registry does this automatically). |
+Config fields consumed: `docling_model`, `docling_artifacts_path`, `vlm_mode`, `generate_page_images`, `hybrid_chunker_max_tokens`, `docling_auto_download`.
+
+### 3.5 `PlainTextParser`
+
+`src/ingest/support/parser_text.py`
+
+```python
+class PlainTextParser:
+    def __init__(self) -> None: ...
+    def parse(self, file_path: Path, config: Any) -> ParseResult: ...
+    def chunk(self, parse_result: ParseResult) -> list[Chunk]: ...
+    @classmethod
+    def ensure_ready(cls, config: Any) -> None: ...   # no-op
+    @classmethod
+    def warmup(cls, config: Any) -> None: ...         # no-op
+```
+
+- `.md`, `.txt`: content used as-is.
+- `.html`, `.htm`: converted via `markdownify` (optional); falls back to a regex tag stripper that preserves `<h1>`–`<h6>` as ATX headings.
+- `.rst`: converted via `pypandoc` (optional); falls back to a heading heuristic that detects `===`, `---`, `~~~` underline patterns.
+- `has_figures` is `True` when `![...](...) ` pattern is found.
+- `page_count` is always `0`.
+- `chunk()` delegates to `chunk_with_markdown(parse_result, config)`.
+- No external dependencies required. `markdownify` and `pypandoc` are optional.
+
+### 3.6 `CodeParser`
+
+`src/ingest/support/parser_code.py`
+
+```python
+class CodeParser:
+    def __init__(self) -> None: ...
+    def parse(self, file_path: Path, config: Any) -> ParseResult: ...
+    def chunk(self, parse_result: ParseResult) -> list[Chunk]: ...
+    @classmethod
+    def ensure_ready(cls, config: Any) -> None: ...
+    @classmethod
+    def warmup(cls, config: Any) -> None: ...
+```
+
+- `parse()` reads file bytes, loads the tree-sitter grammar for the file's language, and builds an AST stored in `self._tree`. `ParseResult.markdown` wraps the full source in a fenced code block (e.g., ` ```python\n<source>\n``` `). `has_figures` is always `False`, `page_count` is always `0`.
+- `chunk()` walks `self._tree.root_node` children and produces one `Chunk` per top-level function or class definition, plus an optional module-level chunk for imports and top-level statements. Falls back to a single chunk when `self._tree` is `None` (tree-sitter parse failure).
+- `extra_metadata` keys per function/class chunk: `language`, `file_path`, `function_name`, `class_name`, `docstring`, `imports`, `decorators`, `kg_relationships`.
+- KG relationships are deterministic (no LLM): `imports`, `inherits`, `calls`.
+- Grammar loading uses `importlib.import_module(f"tree_sitter_{language}")`. Grammars must be installed separately (e.g., `uv add tree-sitter-python`).
+- `ensure_ready()` verifies `tree_sitter` is importable; raises `RuntimeError` with install instructions if not. Checks `tree_sitter_python` as a canary grammar (warning-only if absent).
+
+### 3.7 `ParserRegistry`
+
+`src/ingest/support/parser_registry.py`
+
+```python
+class ParserRegistry:
+    def __init__(self, config: Any) -> None: ...
+    def get_parser(self, file_path: Path, config: Any) -> DocumentParser: ...
+    def ensure_all_ready(self, config: Any) -> None: ...
+    def warmup_all(self, config: Any) -> None: ...
+
+    @property
+    def available_strategies(self) -> list[str]: ...
+```
+
+- Always registers `PlainTextParser` as `"text"` (no external deps, always available).
+- Registers `DoclingParser` as `"document"` if `config.enable_docling_parser=True` and `docling` imports successfully.
+- Registers `CodeParser` as `"code"` if `tree_sitter` imports successfully.
+- `get_parser()` returns a new parser instance per call (per-document lifecycle, FR-3206).
+- If the resolved strategy's dependency is missing, falls back to `"text"` with a warning.
+- `warmup_all()` is non-fatal: warmup failures are logged but do not prevent startup.
+
+### 3.8 `chunk_with_markdown`
+
+```python
+def chunk_with_markdown(parse_result: ParseResult, config: Any) -> list[Chunk]:
+```
+
+Shared markdown chunker used by `PlainTextParser.chunk()` and as a fallback/override in `chunking_node`. Wraps `chunk_markdown()` from `src.ingest.support.markdown` and maps output to `Chunk` with `section_path`, `heading`, and `heading_level` populated from the heading hierarchy.
+
+### 3.9 `validate_extra_metadata`
+
+```python
+def validate_extra_metadata(meta: dict[str, Any]) -> None:
+```
+
+Validates that all `extra_metadata` values are JSON-serialisable. Raises `ValueError` if any value cannot be serialised. Called in debug/test mode by parser implementations.
 
 ---
 
-## 4. How to Add a New Language to Code Parser
+## 4. Parser Selection Flow
 
-### 4.1 tree-sitter Grammar Installation
+`ParserRegistry.get_parser()` uses the following decision tree:
 
-1. Install the grammar package:
-
-```bash
-uv add tree-sitter-haskell
+```
+config.parser_strategy != "auto"?
+    YES → Use forced strategy directly.
+          Raise RuntimeError if strategy not registered.
+    NO  →
+          file_path.name in _FILENAME_MAP?
+              YES → Use mapped strategy.
+              NO  →
+                    file_path.suffix.lower() in _EXTENSION_MAP?
+                        YES → Use mapped strategy.
+                        NO  → Warn "Unrecognised extension"; use "text" fallback.
+                    |
+                    Is resolved strategy registered?
+                        YES → Instantiate and return.
+                        NO  → Warn "Strategy not available; missing dependency";
+                              fall back to "text".
 ```
 
-2. Add the package to `pyproject.toml` optional dependencies:
+### Extension mapping summary
 
-```toml
-[project.optional-dependencies]
-parsers = [
-    # ... existing grammars ...
-    "tree-sitter-haskell",
-]
-```
+| Strategy | Extensions | Special filenames |
+|----------|-----------|-------------------|
+| `document` | `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp` | — |
+| `code` | `.py`, `.rs`, `.go`, `.ts`, `.tsx`, `.js`, `.jsx`, `.java`, `.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.cs`, `.rb`, `.kt`, `.swift`, `.scala`, `.sh`, `.bash`, `.zsh`, `.yaml`, `.yml`, `.toml`, `.json` | `Dockerfile`, `Makefile` |
+| `text` | `.md`, `.txt`, `.rst`, `.html`, `.htm` | — |
 
-3. Verify the grammar loads:
-
-```python
-import tree_sitter_haskell
-import tree_sitter
-
-lang = tree_sitter.Language(tree_sitter_haskell.language())
-parser = tree_sitter.Parser(lang)
-tree = parser.parse(b"main = putStrLn \"Hello\"")
-print(tree.root_node.sexp())
-```
-
-### 4.2 AST Node Mapping
-
-Add the extension mapping in `parser_code.py`:
-
-```python
-# In _EXTENSION_TO_LANGUAGE:
-_EXTENSION_TO_LANGUAGE[".hs"] = "haskell"
-```
-
-Then check what node types tree-sitter uses for function and class/type definitions in that language. Use the tree-sitter playground or print the S-expression:
-
-```python
-tree = parser.parse(open("example.hs", "rb").read())
-print(tree.root_node.sexp())
-# Look for node types like "function", "function_declaration", "type_alias", etc.
-```
-
-Add the relevant node types to the internal helpers:
-
-```python
-# In CodeParser._is_function_def():
-def _is_function_def(self, node_type: str) -> bool:
-    return node_type in {
-        # ... existing types ...
-        "function",              # Haskell
-    }
-
-# In CodeParser._is_class_def():
-def _is_class_def(self, node_type: str) -> bool:
-    return node_type in {
-        # ... existing types ...
-        "type_alias_declaration",  # Haskell
-        "data_declaration",        # Haskell
-    }
-```
-
-### 4.3 KG Relationship Extraction
-
-The `_extract_imports()` helper needs to recognise the language's import syntax. Add the relevant node type:
-
-```python
-# In CodeParser._extract_imports():
-if child.type in (
-    "import_statement",        # Python
-    "import_from_statement",   # Python
-    "use_declaration",         # Rust
-    "import_declaration",      # Go, Java, Kotlin
-    "import",                  # Haskell
-):
-    imports.append(self._node_text(child))
-```
-
-For inheritance, Haskell uses typeclasses, so you would also check for `class_declaration` or `instance_declaration` nodes and extract the typeclass relationship.
-
-Write a test for the new language:
-
-```python
-def test_haskell_parse(tmp_path):
-    hs_file = tmp_path / "Main.hs"
-    hs_file.write_text('module Main where\n\nmain :: IO ()\nmain = putStrLn "Hello"\n')
-
-    parser = CodeParser()
-    result = parser.parse(hs_file, mock_config)
-
-    assert result.has_figures is False
-    assert result.page_count == 0
-    assert "```haskell" in result.markdown
-
-    chunks = parser.chunk(result)
-    assert len(chunks) >= 1
-    assert chunks[0].extra_metadata["language"] == "haskell"
-```
+Extensions are matched case-insensitively. Filenames in `_FILENAME_MAP` are case-sensitive.
 
 ---
 
-## 5. Troubleshooting
+## 5. Configuration
 
-### 5.1 Parser Selection Issues
+### `IngestionConfig` fields
 
-**Problem:** A file is routed to the wrong parser.
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `parser_strategy` | `str` | `"auto"` | `RAG_INGESTION_PARSER_STRATEGY` | `"auto"` routes by extension; `"document"`, `"code"`, or `"text"` forces a strategy for all files. |
+| `chunker` | `str` | `"native"` | `RAG_INGESTION_CHUNKER` | `"native"` uses each parser's internal chunker; `"markdown"` forces heading-aware markdown splitting for all parsers. |
+| `enable_docling_parser` | `bool` | `True` | `RAG_INGESTION_DOCLING_ENABLED` | When `False`, `DoclingParser` is not registered and `.pdf`/`.docx` etc. fall back to `"text"`. |
+| `docling_model` | `str` | — | `RAG_INGESTION_DOCLING_MODEL` | Docling model identifier. Required by `DoclingParser.ensure_ready()`. |
+| `docling_artifacts_path` | `str` | `""` | `RAG_INGESTION_DOCLING_ARTIFACTS_PATH` | Directory for Docling model artifacts. Empty string uses Docling/HF default cache. |
+| `docling_auto_download` | `bool` | `True` | `RAG_INGESTION_DOCLING_AUTO_DOWNLOAD` | Auto-download missing Docling models on `ensure_ready()`. |
+| `docling_strict` | `bool` | `False` | `RAG_INGESTION_DOCLING_STRICT` | When `True`, parser failures in `structure_detection_node` set `should_skip=True` instead of falling back to regex. |
+| `hybrid_chunker_max_tokens` | `int` | `512` | `RAG_INGESTION_HYBRID_CHUNKER_MAX_TOKENS` | Max tokens per chunk for Docling's `HybridChunker`. |
+| `vlm_mode` | `str` | `"disabled"` | `RAG_INGESTION_VLM_MODE` | `"builtin"` activates Docling's SmolVLM at parse time. `"external"` or `"disabled"` leaves `do_picture_description=False`. |
+| `chunk_size` | `int` | `CHUNK_SIZE` | — | Max characters per chunk for markdown splitter. Used by `chunk_with_markdown()`. |
+| `chunk_overlap` | `int` | `CHUNK_OVERLAP` | — | Overlap characters for markdown splitter. Used by `chunk_with_markdown()`. |
 
-**Diagnosis:** Check which strategy the registry selected:
+### VLM mode exclusion constraint
 
-```python
-# In structure_detection_node, the strategy is logged in structure["parser_strategy"]
-# Check the processing_log in pipeline output for "structure_detection:ok"
-```
-
-**Common causes:**
-
-- **Case sensitivity.** Extensions are matched case-insensitively, but filenames in `_FILENAME_MAP` (e.g., `Dockerfile`) are case-sensitive. `dockerfile` (lowercase) will not match.
-- **Unrecognised extension.** Falls back to `"text"` with a warning. Check logs for `"Unrecognised extension"`.
-- **Config override active.** `parser_strategy="document"` forces all files through Docling, including `.py` files. Check `config.parser_strategy`.
-- **Missing dependency.** If tree-sitter is not installed, `.py` files fall back to `"text"`. Check startup logs for `"tree-sitter not available"`.
-
-**Fix:** Verify the extension mapping in `_EXTENSION_MAP` in `parser_registry.py`. Add missing extensions or adjust `_FILENAME_MAP`.
-
-### 5.2 Chunking Quality Issues
-
-**Problem:** Chunks are too large, too small, or split at bad boundaries.
-
-| Parser | Expected Behaviour | Common Issue |
-|--------|--------------------|-------------|
-| **DoclingParser** | HybridChunker respects heading hierarchy and `max_tokens` | `hybrid_chunker_max_tokens` too high or too low. Check `config.hybrid_chunker_max_tokens`. |
-| **CodeParser** | One chunk per function/class. Module-level chunk for imports. | Large classes produce a single chunk. Size-based method splitting is not yet implemented (see Implementation Notes). |
-| **PlainTextParser** | Heading-boundary splits with `chunk_size`/`chunk_overlap` | Tables split mid-row. Check if `RecursiveCharacterTextSplitter` separator config handles `|` rows. |
-
-**Debug approach:**
-
-1. Check `processing_log` for the chunking path used: `chunking:native_ok`, `chunking:markdown_override`, or `chunking:fallback_to_markdown`.
-2. If `chunking:fallback_to_markdown` appears, native chunking failed. Check the error log for the cause.
-3. Test chunking in isolation:
-
-```python
-from src.ingest.support.parser_text import PlainTextParser
-from src.ingest.support.parser_base import ParseResult
-
-parser = PlainTextParser()
-result = parser.parse(Path("problem_file.md"), config)
-chunks = parser.chunk(result)
-for c in chunks:
-    print(f"[{c.chunk_index}] heading={c.heading} len={len(c.text)}")
-    print(c.text[:200])
-    print("---")
-```
-
-### 5.3 VLM Mode Conflicts
-
-**Problem:** Pipeline fails at startup with a VLM mutual exclusion error.
-
-**Cause:** `vlm_mode="builtin"` and `enable_multimodal_processing=true` are both set. This is always a configuration error because it causes figures to be described by two independent VLM pipelines.
-
-**Fix:** Disable one:
-
-```bash
-# Option A: Use Docling's built-in SmolVLM (parse-time figure description)
-RAG_VLM_MODE=builtin
-RAG_ENABLE_MULTIMODAL_PROCESSING=false
-
-# Option B: Use external VLM enrichment (post-chunking via LiteLLM)
-RAG_VLM_MODE=external
-RAG_ENABLE_MULTIMODAL_PROCESSING=false
-
-# Option C: Use Phase 1 multimodal node (pre-chunking via vision.py)
-RAG_VLM_MODE=disabled
-RAG_ENABLE_MULTIMODAL_PROCESSING=true
-```
-
-**Valid combinations reference:**
+Setting `vlm_mode="builtin"` and `enable_multimodal_processing=True` simultaneously is invalid. The pipeline raises an `IngestionDesignCheck` error at startup. Valid combinations:
 
 | `vlm_mode` | `enable_multimodal_processing` | Result |
 |------------|-------------------------------|--------|
 | `disabled` | `false` | No VLM processing. |
 | `disabled` | `true` | Phase 1 multimodal node only. |
 | `builtin` | `false` | Docling SmolVLM at parse time. |
-| `builtin` | `true` | **ERROR.** Mutual exclusion. |
+| `builtin` | `true` | **ERROR** — mutual exclusion. |
 | `external` | `false` | Post-chunking VLM enrichment only. |
-| `external` | `true` | Both stages active (valid, with startup warning). |
+| `external` | `true` | Both stages active (valid). |
 
-### 5.4 tree-sitter Build Issues
+---
 
-**Problem:** `CodeParser.ensure_ready()` raises `RuntimeError: tree-sitter is required for code parsing but not installed`.
+## 6. Adding a New Parser
 
-**Fix:**
+### Step 1: Implement the class
 
-```bash
-uv add tree-sitter
-uv add tree-sitter-python   # Minimum required grammar
-```
-
-**Problem:** Grammar loads but parsing produces an empty tree or unexpected node types.
-
-**Diagnosis:**
+Create `src/ingest/support/parser_<name>.py`:
 
 ```python
-import tree_sitter
-import tree_sitter_python
+# @summary
+# <Name> parser implementing DocumentParser protocol.
+# Exports: <Name>Parser
+# Deps: pathlib, src.ingest.support.parser_base
+# @end-summary
 
-lang = tree_sitter.Language(tree_sitter_python.language())
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+from src.ingest.support.parser_base import Chunk, ParseResult
+
+class <Name>Parser:
+    def __init__(self) -> None:
+        self._internal_doc: Any = None   # Never exposed in ParseResult or Chunk
+        self._config: Any = None
+
+    def parse(self, file_path: Path, config: Any) -> ParseResult:
+        self._config = config
+        # ... parse file, store internal state on self ...
+        return ParseResult(
+            markdown="...",
+            headings=["..."],
+            has_figures=False,
+            page_count=0,
+        )
+
+    def chunk(self, parse_result: ParseResult) -> list[Chunk]:
+        if self._internal_doc is None:
+            raise RuntimeError("<Name>Parser.chunk() called before parse().")
+        # ... chunk using self._internal_doc ...
+        return [
+            Chunk(
+                text="...",
+                section_path="...",
+                heading="...",
+                heading_level=1,
+                chunk_index=idx,
+                extra_metadata={},  # Must be JSON-serialisable
+            )
+            for idx, ... in enumerate(...)
+        ]
+
+    @classmethod
+    def ensure_ready(cls, config: Any) -> None:
+        try:
+            import <dependency>  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError(
+                "<Dependency> is required but not installed. "
+                "Install with: uv add <package>"
+            ) from exc
+
+    @classmethod
+    def warmup(cls, config: Any) -> None:
+        cls.ensure_ready(config)
+```
+
+**Rules:**
+- `parse()` returns `ParseResult` with exactly four fields. No internal types.
+- `chunk()` returns `list[Chunk]`. All `extra_metadata` values must pass `json.dumps()`.
+- `chunk()` before `parse()` must raise `RuntimeError`.
+- Internal state stays on `self`. It must not appear in `ParseResult`, `Chunk`, or pipeline state.
+
+### Step 2: Register in `ParserRegistry`
+
+In `src/ingest/support/parser_registry.py`, add to `ParserRegistry.__init__()`:
+
+```python
+# Attempt to register <Name> parser
+if getattr(config, "enable_<name>_parser", False):
+    try:
+        from src.ingest.support.parser_<name> import <Name>Parser
+        self._strategy_map["<strategy>"] = <Name>Parser
+    except ImportError:
+        logger.info("<Name> not available; '<strategy>' parser strategy disabled.")
+```
+
+If replacing the `"document"` strategy, use `self._strategy_map["document"] = <Name>Parser`. If adding a new strategy, use a distinct strategy name and add extension mappings to `_EXTENSION_MAP`.
+
+### Step 3: Add config fields if needed
+
+```python
+# config/settings.py
+RAG_INGESTION_ENABLE_<NAME>_PARSER: bool = os.getenv(
+    "RAG_INGESTION_ENABLE_<NAME>_PARSER", "false"
+).lower() == "true"
+
+# src/ingest/common/types.py, in IngestionConfig
+enable_<name>_parser: bool = RAG_INGESTION_ENABLE_<NAME>_PARSER
+```
+
+### Step 4: Test against the contract
+
+Every parser implementation must pass the contract test suite in `tests/ingest/test_parser_integration.py`. Write additional unit tests verifying parser-specific behaviour.
+
+---
+
+## 7. Adding a New Language to CodeParser
+
+**Step 1.** Install the grammar package:
+
+```bash
+uv add tree-sitter-<language>
+```
+
+**Step 2.** Add the extension mapping in `parser_code.py`:
+
+```python
+_EXTENSION_TO_LANGUAGE[".ext"] = "<language>"
+```
+
+**Step 3.** Identify AST node types for function and class/type definitions. Use the tree-sitter playground or inspect the S-expression:
+
+```python
+import tree_sitter, tree_sitter_<language>
+lang = tree_sitter.Language(tree_sitter_<language>.language())
 parser = tree_sitter.Parser(lang)
-tree = parser.parse(b"def foo(): pass")
+tree = parser.parse(open("example.<ext>", "rb").read())
 print(tree.root_node.sexp())
+```
+
+**Step 4.** Add the relevant node types to `_is_function_def()` and `_is_class_def()`.
+
+**Step 5.** If the language's import syntax uses a different node type, add it to `_extract_imports()`.
+
+---
+
+## 8. Node Integration
+
+### `structure_detection_node`
+
+`src/ingest/doc_processing/nodes/structure_detection.py`
+
+This node selects one of three paths at runtime:
+
+**Path 1 — Parser abstraction (primary):** `runtime.parser_registry` is set.
+1. Calls `registry.get_parser(Path(state["source_path"]), config)` to get a parser instance.
+2. Calls `parser_instance.parse(Path(state["source_path"]), config)` to get a `ParseResult`.
+3. Stores `parse_result` and `parser_instance` in the state update.
+4. Derives `has_figures`, `heading_count`, and `parser_strategy` from `ParseResult` fields.
+5. On failure: if `config.docling_strict`, returns `should_skip=True`. Otherwise falls back to regex heuristics and sets `parser_strategy="regex_fallback"`.
+
+**Path 2 — Legacy Docling (backward-compat):** `runtime.parser_registry` is `None` and `config.enable_docling_parser=True`.
+- Calls `parse_with_docling()` directly. Emits a `DeprecationWarning`.
+- Sets `docling_document` on state for downstream compatibility.
+- Sets `parser_strategy="docling_legacy"`.
+
+**Path 3 — Regex only:** No registry and Docling disabled.
+- Applies `_FIGURE_PATTERN` and `_HEADING_PATTERN` regexes to `raw_text`.
+- Sets `parser_strategy="regex"`.
+
+`parse_result` and `parser_instance` are only present in state on Path 1.
+
+### `chunking_node`
+
+`src/ingest/embedding/nodes/chunking.py`
+
+**Primary path** (when `parse_result` and `parser_instance` are both in state):
+- `config.chunker == "native"` (default): calls `parser_instance.chunk(parse_result)`. On failure, falls back to `chunk_with_markdown(parse_result, config)` and appends `chunking:fallback_to_markdown` to the processing log.
+- `config.chunker == "markdown"`: calls `chunk_with_markdown(parse_result, config)` directly, bypassing the parser's native chunker. Appends `chunking:markdown_override` to the processing log.
+
+Maps `list[Chunk]` to `list[ProcessedChunk]`: merges `base_metadata` with `section_path`, `heading`, `heading_level`, `chunk_index`, `total_chunks`, and `extra_metadata` from each `Chunk`.
+
+**Legacy fallback path** (when `parse_result` is absent from state):
+- Calls `_chunk_with_markdown_legacy()` which chunks `refactored_text` or `cleaned_text` using the legacy `chunk_markdown()` path. Appends `chunking:legacy_markdown` to the log.
+
+Chunk text normalization via `_normalize_chunk_text()`: applies NFC unicode normalization and strips C0/C1 control characters (preserves `\n`, `\r`, `\t`).
+
+---
+
+## 9. Troubleshooting
+
+### 9.1 File routed to wrong parser
+
+Check `structure["parser_strategy"]` in the pipeline output. Common causes:
+
+- **Uppercase extension.** Extensions are matched case-insensitively (`.PDF` maps to `.pdf`). Filenames in `_FILENAME_MAP` (e.g., `Dockerfile`) are case-sensitive — `dockerfile` (lowercase) will not match.
+- **Unrecognised extension.** Falls back to `"text"` with a `logger.warning`. Look for `"Unrecognised extension"` in logs.
+- **`parser_strategy` override active.** `parser_strategy="document"` forces all files through `DoclingParser` including `.py` files. Check `config.parser_strategy`.
+- **Missing dependency.** If tree-sitter is absent, `.py` files fall back to `"text"`. Check startup logs for `"tree-sitter not available"`.
+
+### 9.2 Chunking quality issues
+
+| Parser | Expected behaviour | Common issue |
+|--------|--------------------|-------------|
+| `DoclingParser` | HybridChunker respects heading hierarchy and `max_tokens` | `hybrid_chunker_max_tokens` too high or low |
+| `CodeParser` | One chunk per function/class; module-level chunk for imports | Large classes produce a single chunk; method-level splitting is not implemented |
+| `PlainTextParser` | Heading-boundary splits with `chunk_size`/`chunk_overlap` | Tables may split mid-row |
+
+Check `processing_log` for: `chunking:native_ok`, `chunking:markdown_override`, or `chunking:fallback_to_markdown`. If `chunking:fallback_to_markdown` appears, native chunking failed — check the error log for cause.
+
+Test chunking in isolation:
+
+```python
+from pathlib import Path
+from src.ingest.support.parser_text import PlainTextParser
+from src.ingest.common.types import IngestionConfig
+
+parser = PlainTextParser()
+config = IngestionConfig(enable_docling_parser=False)
+result = parser.parse(Path("problem_file.md"), config)
+chunks = parser.chunk(result)
+for c in chunks:
+    print(f"[{c.chunk_index}] heading={c.heading!r} len={len(c.text)}")
+```
+
+### 9.3 `chunk()` called before `parse()`
+
+All three parsers raise `RuntimeError` with a message containing `"called before parse()"`. This happens when a parser instance is reused across documents or when `parse()` was never called. `ParserRegistry.get_parser()` creates a new instance per call, so the usual cause is code that reuses an instance manually.
+
+### 9.4 `extra_metadata` is not JSON-serialisable
+
+Symptom: `TypeError` during chunk serialisation. Fix: ensure all values stored in `extra_metadata` are Python primitives (`str`, `int`, `float`, `bool`, `list`, `dict`, or `None`). Use `validate_extra_metadata(chunk.extra_metadata)` in tests to catch this early.
+
+### 9.5 tree-sitter build issues
+
+```bash
+# Install core package and Python grammar (minimum required):
+uv add tree-sitter tree-sitter-python
+
+# Verify grammar loads:
+python -c "
+import tree_sitter, tree_sitter_python
+lang = tree_sitter.Language(tree_sitter_python.language())
+p = tree_sitter.Parser(lang)
+tree = p.parse(b'def foo(): pass')
+print(tree.root_node.sexp())
+"
 # Expected: (module (function_definition ...))
 ```
 
-If the S-expression looks wrong, the grammar version may be incompatible with the installed `tree-sitter` version. Pin compatible versions:
+If the S-expression is unexpected, the grammar version may be incompatible. Pin:
 
 ```bash
 uv add "tree-sitter>=0.21,<0.23" "tree-sitter-python>=0.21"
 ```
 
-**Problem:** `_load_grammar()` raises `ModuleNotFoundError` for a specific language.
+`ModuleNotFoundError` from `_load_grammar()` means the grammar package is not installed or uses a non-standard module name. Check the `tree_sitter_{language}` naming pattern against the installed package.
 
-**Cause:** The grammar package name does not match the expected `tree_sitter_{language}` pattern. Some languages use different naming:
+### 9.6 VLM mode conflict at startup
 
-- C# grammar: package is `tree-sitter-c-sharp`, module is `tree_sitter_c_sharp`
-- C++ grammar: package is `tree-sitter-cpp`, module is `tree_sitter_cpp`
+The pipeline raises an `IngestionDesignCheck` error if `vlm_mode="builtin"` and `enable_multimodal_processing=True` are both set. Fix:
 
-Check the `_load_grammar()` method's special-case handling and add new cases if needed.
+```bash
+# Use Docling's built-in SmolVLM (parse-time figure description):
+RAG_VLM_MODE=builtin
+RAG_ENABLE_MULTIMODAL_PROCESSING=false
 
----
-
-## 6. Testing Guide
-
-### 6.1 Critical Test Scenarios
-
-These are the scenarios that must pass before any parser change is merged.
-
-| # | Test | What It Validates | File |
-|---|------|-------------------|------|
-| 1 | `ParseResult` round-trips through `json.dumps(asdict(...))` | No opaque types in the boundary contract (FR-3201) | `test_parser_base.py` |
-| 2 | `Chunk` round-trips through `json.dumps(asdict(...))` | `extra_metadata` is serialisable (FR-3202) | `test_parser_base.py` |
-| 3 | Stub class satisfies `isinstance(stub, DocumentParser)` | Protocol is `runtime_checkable` and correctly defined (FR-3200) | `test_parser_base.py` |
-| 4 | `DoclingParser.parse()` returns `ParseResult` with no `docling_document` attribute | Encapsulation rule enforced (FR-3205) | `test_parser_docling.py` |
-| 5 | `DoclingParser.chunk()` before `parse()` raises `RuntimeError` | Lifecycle guard (FR-3206) | `test_parser_docling.py` |
-| 6 | `CodeParser.chunk()` produces one chunk per function in a 3-function file | AST-guided chunking works (FR-3252) | `test_parser_code.py` |
-| 7 | `CodeParser` chunk `extra_metadata` contains `language`, `function_name`, `kg_relationships` | Code metadata contract (FR-3253, FR-3254) | `test_parser_code.py` |
-| 8 | `ParserRegistry` routes `.pdf` to `DoclingParser`, `.py` to `CodeParser`, `.md` to `PlainTextParser` | Extension routing (FR-3300) | `test_parser_registry.py` |
-| 9 | `ParserRegistry` routes `.PDF` (uppercase) to `DoclingParser` | Case-insensitive matching (FR-3300 AC 4) | `test_parser_registry.py` |
-| 10 | Unknown extension `.ini` routes to `PlainTextParser` with warning | Fallback behaviour (FR-3302) | `test_parser_registry.py` |
-| 11 | `vlm_mode="builtin"` + `enable_multimodal_processing=true` produces design check error | VLM mutual exclusion (FR-3340) | `test_vlm_guard.py` |
-| 12 | `chunker="markdown"` overrides native chunking for all parser types | Chunker override (FR-3320) | `test_chunker_override.py` |
-
-### 6.2 Test Fixtures
-
-**Reusable config fixture:**
-
-```python
-@pytest.fixture
-def mock_config():
-    """Minimal IngestionConfig for parser tests."""
-    from src.ingest.common.types import IngestionConfig
-    return IngestionConfig(
-        parser_strategy="auto",
-        chunker="native",
-        vlm_mode="disabled",
-        enable_multimodal_processing=False,
-        chunk_size=1000,
-        chunk_overlap=200,
-        hybrid_chunker_max_tokens=512,
-        docling_model="default",
-        docling_artifacts_path="",
-        docling_auto_download=False,
-        enable_docling_parser=True,
-        generate_page_images=False,
-    )
+# Or use external VLM enrichment (post-chunking):
+RAG_VLM_MODE=external
+RAG_ENABLE_MULTIMODAL_PROCESSING=false
 ```
 
-**Sample Python file fixture for CodeParser tests:**
+### 9.7 Legacy deprecation warning
 
-```python
-@pytest.fixture
-def sample_python_file(tmp_path):
-    """Python file with functions, a class, imports, and decorators."""
-    content = '''"""Utility helpers."""
-
-import os
-from pathlib import Path
-
-
-def read_file(path: str) -> str:
-    """Read a file and return its contents."""
-    return Path(path).read_text()
-
-
-def write_file(path: str, content: str) -> None:
-    """Write content to a file."""
-    Path(path).write_text(content)
-
-
-class FileProcessor:
-    """Processes files in a directory."""
-
-    def __init__(self, root: str):
-        self.root = root
-
-    @staticmethod
-    def list_files(directory: str) -> list[str]:
-        """List all files in directory."""
-        return os.listdir(directory)
-'''
-    f = tmp_path / "utils.py"
-    f.write_text(content)
-    return f
-```
-
-**Sample markdown file fixture:**
-
-```python
-@pytest.fixture
-def sample_markdown_file(tmp_path):
-    """Markdown file with headings, a table, and an image."""
-    content = """# Project Overview
-
-Some introductory text.
-
-## Architecture
-
-The system uses a layered design.
-
-| Layer | Component |
-|-------|-----------|
-| API   | FastAPI   |
-| Data  | Weaviate  |
-
-## Screenshots
-
-![Dashboard](./dashboard.png)
-
-### Details
-
-More detailed information here.
-"""
-    f = tmp_path / "README.md"
-    f.write_text(content)
-    return f
-```
-
-### 6.3 Parser Contract Tests
-
-Every parser implementation must pass the same contract test suite. This pattern ensures swappability:
-
-```python
-import json
-from dataclasses import asdict
-
-import pytest
-
-from src.ingest.support.parser_base import Chunk, DocumentParser, ParseResult
-
-
-class ParserContractTests:
-    """Mixin for testing any DocumentParser implementation.
-
-    Subclass this and implement the parser_instance and sample_file fixtures.
-    """
-
-    @pytest.fixture
-    def parser_instance(self):
-        """Override: return a fresh parser instance."""
-        raise NotImplementedError
-
-    @pytest.fixture
-    def sample_file(self, tmp_path):
-        """Override: return a Path to a sample file for this parser."""
-        raise NotImplementedError
-
-    def test_satisfies_protocol(self, parser_instance):
-        assert isinstance(parser_instance, DocumentParser)
-
-    def test_parse_returns_parse_result(self, parser_instance, sample_file, mock_config):
-        result = parser_instance.parse(sample_file, mock_config)
-        assert isinstance(result, ParseResult)
-        assert isinstance(result.markdown, str)
-        assert isinstance(result.headings, list)
-        assert isinstance(result.has_figures, bool)
-        assert isinstance(result.page_count, int)
-
-    def test_parse_result_is_serialisable(self, parser_instance, sample_file, mock_config):
-        result = parser_instance.parse(sample_file, mock_config)
-        serialised = json.dumps(asdict(result))
-        assert serialised  # Non-empty JSON string
-
-    def test_parse_result_has_no_internal_types(self, parser_instance, sample_file, mock_config):
-        result = parser_instance.parse(sample_file, mock_config)
-        assert not hasattr(result, "docling_document")
-        assert not hasattr(result, "tree")
-        assert not hasattr(result, "internal_doc")
-
-    def test_chunk_returns_chunk_list(self, parser_instance, sample_file, mock_config):
-        result = parser_instance.parse(sample_file, mock_config)
-        chunks = parser_instance.chunk(result)
-        assert isinstance(chunks, list)
-        assert all(isinstance(c, Chunk) for c in chunks)
-
-    def test_chunks_are_serialisable(self, parser_instance, sample_file, mock_config):
-        result = parser_instance.parse(sample_file, mock_config)
-        chunks = parser_instance.chunk(result)
-        for c in chunks:
-            json.dumps(asdict(c))
-
-    def test_chunk_before_parse_raises(self, parser_instance):
-        dummy = ParseResult(markdown="x", headings=[], has_figures=False, page_count=0)
-        with pytest.raises(RuntimeError):
-            parser_instance.chunk(dummy)
-
-    def test_chunk_indices_are_sequential(self, parser_instance, sample_file, mock_config):
-        result = parser_instance.parse(sample_file, mock_config)
-        chunks = parser_instance.chunk(result)
-        indices = [c.chunk_index for c in chunks]
-        assert indices == list(range(len(chunks)))
-```
-
-Use it for each parser:
-
-```python
-class TestDoclingParserContract(ParserContractTests):
-    @pytest.fixture
-    def parser_instance(self):
-        from src.ingest.support.docling import DoclingParser
-        return DoclingParser()
-
-    @pytest.fixture
-    def sample_file(self, tmp_path):
-        # Provide a small PDF fixture
-        ...
-
-
-class TestPlainTextParserContract(ParserContractTests):
-    @pytest.fixture
-    def parser_instance(self):
-        from src.ingest.support.parser_text import PlainTextParser
-        return PlainTextParser()
-
-    @pytest.fixture
-    def sample_file(self, sample_markdown_file):
-        return sample_markdown_file
-
-
-class TestCodeParserContract(ParserContractTests):
-    @pytest.fixture
-    def parser_instance(self):
-        from src.ingest.support.parser_code import CodeParser
-        return CodeParser()
-
-    @pytest.fixture
-    def sample_file(self, sample_python_file):
-        return sample_python_file
-```
-
-This contract test pattern means adding a new parser automatically gets validated against the full protocol contract by subclassing `ParserContractTests` and providing two fixtures.
+If logs show `DeprecationWarning: structure_detection_node: parser_registry is not set on Runtime`, the registry has not been initialized on the `Runtime` object. Ensure `ParserRegistry(config)` is created in `impl.py` and assigned to `runtime.parser_registry` before the pipeline graph runs.
