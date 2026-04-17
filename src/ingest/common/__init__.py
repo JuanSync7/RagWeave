@@ -1,8 +1,10 @@
 # @summary
 # Ingestion common package: shared schemas, utilities, state/config types, node helpers, and inter-phase store.
 # Exports: ManifestEntry, SourceIdentity, ProcessedChunk, IngestState, IngestionConfig, Runtime,
-#          PIPELINE_NODE_NAMES, append_processing_log, sha256_path, load_manifest, save_manifest, CleanDocumentStore
-# Deps: src.ingest.common.schemas, src.ingest.common.utils, src.ingest.common.types, src.ingest.common.shared, src.ingest.common.clean_store
+#          PIPELINE_NODE_NAMES, append_processing_log, sha256_path, load_manifest, save_manifest,
+#          CleanDocumentStore, MinioCleanStore
+# Deps: src.ingest.common.schemas, src.ingest.common.utils, src.ingest.common.types, src.ingest.common.shared,
+#       src.ingest.common.clean_store, src.ingest.common.minio_clean_store
 # @end-summary
 """Shared contracts and utilities for the ingestion pipeline.
 
@@ -35,6 +37,7 @@ from src.ingest.common.shared import (
     quality_score,
 )
 from src.ingest.common.clean_store import CleanDocumentStore
+from src.ingest.common.minio_clean_store import MinioCleanStore
 
 __all__ = [
     "ManifestEntry",
@@ -57,6 +60,7 @@ __all__ = [
     "cross_refs",
     "quality_score",
     "CleanDocumentStore",
+    "MinioCleanStore",
 ]
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---

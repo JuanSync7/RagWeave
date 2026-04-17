@@ -485,6 +485,102 @@ RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
 """If True (default), persist DoclingDocument JSON to CleanDocumentStore.
 Set to false to trade storage for compute (re-parse in Phase 2)."""
 
+# --- Ingestion Hardening: Document Parsing Abstraction (FR-3301, FR-3320) ---
+RAG_INGESTION_PARSER_STRATEGY: str = os.environ.get(
+    "RAG_INGESTION_PARSER_STRATEGY", "auto"
+)
+"""Parser selection strategy: "auto" | "document" | "code" | "text".
+"auto" routes by file extension via ParserRegistry. FR-3301."""
+
+RAG_INGESTION_CHUNKER: str = os.environ.get(
+    "RAG_INGESTION_CHUNKER", "native"
+)
+"""Chunker override: "native" | "markdown".
+"native" uses each parser's own chunker (DoclingParser HybridChunker,
+CodeParser tree-sitter, PlainTextParser markdown). "markdown" forces
+the shared chunk_with_markdown() fallback for all parsers. FR-3320."""
+
+# --- Ingestion Hardening: Data Lifecycle — MinIO Clean Store + GC ---
+RAG_INGESTION_CLEAN_STORE_BUCKET: str = os.environ.get(
+    "RAG_INGESTION_CLEAN_STORE_BUCKET", ""
+)
+"""MinIO bucket for the clean store. Empty string reuses the primary
+target_bucket. Data Lifecycle T1."""
+
+RAG_GC_MODE: str = os.environ.get("RAG_GC_MODE", "soft")
+"""Default GC delete mode: "soft" (default) or "hard". FR-3020."""
+
+RAG_GC_RETENTION_DAYS: int = int(os.environ.get("RAG_GC_RETENTION_DAYS", "30"))
+"""Days before soft-deleted entries are eligible for hard purge. FR-3020."""
+
+RAG_GC_SCHEDULE: str = os.environ.get("RAG_GC_SCHEDULE", "")
+"""Cron expression for scheduled GC runs. Empty string disables scheduling."""
+
+# --- Ingestion Hardening: Cross-Document Dedup (FR-3400-3433) ---
+RAGWEAVE_ENABLE_CROSS_DOC_DEDUP: bool = os.environ.get(
+    "RAGWEAVE_ENABLE_CROSS_DOC_DEDUP", "true"
+).lower() in ("true", "1", "yes")
+"""Master toggle for cross-document dedup (Tier 1 exact + optional Tier 2).
+Default True. FR-3400."""
+
+RAGWEAVE_ENABLE_FUZZY_DEDUP: bool = os.environ.get(
+    "RAGWEAVE_ENABLE_FUZZY_DEDUP", "false"
+).lower() in ("true", "1", "yes")
+"""Enable Tier 2 MinHash fuzzy matching. Default False (Tier 1 only).
+Requires the datasketch package. FR-3420."""
+
+RAGWEAVE_FUZZY_THRESHOLD: float = float(
+    os.environ.get("RAGWEAVE_FUZZY_THRESHOLD", "0.95")
+)
+"""Jaccard similarity threshold for Tier 2 fuzzy dedup. Default 0.95. FR-3421."""
+
+RAGWEAVE_FUZZY_SHINGLE_SIZE: int = int(
+    os.environ.get("RAGWEAVE_FUZZY_SHINGLE_SIZE", "3")
+)
+"""Word n-gram size for MinHash shingles. Default 3."""
+
+RAGWEAVE_FUZZY_NUM_HASHES: int = int(
+    os.environ.get("RAGWEAVE_FUZZY_NUM_HASHES", "128")
+)
+"""MinHash permutation count. Higher = better accuracy, more RAM. Default 128."""
+
+# --- Ingestion Hardening: Orchestration Dual Queue + Priority ---
+RAG_INGEST_USER_TASK_QUEUE: str = os.environ.get(
+    "RAG_INGEST_USER_TASK_QUEUE", ""
+)
+"""Task queue name for user-triggered ingestion. Empty string + empty
+RAG_INGEST_BACKGROUND_TASK_QUEUE = single-queue legacy mode.
+Typical production value: "ingest-user"."""
+
+RAG_INGEST_BACKGROUND_TASK_QUEUE: str = os.environ.get(
+    "RAG_INGEST_BACKGROUND_TASK_QUEUE", ""
+)
+"""Task queue name for background/batch ingestion.
+Typical production value: "ingest-background"."""
+
+RAG_INGEST_USER_SLOTS: int = int(os.environ.get("RAG_INGEST_USER_SLOTS", "3"))
+"""Max concurrent activities for the user-queue worker. Default 3."""
+
+RAG_INGEST_BACKGROUND_SLOTS: int = int(
+    os.environ.get("RAG_INGEST_BACKGROUND_SLOTS", "1")
+)
+"""Max concurrent activities for the background-queue worker. Default 1."""
+
+RAG_INGEST_WORKER_CONCURRENCY: int = int(
+    os.environ.get("RAG_INGEST_WORKER_CONCURRENCY", "4")
+)
+"""Legacy total worker concurrency. Used to derive 75/25 user/background
+split when RAG_INGEST_USER_SLOTS / RAG_INGEST_BACKGROUND_SLOTS are unset."""
+
+RAG_INGEST_PRIORITY_HIGH: int = int(os.environ.get("RAG_INGEST_PRIORITY_HIGH", "1"))
+"""High priority value for trigger_type=single (user interactive)."""
+
+RAG_INGEST_PRIORITY_MEDIUM: int = int(os.environ.get("RAG_INGEST_PRIORITY_MEDIUM", "2"))
+"""Medium priority value for trigger_type=batch."""
+
+RAG_INGEST_PRIORITY_LOW: int = int(os.environ.get("RAG_INGEST_PRIORITY_LOW", "3"))
+"""Low priority value for trigger_type=background (bulk/scheduled)."""
+
 # --- Guardrails ---
 # GUARDRAIL_BACKEND selects the active guardrail implementation.
 # Valid values: "nemo" (default), "" or "none" (disabled).
@@ -696,6 +792,10 @@ RAG_INGESTION_COLQWEN_MODEL: str = os.environ.get(
 RAG_INGESTION_COLQWEN_BATCH_SIZE: int = int(os.environ.get(
     "RAG_INGESTION_COLQWEN_BATCH_SIZE", "4"
 ))  # FR-104, FR-109
+
+RAG_INGESTION_EMBEDDING_BATCH_SIZE: int = int(os.environ.get(
+    "RAGWEAVE_EMBEDDING_BATCH_SIZE", "64"
+))  # FR-1211
 
 RAG_INGESTION_PAGE_IMAGE_QUALITY: int = int(os.environ.get(
     "RAG_INGESTION_PAGE_IMAGE_QUALITY", "85"

@@ -1,10 +1,11 @@
  # @summary
  # Docling integration for ingestion parsing into markdown.
- # Exports: DoclingParseResult, warmup_docling_models, ensure_docling_ready, parse_with_docling
- # Deps: dataclasses, pathlib, typing
+ # Exports: DoclingParseResult, warmup_docling_models, ensure_docling_ready, parse_with_docling, DoclingParser
+ # Deps: dataclasses, pathlib, typing, src.ingest.support.parser_base
  # vlm_mode="builtin" activates SmolVLM picture description at parse time via PdfPipelineOptions.
  # generate_page_images=True extracts PIL.Image (RGB) page images from the converted document.
  # page_count reflects total pages in source; page_images is empty on extraction failure (no error raised).
+ # DoclingParser wraps standalone functions into the DocumentParser protocol (FR-3221, FR-3223, FR-3224).
  # @end-summary
 """Docling integration for ingestion parsing.
 
@@ -383,3 +384,145 @@ def parse_with_docling(
         page_images=page_images,
         page_count=page_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# DoclingParser — DocumentParser protocol implementation (FR-3221–FR-3224)
+# ---------------------------------------------------------------------------
+
+class DoclingParser:
+    """Docling-based document parser implementing DocumentParser protocol.
+
+    Wraps existing parse_with_docling(), ensure_docling_ready(), and
+    warmup_docling_models() into a class with per-document instance lifecycle.
+
+    Internal state:
+        _docling_document: DoclingDocument retained between parse() and chunk().
+            Never exposed via ParseResult or any public API. FR-3205.
+        _vlm_mode: VLM mode from config, used during parse(). FR-3224.
+        _max_tokens: HybridChunker max tokens from config.
+    """
+
+    def __init__(self) -> None:
+        self._docling_document: Any = None
+        self._vlm_mode: str = "disabled"
+        self._max_tokens: int = 512
+
+    def parse(self, file_path: Path, config: Any) -> "ParseResult":
+        """Parse a document using Docling. FR-3221.
+
+        Calls existing parse_with_docling() internally. Stores the
+        DoclingDocument in self._docling_document for use by chunk().
+        Returns a ParseResult with no DoclingDocument attribute.
+
+        Args:
+            file_path: Path to the source document.
+            config: IngestionConfig instance.
+
+        Returns:
+            ParseResult with markdown, headings, has_figures, page_count.
+        """
+        from src.ingest.support.parser_base import ParseResult
+
+        self._vlm_mode = getattr(config, "vlm_mode", "disabled")
+        self._max_tokens = getattr(config, "hybrid_chunker_max_tokens", 512)
+
+        result = parse_with_docling(
+            file_path,
+            parser_model=config.docling_model,
+            artifacts_path=config.docling_artifacts_path,
+            vlm_mode=self._vlm_mode,
+            generate_page_images=config.generate_page_images,
+        )
+
+        # Encapsulate DoclingDocument — FR-3205
+        self._docling_document = result.docling_document
+
+        return ParseResult(
+            markdown=result.text_markdown,
+            headings=result.headings,
+            has_figures=result.has_figures,
+            page_count=result.page_count,
+        )
+
+    def chunk(self, parse_result: Any) -> list:
+        """Chunk using Docling's HybridChunker. FR-3223.
+
+        Operates on self._docling_document (internal state from parse()).
+        Maps HybridChunker output to Chunk dataclass with section_path
+        derived from meta.headings.
+
+        Args:
+            parse_result: ParseResult from a prior parse() call.
+
+        Returns:
+            List of Chunk objects with heading hierarchy metadata.
+
+        Raises:
+            RuntimeError: If called before parse() (no DoclingDocument).
+        """
+        from src.ingest.support.parser_base import Chunk
+
+        if self._docling_document is None:
+            raise RuntimeError(
+                "DoclingParser.chunk() called before parse(). "
+                "Call parse() first to populate internal DoclingDocument."
+            )
+
+        from docling_core.transforms.chunker import HybridChunker
+
+        chunker = HybridChunker(
+            max_tokens=self._max_tokens,
+            merge_peers=True,
+        )
+        chunk_iter = chunker.chunk(dl_doc=self._docling_document)
+        raw_chunks = list(chunk_iter)
+
+        chunks: list[Chunk] = []
+        for idx, raw in enumerate(raw_chunks):
+            # Extract heading hierarchy from HybridChunker metadata
+            headings: list[str] = []
+            meta = getattr(raw, "meta", None)
+            if meta is not None:
+                headings = list(getattr(meta, "headings", None) or [])
+
+            heading = headings[-1] if headings else ""
+            section_path = " > ".join(headings)
+            heading_level = len(headings)
+
+            chunks.append(
+                Chunk(
+                    text=raw.text,
+                    section_path=section_path,
+                    heading=heading,
+                    heading_level=heading_level,
+                    chunk_index=idx,
+                    extra_metadata={},
+                )
+            )
+        return chunks
+
+    @classmethod
+    def ensure_ready(cls, config: Any) -> None:
+        """Validate Docling runtime. Delegates to ensure_docling_ready(). FR-3204."""
+        ensure_docling_ready(
+            parser_model=config.docling_model,
+            artifacts_path=config.docling_artifacts_path,
+            auto_download=config.docling_auto_download,
+        )
+
+    @classmethod
+    def warmup(cls, config: Any) -> None:
+        """Download Docling models. Delegates to warmup_docling_models(). FR-3207."""
+        warmup_docling_models(
+            artifacts_path=config.docling_artifacts_path,
+            with_smolvlm=(getattr(config, "vlm_mode", "disabled") == "builtin"),
+        )
+
+
+# DEPRECATED standalone functions below — preserved for backward compatibility.
+# Use DoclingParser class for new code.
+# parse_with_docling()       — still available
+# ensure_docling_ready()     — still available
+# warmup_docling_models()    — still available
+# DoclingParseResult         — still available
