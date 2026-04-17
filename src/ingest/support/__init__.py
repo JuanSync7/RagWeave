@@ -1,8 +1,11 @@
 # @summary
 # Node support libraries: document parsing (Docling), vision/VLM enrichment,
-# LLM helpers, and text processing primitives.
+# LLM helpers, and text processing primitives. Includes pluggable parser
+# abstraction (DoclingParser, PlainTextParser, CodeParser, ParserRegistry).
 # Deps: src.ingest.support.docling, src.ingest.support.vision, src.ingest.support.llm,
-#       src.ingest.support.document, src.ingest.support.markdown
+#       src.ingest.support.document, src.ingest.support.markdown,
+#       src.ingest.support.parser_registry, src.ingest.support.parser_text,
+#       src.ingest.support.parser_code
 # @end-summary
 """Support libraries for specialized ingestion processing.
 
@@ -13,6 +16,18 @@ This package contains optional helpers used by ingestion pipeline nodes, such as
 - LLM helpers for metadata enrichment (when enabled)
 - Text normalization and markdown-aware chunking utilities
 """
+
+# --- Parser base contracts ---
+from src.ingest.support.parser_base import (
+    Chunk,
+    DocumentParser,
+    ParseResult,
+    chunk_with_markdown,
+    validate_extra_metadata,
+)
+
+# --- Parser registry (stable import surface for pipeline nodes) ---
+from src.ingest.support.parser_registry import ParserRegistry
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
 from src.ingest.support.colqwen import (

@@ -1,9 +1,12 @@
 # @summary
 # Graph context formatter for LLM prompt injection.
 # Transforms traversal results into structured text with token budget.
-# Exports: GraphContextFormatter
+# Supports verb normalization: edge type labels are mapped to natural-language
+# verb phrases via a YAML schema table loaded once at init time.
+# Exports: GraphContextFormatter, format_community_section
 # Deps: src.knowledge_graph.common (Entity, Triple),
-#        src.knowledge_graph.query.schemas (PathResult, PathHop)
+#        src.knowledge_graph.query.schemas (PathResult, PathHop),
+#        src.knowledge_graph.community.schemas (CommunitySummary)
 # @end-summary
 """Graph context formatter for LLM prompt injection.
 
@@ -21,18 +24,61 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+import yaml
 
 from src.knowledge_graph.common.schemas import Entity, Triple
 from src.knowledge_graph.query.schemas import PathResult
 
-__all__ = ["GraphContextFormatter"]
+if TYPE_CHECKING:
+    from src.knowledge_graph.community.schemas import CommunitySummary
+
+__all__ = ["GraphContextFormatter", "format_community_section"]
 
 _log = logging.getLogger("rag.knowledge_graph.query.context_formatter")
 
 # Sentinel used inside _apply_token_budget to tag seed vs neighbour lines.
 _SEED_TAG = "__seed__"
 _NEIGHBOUR_TAG = "__neighbour__"
+
+
+def _load_verb_table(schema_path: Optional[str]) -> Dict[str, str]:
+    """Load the ``verb_normalization`` mapping from a YAML schema file.
+
+    Parameters
+    ----------
+    schema_path:
+        Absolute or relative path to the YAML schema file, or ``None``.
+
+    Returns
+    -------
+    Dict[str, str]
+        Mapping of edge-type label to natural-language verb phrase.
+        Returns an empty dict if the path is ``None``, the file does not
+        exist, the key is absent, or any error occurs during loading.
+    """
+    if schema_path is None:
+        return {}
+    try:
+        path = Path(schema_path)
+        if not path.exists():
+            return {}
+        with path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        if not isinstance(data, dict):
+            return {}
+        table = data.get("verb_normalization", {})
+        if not isinstance(table, dict):
+            return {}
+        return {str(k): str(v) for k, v in table.items()}
+    except Exception:  # noqa: BLE001
+        _log.warning(
+            "Failed to load verb_normalization from schema '%s'", schema_path,
+            exc_info=True,
+        )
+        return {}
 
 
 class GraphContextFormatter:
@@ -73,6 +119,7 @@ class GraphContextFormatter:
         marker_style: str = "markdown",
         description_fallback_k: int = 3,
         max_path_hops: int = 5,
+        schema_path: Optional[str] = None,
     ) -> None:
         self.token_budget = token_budget
         self.marker_style = marker_style
@@ -80,6 +127,7 @@ class GraphContextFormatter:
         self.max_path_hops = max_path_hops
 
         self._section_markers = self._get_section_markers(marker_style)
+        self._verb_table: Dict[str, str] = _load_verb_table(schema_path)
 
     # ------------------------------------------------------------------
     # Public API
@@ -259,11 +307,11 @@ class GraphContextFormatter:
 
             # Build the narrative chain.
             first_hop = hops[0]
-            predicate_str = first_hop.edge_type.replace("_", " ")
+            predicate_str = self._normalize_predicate(first_hop.edge_type)
             narrative = f"{first_hop.from_entity} {predicate_str} {first_hop.to_entity}"
 
             for hop in hops[1:]:
-                pred = hop.edge_type.replace("_", " ")
+                pred = self._normalize_predicate(hop.edge_type)
                 narrative += f", which {pred} {hop.to_entity}"
 
             if truncated:
@@ -424,6 +472,8 @@ class GraphContextFormatter:
                 "triples_close": "",
                 "paths_open": "### Paths",
                 "paths_close": "",
+                "communities_open": "### Communities",
+                "communities_close": "",
                 "footer": "",
             }
         if marker_style == "xml":
@@ -435,6 +485,8 @@ class GraphContextFormatter:
                 "triples_close": "</relationships>",
                 "paths_open": "<paths>",
                 "paths_close": "</paths>",
+                "communities_open": "<communities>",
+                "communities_close": "</communities>",
                 "footer": "</graph_context>",
             }
         if marker_style == "plain":
@@ -446,6 +498,8 @@ class GraphContextFormatter:
                 "triples_close": "",
                 "paths_open": "--- PATHS ---",
                 "paths_close": "",
+                "communities_open": "--- COMMUNITIES ---",
+                "communities_close": "",
                 "footer": "",
             }
         raise ValueError(
@@ -456,6 +510,24 @@ class GraphContextFormatter:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _normalize_predicate(self, predicate: str) -> str:
+        """Return the natural-language verb phrase for *predicate*.
+
+        Looks up *predicate* in the verb table loaded from the schema.
+        Falls back to replacing underscores with spaces when no entry exists.
+
+        Parameters
+        ----------
+        predicate:
+            Raw edge-type label (e.g. ``"depends_on"``).
+
+        Returns
+        -------
+        str
+            Human-readable verb phrase (e.g. ``"depends on"``).
+        """
+        return self._verb_table.get(predicate, predicate.replace("_", " "))
 
     def _entity_description(self, entity: Entity) -> str:
         """Return the best available description for *entity*.
@@ -530,6 +602,90 @@ class GraphContextFormatter:
             parts.append(m["footer"])
 
         return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Public module-level functions
+# ---------------------------------------------------------------------------
+
+
+def format_community_section(
+    summaries: Dict[int, "CommunitySummary"],
+    entity_counts: Dict[int, int],
+    token_budget: int,
+    section_markers: Dict[str, str],
+) -> str:
+    """Format community summaries into a structured text block for LLM prompts.
+
+    Each community is rendered as::
+
+        [Community {id}] ({N} entities touched): {summary_text}
+
+    Communities are sorted by entity involvement (descending) so the most
+    relevant communities appear first. If the total character count exceeds
+    the budget, communities with the fewest entity counts are dropped first.
+
+    Parameters
+    ----------
+    summaries:
+        Mapping of community ID to :class:`CommunitySummary` objects.
+    entity_counts:
+        Mapping of community ID to the number of query-touched entities
+        that belong to that community.
+    token_budget:
+        Maximum token budget for this section. A budget of ``0`` or
+        negative means no output should be produced.
+    section_markers:
+        Dict of section marker strings (as returned by
+        ``GraphContextFormatter._get_section_markers``). Must contain
+        ``"communities_open"`` and ``"communities_close"`` keys.
+
+    Returns
+    -------
+    str
+        Formatted community section string, or ``""`` if *token_budget*
+        is non-positive or *summaries* is empty.
+    """
+    if token_budget <= 0 or not summaries:
+        return ""
+
+    char_budget = token_budget * GraphContextFormatter._CHARS_PER_TOKEN
+
+    # Build (community_id, count, line) tuples.
+    entries: List[Tuple[int, int, str]] = []
+    for cid, summary in summaries.items():
+        count = entity_counts.get(cid, 0)
+        line = f"[Community {cid}] ({count} entities touched): {summary.summary_text}"
+        entries.append((cid, count, line))
+
+    # Apply budget: drop communities with fewest entity counts first.
+    # Work on a copy sorted ascending by count so we pop from the front.
+    entries_asc = sorted(entries, key=lambda t: t[1])
+
+    def _total_chars(items: List[Tuple[int, int, str]]) -> int:
+        return sum(len(t[2]) for t in items)
+
+    while _total_chars(entries_asc) > char_budget and entries_asc:
+        entries_asc.pop(0)
+
+    if not entries_asc:
+        return ""
+
+    # Final display order: descending by entity count (highest involvement first).
+    entries_asc.sort(key=lambda t: t[1], reverse=True)
+    lines = [t[2] for t in entries_asc]
+
+    parts: List[str] = []
+    open_marker = section_markers.get("communities_open", "")
+    close_marker = section_markers.get("communities_close", "")
+
+    if open_marker:
+        parts.append(open_marker)
+    parts.extend(lines)
+    if close_marker:
+        parts.append(close_marker)
+
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

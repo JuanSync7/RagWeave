@@ -200,6 +200,7 @@ class TestStructureDetectionErrorScenarios:
             "docling_enabled",
             "docling_model",
             "docling_document_available",
+            "parser_strategy",
         }
 
     def test_structure_detection_node_processing_log_records_ok(self):

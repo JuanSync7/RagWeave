@@ -74,6 +74,27 @@ class VectorBackend(ABC):
         ...
 
     @abstractmethod
+    def update_chunk_content(
+        self,
+        client: Any,
+        chunk_uuid: str,
+        *,
+        text: str,
+        content_hash: str,
+        fuzzy_fingerprint: Optional[str] = None,
+        collection: Optional[str] = None,
+    ) -> bool:
+        """Replace a canonical chunk's text + dedup metadata (FR-3432).
+
+        Used by the cross-document dedup node when an incoming chunk is richer
+        than the existing canonical chunk it fuzzy-matches.
+
+        Returns:
+            True on success, False on error (caller treats as non-fatal).
+        """
+        ...
+
+    @abstractmethod
     def search(
         self,
         client: Any,

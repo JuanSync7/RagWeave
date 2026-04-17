@@ -1,12 +1,18 @@
 # @summary
 # Ingestion pipeline orchestrator: source discovery, idempotency, two-phase ingest.
 # Exports: ingest_directory, ingest_file, verify_core_design, IngestionConfig, Runtime
-# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding, src.ingest.doc_processing
+# Deps: src.vector_db, src.core.embeddings, src.core.knowledge_graph, src.ingest.embedding,
+#       src.ingest.doc_processing, src.ingest.support.parser_registry
 # verify_core_design calls _check_docling_chunking_config (Task 4.2) which validates
 #   vlm_mode values, builtin-requires-docling, and hybrid_chunker_max_tokens > 512 limit.
 # verify_core_design also calls _check_visual_embedding_config (Task 1.1) which validates
 #   enable_visual_embedding requires enable_docling_parser, colqwen_batch_size 1-32,
 #   page_image_quality 1-100, and page_image_max_dimension 256-4096.
+# verify_core_design also calls _check_parser_abstraction_config (T9) which validates
+#   parser_strategy, chunker, VLM mutual exclusion, and VLM+code incompatibility.
+# verify_core_design also calls _check_embedding_batch_config (FR-1211) which validates
+#   embedding_batch_size range [1, 2048].
+# ParserRegistry is instantiated in ingest_directory and attached to Runtime (T9).
 # @end-summary
 
 """Ingestion pipeline runtime orchestration and public implementation API.
@@ -26,6 +32,7 @@ import hashlib
 import orjson
 import logging
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -53,10 +60,12 @@ from src.vector_db import (
 )
 from src.ingest.support import ensure_docling_ready
 from src.ingest.support import ensure_vision_ready
+from src.ingest.support.parser_registry import ParserRegistry
 from src.ingest.common import (
     ManifestEntry,
     SourceIdentity,
 )
+from src.ingest.common.schemas import PIPELINE_SCHEMA_VERSION
 from src.ingest.common import (
     load_manifest,
     save_manifest,
@@ -211,6 +220,14 @@ def _normalize_manifest_entries(
                 source_key = f"legacy_name:{key_text}"
                 entry.setdefault("legacy_name", key_text)
         entry["source_key"] = source_key
+        # Ensure lifecycle fields have safe defaults for pre-1.0.0 manifests (FR-3114).
+        entry.setdefault("schema_version", "0.0.0")
+        entry.setdefault("trace_id", "")
+        entry.setdefault("batch_id", "")
+        entry.setdefault("deleted", False)
+        entry.setdefault("deleted_at", "")
+        entry.setdefault("validation", {})
+        entry.setdefault("clean_hash", "")
         normalized[source_key] = entry
     return normalized
 
@@ -356,6 +373,110 @@ def _check_visual_embedding_config(
     return errors, warnings
 
 
+def _check_embedding_batch_config(
+    config: IngestionConfig,
+) -> tuple[list[str], list[str]]:
+    """Validate embedding batch configuration. FR-1211.
+
+    Checks:
+    1. embedding_batch_size range [1, 2048] (fatal)
+
+    Args:
+        config: IngestionConfig to validate.
+
+    Returns:
+        Tuple of (errors, warnings). Errors block pipeline start.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not (1 <= config.embedding_batch_size <= 2048):
+        errors.append(
+            f"embedding_batch_size={config.embedding_batch_size} is out of range;"
+            " must be between 1 and 2048 (inclusive)"
+        )
+
+    return errors, warnings
+
+
+def _check_parser_abstraction_config(
+    config: IngestionConfig,
+) -> tuple[list[str], list[str]]:
+    """Validate parser abstraction configuration fields. FR-3301, FR-3320, FR-3340.
+
+    Checks:
+    1. ``parser_strategy`` must be one of the accepted values (FR-3301 AC 3).
+    2. ``chunker`` must be one of the accepted values (FR-3322).
+    3. ``chunker="markdown"`` emits a warning (FR-3323).
+    4. VLM mutual exclusion: ``vlm_mode="builtin"`` AND ``enable_multimodal_processing=True``
+       is an error (FR-3340, FR-3341).
+    5. ``vlm_mode="external"`` AND ``enable_multimodal_processing=True`` is a warning (FR-3342).
+    6. ``enable_vlm_enrichment=True`` AND ``parser_strategy="code"`` is an error (FR-3341).
+
+    Args:
+        config: IngestionConfig to validate.
+
+    Returns:
+        Tuple of (errors, warnings). Errors block pipeline start.
+    """
+    errors: list[str] = []
+    warnings_list: list[str] = []
+
+    # Rule 1: parser_strategy must be a recognised value.
+    _VALID_STRATEGIES = {"auto", "document", "code", "text"}
+    if config.parser_strategy not in _VALID_STRATEGIES:
+        errors.append(
+            f"parser_strategy must be 'auto', 'document', 'code', or 'text', "
+            f"got '{config.parser_strategy}'."
+        )
+
+    # Rule 2: chunker must be a recognised value.
+    _VALID_CHUNKERS = {"native", "markdown"}
+    if config.chunker not in _VALID_CHUNKERS:
+        errors.append(
+            f"chunker must be 'native' or 'markdown', got '{config.chunker}'."
+        )
+
+    # Rule 3: chunker override warning.
+    if config.chunker == "markdown":
+        warnings_list.append(
+            "Chunker override active: all parsers will use markdown-based chunking. "
+            "Native chunking (with richer heading metadata from HybridChunker / "
+            "AST-aware code splitting) is disabled."
+        )
+
+    # Rule 4: VLM mutual exclusion (builtin + multimodal).
+    if config.vlm_mode == "builtin" and config.enable_multimodal_processing:
+        errors.append(
+            "vlm_mode='builtin' and enable_multimodal_processing=True are mutually "
+            "exclusive. vlm_mode='builtin' describes figures at parse time via Docling "
+            "SmolVLM. enable_multimodal_processing describes figures in the Phase 1 "
+            "multimodal node via vision.py. Disable one to prevent double VLM "
+            "processing of figure images."
+        )
+
+    # Rule 5: VLM coexistence info (external + multimodal).
+    if config.vlm_mode == "external" and config.enable_multimodal_processing:
+        warnings_list.append(
+            "vlm_mode='external' and enable_multimodal_processing are both active. "
+            "Phase 1 multimodal node will process figures pre-chunking; "
+            "vlm_mode='external' will enrich chunks post-chunking. Both being active "
+            "is valid but means figures are processed at two pipeline stages."
+        )
+
+    # Rule 6: VLM enrichment incompatible with code parser strategy.
+    enable_vlm = getattr(config, "enable_vlm_enrichment", False)
+    if enable_vlm and config.parser_strategy == "code":
+        errors.append(
+            "VLM enrichment is incompatible with code parser strategy. "
+            "Code parser chunks contain raw source; VLM figure enrichment "
+            "is meaningless for code content. "
+            "Set parser_strategy to 'auto', 'document', or 'text' to use VLM enrichment."
+        )
+
+    return errors, warnings_list
+
+
 def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     """Validate ingestion configuration compatibility and return actionable feedback.
 
@@ -391,6 +512,16 @@ def verify_core_design(config: IngestionConfig) -> IngestionDesignCheck:
     errors.extend(ve_errors)
     warnings.extend(ve_warnings)
 
+    # Parser abstraction validation (Task T9, FR-3301, FR-3320, FR-3340-FR-3342).
+    pa_errors, pa_warnings = _check_parser_abstraction_config(config)
+    errors.extend(pa_errors)
+    warnings.extend(pa_warnings)
+
+    # Batch embedding validation (FR-1211).
+    eb_errors, eb_warnings = _check_embedding_batch_config(config)
+    errors.extend(eb_errors)
+    warnings.extend(eb_warnings)
+
     return IngestionDesignCheck(ok=not errors, errors=errors, warnings=warnings)
 
 
@@ -405,6 +536,7 @@ def ingest_file(
     source_version: str,
     existing_hash: str = "",
     existing_source_uri: str = "",
+    batch_id: str = "",
 ) -> IngestFileResult:
     """Run the two-phase ingestion pipeline for a single source file.
 
@@ -423,12 +555,23 @@ def ingest_file(
         source_version: Source version string.
         existing_hash: Previously stored content hash (for incremental updates).
         existing_source_uri: Previously stored URI (for incremental updates).
+        batch_id: Optional batch grouping ID (FR-3053). Empty string when not
+            part of a named batch run.
 
     Returns:
         ``IngestFileResult`` describing errors, stored chunk count, metadata,
-        processing log, and content hashes for both the source and clean text.
+        processing log, content hashes, and trace_id for the ingestion run.
     """
     config = runtime.config
+
+    # ── Trace ID generation (FR-3050) ─────────────────────────────────────
+    trace_id = str(uuid.uuid4())
+    logger.info(
+        "ingest_file_start trace_id=%s source_key=%s batch_id=%s",
+        trace_id,
+        source_key,
+        batch_id,
+    )
 
     # ── Phase 1 ──────────────────────────────────────────────────────────
     phase1 = run_document_processing(
@@ -440,6 +583,7 @@ def ingest_file(
         source_id=source_id,
         connector=connector,
         source_version=source_version,
+        trace_id=trace_id,
     )
 
     # run_document_processing always returns a DocumentProcessingState TypedDict (never None).
@@ -452,6 +596,7 @@ def ingest_file(
             processing_log=phase1.get("processing_log", []),
             source_hash=phase1.get("source_hash", ""),
             clean_hash="",
+            trace_id=trace_id,
         )
 
     # Determine final clean text
@@ -491,6 +636,10 @@ def ingest_file(
         _write_refactor_mirror_artifacts(source_identity, phase1, config)
 
     # ── Phase 2 (DoclingDocument passed in-memory from Phase 1) ──────────
+    # Propagate trace_id from Phase 1 state to Phase 2 (FR-3052).
+    # phase1.get("trace_id") will be the same value we injected above, but we
+    # read it from the state to stay consistent with the contract that Phase 2
+    # receives trace_id via state, not as a free variable.
     phase2 = run_embedding_pipeline(
         runtime=runtime,
         source_key=source_key,
@@ -503,6 +652,8 @@ def ingest_file(
         clean_hash=clean_hash,
         refactored_text=phase1.get("refactored_text"),
         docling_document=phase1.get("docling_document"),
+        trace_id=phase1.get("trace_id", trace_id),
+        batch_id=batch_id,
     )
 
     return IngestFileResult(
@@ -513,6 +664,7 @@ def ingest_file(
         processing_log=phase1.get("processing_log", []) + phase2.get("processing_log", []),
         source_hash=phase1.get("source_hash", ""),
         clean_hash=clean_hash,
+        trace_id=trace_id,
     )
 
 
@@ -523,6 +675,7 @@ def ingest_directory(
     update: bool = False,
     obsidian_export: bool = False,
     selected_sources: Optional[list[Path]] = None,
+    batch_id: str = "",
 ) -> IngestionRunSummary:
     """Ingest a directory of documents and persist vectors/KG artifacts.
 
@@ -533,6 +686,9 @@ def ingest_directory(
         update: Whether to run in incremental mode using the manifest.
         obsidian_export: Whether to export the knowledge graph to an Obsidian vault.
         selected_sources: Optional explicit list of files to ingest.
+        batch_id: Optional batch grouping ID (FR-3053). When provided, all files in
+            this run share the same batch_id in their manifests and Weaviate metadata.
+            Empty string (default) means no batch grouping.
 
     Returns:
         An `IngestionRunSummary` describing the run outcome.
@@ -613,6 +769,18 @@ def ingest_directory(
             _db_client = _db_create_client()
             _db_ensure_bucket(_db_client, config.target_bucket or None)
 
+        # Instantiate parser registry and validate readiness (T9 / FR-3303).
+        try:
+            _parser_registry = ParserRegistry(config)
+            _parser_registry.ensure_all_ready(config)
+        except Exception as _preg_exc:
+            logger.warning(
+                "ParserRegistry initialisation failed: %s — "
+                "structure_detection_node will use legacy Docling fallback.",
+                _preg_exc,
+            )
+            _parser_registry = None
+
         runtime = Runtime(
             config=config,
             embedder=LocalBGEEmbeddings(),
@@ -621,6 +789,7 @@ def ingest_directory(
             if config.build_kg
             else None,
             db_client=_db_client,
+            parser_registry=_parser_registry,
         )
 
         if config.export_processed:
@@ -672,6 +841,7 @@ def ingest_directory(
                     source_version=source["source_version"],
                     existing_hash=previous_hash if update else "",
                     existing_source_uri=previous_uri if update else "",
+                    batch_id=batch_id,
                 )
                 if result.errors:
                     failed += 1
@@ -705,11 +875,19 @@ def ingest_directory(
                     "connector": source["connector"],
                     "source_version": source["source_version"],
                     "content_hash": result.source_hash,
+                    "clean_hash": result.clean_hash,
                     "chunk_count": result.stored_count,
                     "summary": result.metadata_summary,
                     "keywords": result.metadata_keywords,
                     "processing_log": result.processing_log[-12:],
                     "mirror_stem": stem,
+                    # -- Data Lifecycle fields (FR-3050, FR-3053, FR-3100) --
+                    "schema_version": PIPELINE_SCHEMA_VERSION,
+                    "trace_id": result.trace_id,
+                    "batch_id": batch_id,
+                    "deleted": False,
+                    "deleted_at": "",
+                    "validation": result.validation,
                 }
                 save_manifest(manifest)
 

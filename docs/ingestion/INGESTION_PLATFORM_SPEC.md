@@ -17,7 +17,7 @@
 |-------|-------|
 | System | AION RAG Document Embedding Pipeline |
 | Document Type | Platform Specification (Cross-Cutting Requirements) |
-| Companion Documents | DOCUMENT_PROCESSING_SPEC.md (Document Processing Phase), EMBEDDING_PIPELINE_SPEC.md (Embedding Phase), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), DOCUMENT_PROCESSING_IMPLEMENTATION.md (Phase 1 Implementation), EMBEDDING_PIPELINE_IMPLEMENTATION.md (Phase 2 Implementation) |
+| Companion Documents | DOCUMENT_PROCESSING_SPEC.md (Document Processing Phase), EMBEDDING_PIPELINE_SPEC.md (Embedding Phase), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), DOCUMENT_PROCESSING_IMPLEMENTATION.md (Phase 1 Implementation), EMBEDDING_PIPELINE_IMPLEMENTATION.md (Phase 2 Implementation), DATA_LIFECYCLE_SPEC.md (Data Lifecycle Requirements), DOCUMENT_PARSING_SPEC.md (Parser Abstraction), CROSS_DOCUMENT_DEDUP_SPEC.md (Cross-Document Deduplication), INGESTION_ORCHESTRATION_SPEC.md (Ingestion Orchestration) |
 | Version | 2.3.0 |
 | Status | Draft |
 

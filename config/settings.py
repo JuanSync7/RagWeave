@@ -106,9 +106,15 @@ RAG_KG_RETRIEVAL_EDGE_TYPES: list[str] = [
 # Path patterns: JSON-encoded list of edge-type sequences, e.g. '[["instantiates","specified_by"]]'.
 # Empty list = no pattern matching.
 import json as _json
-RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = _json.loads(
-    os.environ.get("RAG_KG_RETRIEVAL_PATH_PATTERNS", "[]")
-)
+try:
+    RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = _json.loads(
+        os.environ.get("RAG_KG_RETRIEVAL_PATH_PATTERNS", "[]")
+    )
+except (ValueError, TypeError):
+    logging.getLogger(__name__).warning(
+        "RAG_KG_RETRIEVAL_PATH_PATTERNS is not valid JSON; defaulting to []"
+    )
+    RAG_KG_RETRIEVAL_PATH_PATTERNS: list[list[str]] = []
 # Max tokens for the graph context block injected into the generation prompt.
 RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET: int = int(
     os.environ.get("RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET", "500")
@@ -117,6 +123,18 @@ RAG_KG_GRAPH_CONTEXT_TOKEN_BUDGET: int = int(
 RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION: bool = os.environ.get(
     "RAG_KG_ENABLE_GRAPH_CONTEXT_INJECTION", "false"
 ).lower() in ("true", "1", "yes")
+# Community context token budget (REQ-KG-1320). 0 = community context disabled.
+RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET: int = int(
+    os.environ.get("RAG_KG_COMMUNITY_CONTEXT_TOKEN_BUDGET", "200")
+)
+# Graph context section marker style (REQ-KG-1322). "markdown" | "xml" | "plain".
+RAG_KG_GRAPH_CONTEXT_MARKER_STYLE: str = os.environ.get(
+    "RAG_KG_GRAPH_CONTEXT_MARKER_STYLE", "markdown"
+)
+# Max entities explored per hop in path pattern evaluation (REQ-KG-1324).
+RAG_KG_MAX_HOP_FANOUT: int = int(
+    os.environ.get("RAG_KG_MAX_HOP_FANOUT", "50")
+)
 
 # --- Semantic Chunking ---
 SEMANTIC_CHUNKING_ENABLED = os.environ.get(
@@ -462,6 +480,102 @@ RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
 """If True (default), persist DoclingDocument JSON to CleanDocumentStore.
 Set to false to trade storage for compute (re-parse in Phase 2)."""
 
+# --- Ingestion Hardening: Document Parsing Abstraction (FR-3301, FR-3320) ---
+RAG_INGESTION_PARSER_STRATEGY: str = os.environ.get(
+    "RAG_INGESTION_PARSER_STRATEGY", "auto"
+)
+"""Parser selection strategy: "auto" | "document" | "code" | "text".
+"auto" routes by file extension via ParserRegistry. FR-3301."""
+
+RAG_INGESTION_CHUNKER: str = os.environ.get(
+    "RAG_INGESTION_CHUNKER", "native"
+)
+"""Chunker override: "native" | "markdown".
+"native" uses each parser's own chunker (DoclingParser HybridChunker,
+CodeParser tree-sitter, PlainTextParser markdown). "markdown" forces
+the shared chunk_with_markdown() fallback for all parsers. FR-3320."""
+
+# --- Ingestion Hardening: Data Lifecycle — MinIO Clean Store + GC ---
+RAG_INGESTION_CLEAN_STORE_BUCKET: str = os.environ.get(
+    "RAG_INGESTION_CLEAN_STORE_BUCKET", ""
+)
+"""MinIO bucket for the clean store. Empty string reuses the primary
+target_bucket. Data Lifecycle T1."""
+
+RAG_GC_MODE: str = os.environ.get("RAG_GC_MODE", "soft")
+"""Default GC delete mode: "soft" (default) or "hard". FR-3020."""
+
+RAG_GC_RETENTION_DAYS: int = int(os.environ.get("RAG_GC_RETENTION_DAYS", "30"))
+"""Days before soft-deleted entries are eligible for hard purge. FR-3020."""
+
+RAG_GC_SCHEDULE: str = os.environ.get("RAG_GC_SCHEDULE", "")
+"""Cron expression for scheduled GC runs. Empty string disables scheduling."""
+
+# --- Ingestion Hardening: Cross-Document Dedup (FR-3400-3433) ---
+RAGWEAVE_ENABLE_CROSS_DOC_DEDUP: bool = os.environ.get(
+    "RAGWEAVE_ENABLE_CROSS_DOC_DEDUP", "true"
+).lower() in ("true", "1", "yes")
+"""Master toggle for cross-document dedup (Tier 1 exact + optional Tier 2).
+Default True. FR-3400."""
+
+RAGWEAVE_ENABLE_FUZZY_DEDUP: bool = os.environ.get(
+    "RAGWEAVE_ENABLE_FUZZY_DEDUP", "false"
+).lower() in ("true", "1", "yes")
+"""Enable Tier 2 MinHash fuzzy matching. Default False (Tier 1 only).
+Requires the datasketch package. FR-3420."""
+
+RAGWEAVE_FUZZY_THRESHOLD: float = float(
+    os.environ.get("RAGWEAVE_FUZZY_THRESHOLD", "0.95")
+)
+"""Jaccard similarity threshold for Tier 2 fuzzy dedup. Default 0.95. FR-3421."""
+
+RAGWEAVE_FUZZY_SHINGLE_SIZE: int = int(
+    os.environ.get("RAGWEAVE_FUZZY_SHINGLE_SIZE", "3")
+)
+"""Word n-gram size for MinHash shingles. Default 3."""
+
+RAGWEAVE_FUZZY_NUM_HASHES: int = int(
+    os.environ.get("RAGWEAVE_FUZZY_NUM_HASHES", "128")
+)
+"""MinHash permutation count. Higher = better accuracy, more RAM. Default 128."""
+
+# --- Ingestion Hardening: Orchestration Dual Queue + Priority ---
+RAG_INGEST_USER_TASK_QUEUE: str = os.environ.get(
+    "RAG_INGEST_USER_TASK_QUEUE", ""
+)
+"""Task queue name for user-triggered ingestion. Empty string + empty
+RAG_INGEST_BACKGROUND_TASK_QUEUE = single-queue legacy mode.
+Typical production value: "ingest-user"."""
+
+RAG_INGEST_BACKGROUND_TASK_QUEUE: str = os.environ.get(
+    "RAG_INGEST_BACKGROUND_TASK_QUEUE", ""
+)
+"""Task queue name for background/batch ingestion.
+Typical production value: "ingest-background"."""
+
+RAG_INGEST_USER_SLOTS: int = int(os.environ.get("RAG_INGEST_USER_SLOTS", "3"))
+"""Max concurrent activities for the user-queue worker. Default 3."""
+
+RAG_INGEST_BACKGROUND_SLOTS: int = int(
+    os.environ.get("RAG_INGEST_BACKGROUND_SLOTS", "1")
+)
+"""Max concurrent activities for the background-queue worker. Default 1."""
+
+RAG_INGEST_WORKER_CONCURRENCY: int = int(
+    os.environ.get("RAG_INGEST_WORKER_CONCURRENCY", "4")
+)
+"""Legacy total worker concurrency. Used to derive 75/25 user/background
+split when RAG_INGEST_USER_SLOTS / RAG_INGEST_BACKGROUND_SLOTS are unset."""
+
+RAG_INGEST_PRIORITY_HIGH: int = int(os.environ.get("RAG_INGEST_PRIORITY_HIGH", "1"))
+"""High priority value for trigger_type=single (user interactive)."""
+
+RAG_INGEST_PRIORITY_MEDIUM: int = int(os.environ.get("RAG_INGEST_PRIORITY_MEDIUM", "2"))
+"""Medium priority value for trigger_type=batch."""
+
+RAG_INGEST_PRIORITY_LOW: int = int(os.environ.get("RAG_INGEST_PRIORITY_LOW", "3"))
+"""Low priority value for trigger_type=background (bulk/scheduled)."""
+
 # --- Guardrails ---
 # GUARDRAIL_BACKEND selects the active guardrail implementation.
 # Valid values: "nemo" (default), "" or "none" (disabled).
@@ -674,6 +788,10 @@ RAG_INGESTION_COLQWEN_BATCH_SIZE: int = int(os.environ.get(
     "RAG_INGESTION_COLQWEN_BATCH_SIZE", "4"
 ))  # FR-104, FR-109
 
+RAG_INGESTION_EMBEDDING_BATCH_SIZE: int = int(os.environ.get(
+    "RAGWEAVE_EMBEDDING_BATCH_SIZE", "64"
+))  # FR-1211
+
 RAG_INGESTION_PAGE_IMAGE_QUALITY: int = int(os.environ.get(
     "RAG_INGESTION_PAGE_IMAGE_QUALITY", "85"
 ))  # FR-105, FR-109
@@ -742,4 +860,92 @@ def validate_visual_retrieval_config() -> None:
         raise ValueError(
             f"RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS={RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS} "
             "out of range [60, 86400]"
+        )
+
+
+def validate_all_config() -> None:
+    """Validate all critical configuration at startup.
+
+    Collects all validation errors and raises a single ValueError
+    with all messages for easy diagnosis.
+    """
+    errors: list[str] = []
+
+    # --- Timeouts must be > 0 ---
+    for name, val in [
+        ("RAG_WORKFLOW_DEFAULT_TIMEOUT_MS", RAG_WORKFLOW_DEFAULT_TIMEOUT_MS),
+        ("RAG_RETRIEVAL_TIMEOUT_MS", RAG_RETRIEVAL_TIMEOUT_MS),
+        ("QUERY_PROCESSING_TIMEOUT", QUERY_PROCESSING_TIMEOUT),
+        ("RAG_INGESTION_LLM_TIMEOUT_SECONDS", RAG_INGESTION_LLM_TIMEOUT_SECONDS),
+        ("RAG_INGESTION_VISION_TIMEOUT_SECONDS", RAG_INGESTION_VISION_TIMEOUT_SECONDS),
+        ("RAG_NEMO_RAIL_TIMEOUT_SECONDS", RAG_NEMO_RAIL_TIMEOUT_SECONDS),
+    ]:
+        if val <= 0:
+            errors.append(f"{name}={val} must be > 0")
+
+    # --- Thresholds must be in [0.0, 1.0] ---
+    for name, val in [
+        ("QUERY_CONFIDENCE_THRESHOLD", QUERY_CONFIDENCE_THRESHOLD),
+        ("SEMANTIC_SIMILARITY_THRESHOLD", SEMANTIC_SIMILARITY_THRESHOLD),
+        ("RAG_NEMO_TOXICITY_THRESHOLD", RAG_NEMO_TOXICITY_THRESHOLD),
+        ("RAG_NEMO_FAITHFULNESS_THRESHOLD", RAG_NEMO_FAITHFULNESS_THRESHOLD),
+        ("RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD", RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD),
+        ("RAG_NEMO_PII_SCORE_THRESHOLD", RAG_NEMO_PII_SCORE_THRESHOLD),
+        ("RAG_CONFIDENCE_HIGH_THRESHOLD", RAG_CONFIDENCE_HIGH_THRESHOLD),
+        ("RAG_CONFIDENCE_LOW_THRESHOLD", RAG_CONFIDENCE_LOW_THRESHOLD),
+        ("RAG_CONFIDENCE_RETRIEVAL_WEIGHT", RAG_CONFIDENCE_RETRIEVAL_WEIGHT),
+        ("RAG_CONFIDENCE_LLM_WEIGHT", RAG_CONFIDENCE_LLM_WEIGHT),
+        ("RAG_CONFIDENCE_CITATION_WEIGHT", RAG_CONFIDENCE_CITATION_WEIGHT),
+    ]:
+        if not (0.0 <= val <= 1.0):
+            errors.append(f"{name}={val} must be in [0.0, 1.0]")
+
+    # --- Threshold ordering ---
+    if RAG_CONFIDENCE_HIGH_THRESHOLD < RAG_CONFIDENCE_LOW_THRESHOLD:
+        errors.append(
+            f"RAG_CONFIDENCE_HIGH_THRESHOLD ({RAG_CONFIDENCE_HIGH_THRESHOLD}) "
+            f"must be >= RAG_CONFIDENCE_LOW_THRESHOLD ({RAG_CONFIDENCE_LOW_THRESHOLD})"
+        )
+    if not (
+        RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD
+        >= RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD
+        >= RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD
+    ):
+        errors.append(
+            "Retrieval quality thresholds must satisfy: "
+            "STRONG >= MODERATE >= WEAK"
+        )
+
+    # --- Positive integers ---
+    for name, val in [
+        ("GENERATION_MAX_TOKENS", GENERATION_MAX_TOKENS),
+        ("LLM_MAX_TOKENS", LLM_MAX_TOKENS),
+        ("RAG_WORKER_CONCURRENCY", RAG_WORKER_CONCURRENCY),
+        ("RATE_LIMIT_WINDOW_SECONDS", RATE_LIMIT_WINDOW_SECONDS),
+        ("RERANKER_BATCH_SIZE", RERANKER_BATCH_SIZE),
+        ("RAG_INGESTION_LLM_MAX_KEYWORDS", RAG_INGESTION_LLM_MAX_KEYWORDS),
+    ]:
+        if val <= 0:
+            errors.append(f"{name}={val} must be > 0")
+
+    # --- Port range ---
+    if not (1 <= RAG_API_PORT <= 65535):
+        errors.append(f"RAG_API_PORT={RAG_API_PORT} must be in [1, 65535]")
+
+    # --- Feature dependencies ---
+    if RAG_INGESTION_VISION_ENABLED:
+        if not RAG_INGESTION_VISION_PROVIDER:
+            errors.append(
+                "RAG_INGESTION_VISION_ENABLED=true requires "
+                "RAG_INGESTION_VISION_PROVIDER to be set"
+            )
+        if not RAG_INGESTION_VISION_MODEL:
+            errors.append(
+                "RAG_INGESTION_VISION_ENABLED=true requires "
+                "RAG_INGESTION_VISION_MODEL to be set"
+            )
+
+    if errors:
+        raise ValueError(
+            "Configuration validation failed:\n  " + "\n  ".join(errors)
         )
