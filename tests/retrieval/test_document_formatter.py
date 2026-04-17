@@ -165,3 +165,40 @@ class TestExtractMetadataHeader:
             "domain": ["digital", "timing"],
         })
         assert "Domain: digital, timing" in header
+
+
+# ---------------------------------------------------------------------------
+# Additional metadata edge-case tests
+# ---------------------------------------------------------------------------
+
+
+class TestFormatContextMetadataCases:
+    """Edge-case tests for format_context metadata handling."""
+
+    def test_chunks_with_metadata_include_source_attribution(self):
+        """Chunks that have a 'source' field must include it in the formatted output."""
+        results = [
+            MockRankedResult(
+                text="Engine specifications text.",
+                score=0.8,
+                metadata={"source": "engine_spec.pdf", "heading": "Section 4"},
+            )
+        ]
+        result = format_context(results)
+        assert "Source: engine_spec.pdf" in result.context_string
+        assert "Engine specifications text." in result.context_string
+
+    def test_chunks_without_metadata_do_not_raise_key_error(self):
+        """Chunks with completely empty metadata must not raise KeyError."""
+        results = [
+            MockRankedResult(text="Plain text chunk.", score=0.6, metadata={})
+        ]
+        result = format_context(results)
+        assert "Plain text chunk." in result.context_string
+        assert result.chunk_count == 1
+
+    def test_empty_chunk_list_returns_empty_string(self):
+        """format_context([]) must return an empty context_string."""
+        result = format_context([])
+        assert result.context_string == ""
+        assert result.chunk_count == 0

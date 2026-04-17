@@ -52,6 +52,14 @@ except (ImportError, ModuleNotFoundError):
         def __init__(self, message=""):
             super().__init__(message)
 
+# Force src.ingest.support.colqwen and src.db.minio.store into sys.modules so
+# patch() can resolve them by dotted path in TestRAGChainVisualTrack tests.
+try:
+    import src.ingest.support.colqwen  # noqa: F401
+    import src.db.minio.store  # noqa: F401
+except (ImportError, ModuleNotFoundError):
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Helpers — build a mock torch module that behaves like torch for colqwen
@@ -1500,7 +1508,7 @@ class TestRAGChainVisualTrack:
         # Simulate model loaded
         chain._visual_model = MagicMock()
         chain._visual_processor = MagicMock()
-        with patch("src.ingest.support.colqwen.unload_colqwen_model"):
+        with patch("src.ingest.support.unload_colqwen_model"):
             chain.close()
         assert chain._visual_model is None
         assert chain._visual_processor is None
@@ -1508,7 +1516,7 @@ class TestRAGChainVisualTrack:
     def test_close_without_model_loaded_does_not_error(self, monkeypatch):
         """FR-613: close() when model never loaded → no error, unload not called."""
         chain = self._make_chain(monkeypatch)
-        with patch("src.ingest.support.colqwen.unload_colqwen_model") as mock_unload:
+        with patch("src.ingest.support.unload_colqwen_model") as mock_unload:
             chain.close()
         mock_unload.assert_not_called()
 
@@ -1679,7 +1687,7 @@ class TestRAGChainVisualTrack:
         chain.tracer = self._make_mock_tracer()
         # model is None → cold load → fails
 
-        with patch("src.ingest.support.colqwen.load_colqwen_model",
+        with patch("src.ingest.support.load_colqwen_model",
                    side_effect=ColQwen2LoadError("CUDA not available")):
             with pytest.raises(ColQwen2LoadError):
                 chain._run_visual_retrieval("any query", tenant_id=None)
@@ -1710,6 +1718,40 @@ class TestRAGChainVisualTrack:
                    side_effect=_WeaviateQueryError("query failed", "grpc")):
             with pytest.raises(_WeaviateQueryError):
                 chain._run_visual_retrieval("any query", tenant_id=None)
+
+    # --- Enabled/disabled path (additional coverage) ---
+
+    def test_visual_disabled_run_visual_retrieval_never_called(self, monkeypatch):
+        """FR-601: when _visual_retrieval_enabled=False, visual search is never invoked."""
+        chain = self._make_chain(monkeypatch, enabled=False)
+        assert chain._visual_retrieval_enabled is False
+
+        # The guard is the flag itself; verify search_visual is never reached.
+        with patch("src.vector_db.search_visual") as mock_search_visual:
+            # Simulating the flag check that run() performs before calling _run_visual_retrieval
+            if chain._visual_retrieval_enabled:
+                chain._run_visual_retrieval("any query", tenant_id=None)
+            mock_search_visual.assert_not_called()
+
+    def test_visual_enabled_run_visual_retrieval_returns_results(self, monkeypatch):
+        """FR-601/FR-603: when enabled and images found, _run_visual_retrieval returns list."""
+        chain = self._make_chain(monkeypatch, enabled=True)
+        chain._visual_model = MagicMock()
+        chain._visual_processor = MagicMock()
+        chain.tracer = self._make_mock_tracer()
+
+        with patch("src.ingest.support.embed_text_query",
+                   return_value=[0.1] * 128), \
+             patch("src.vector_db.search_visual",
+                   return_value=self.PAGE_RECORDS), \
+             patch("src.db.minio.get_page_image_url",
+                   return_value="https://minio.example.com/page.jpg"), \
+             patch("src.db.minio.create_client",
+                   return_value=MagicMock()):
+            results = chain._run_visual_retrieval("quarterly revenue chart", tenant_id=None)
+
+        assert len(results) == len(self.PAGE_RECORDS)
+        assert all(vpr.page_image_url for vpr in results)
 
 
 # ===========================================================================

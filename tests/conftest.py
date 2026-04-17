@@ -345,5 +345,93 @@ def _install_stub_modules() -> None:
         sys.modules["weaviate.classes.config"] = config_mod
         sys.modules["weaviate.classes.query"] = query_mod
 
+    if "colpali_engine" not in sys.modules:
+        colpali = types.ModuleType("colpali_engine")
+        sys.modules["colpali_engine"] = colpali
+
+    if "bitsandbytes" not in sys.modules:
+        bnb = types.ModuleType("bitsandbytes")
+        sys.modules["bitsandbytes"] = bnb
+
+    if "PIL" not in sys.modules:
+        pil = types.ModuleType("PIL")
+        pil_image = types.ModuleType("PIL.Image")
+
+        class Image:
+            """Minimal PIL.Image stub."""
+
+            LANCZOS = 1
+
+            @staticmethod
+            def open(*args, **kwargs):
+                return Image()
+
+            @staticmethod
+            def new(*args, **kwargs):
+                return Image()
+
+            def convert(self, *args, **kwargs):
+                return self
+
+            def resize(self, *args, **kwargs):
+                return self
+
+            def save(self, *args, **kwargs):
+                pass
+
+            def tobytes(self, *args, **kwargs):
+                return b""
+
+            @property
+            def size(self):
+                return (100, 100)
+
+        pil_image.Image = Image
+        pil_image.LANCZOS = Image.LANCZOS
+        pil.Image = pil_image
+        sys.modules["PIL"] = pil
+        sys.modules["PIL.Image"] = pil_image
+
+    if "prometheus_client" not in sys.modules:
+        prom = types.ModuleType("prometheus_client")
+
+        CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+
+        def generate_latest(*args, **kwargs):
+            return b""
+
+        class _MetricBase:
+            """Lightweight stub for Counter, Gauge, Histogram."""
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def labels(self, *args, **kwargs):
+                return self
+
+            def inc(self, *args, **kwargs):
+                pass
+
+            def dec(self, *args, **kwargs):
+                pass
+
+            def set(self, *args, **kwargs):
+                pass
+
+            def observe(self, *args, **kwargs):
+                pass
+
+            def time(self):
+                import contextlib
+                return contextlib.nullcontext()
+
+        prom.CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
+        prom.generate_latest = generate_latest
+        prom.Counter = _MetricBase
+        prom.Gauge = _MetricBase
+        prom.Histogram = _MetricBase
+        prom.Summary = _MetricBase
+        sys.modules["prometheus_client"] = prom
+
 
 _install_stub_modules()
