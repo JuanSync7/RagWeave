@@ -14,7 +14,7 @@
 |-------|-------|
 | System | AION RAG Document Embedding Pipeline |
 | Document Type | Pipeline Specification — Document Processing Phase |
-| Companion Documents | EMBEDDING_PIPELINE_SPEC.md (Embedding Phase Functional Requirements), INGESTION_PLATFORM_SPEC.md (Platform/Cross-Cutting Requirements), DOCLING_CHUNKING_SPEC.md (Docling-Native Chunking Subsystem), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), DOCUMENT_PROCESSING_IMPLEMENTATION.md (Phase 1 Implementation Guide) |
+| Companion Documents | EMBEDDING_PIPELINE_SPEC.md (Embedding Phase Functional Requirements), INGESTION_PLATFORM_SPEC.md (Platform/Cross-Cutting Requirements), DOCLING_CHUNKING_SPEC.md (Docling-Native Chunking Subsystem), DOCUMENT_PARSING_SPEC.md (Abstract Parser Contract), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), DOCUMENT_PROCESSING_IMPLEMENTATION.md (Phase 1 Implementation Guide) |
 | Version | 1.1.0 |
 | Status | Draft |
 | Supersedes | INGESTION_PIPELINE_SPEC.md (sections 3.1–3.5) |

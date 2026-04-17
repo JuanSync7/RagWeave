@@ -163,3 +163,54 @@ def test_503_overload_uses_standard_envelope(monkeypatch):
     assert body["ok"] is False
     assert body["error"]["code"] == "HTTP_503"
     assert "Server overloaded" in body["error"]["message"]
+
+
+def _patched_client(monkeypatch, *, fail_query: bool = False):
+    """Return a TestClient with a stubbed Temporal connection."""
+    _set_auth_defaults()
+
+    async def _fake_connect(_target: str):
+        return _DummyTemporalClient(fail_query=fail_query)
+
+    monkeypatch.setattr(api.Client, "connect", _fake_connect)
+    return TestClient(api.app, raise_server_exceptions=False)
+
+
+def test_every_error_response_has_required_fields(monkeypatch):
+    """Every error response must include ok=false, non-empty error, non-empty request_id."""
+    with _patched_client(monkeypatch) as client:
+        resp_422 = client.post("/query", json={})
+        resp_404 = client.get("/does-not-exist")
+
+    for resp in (resp_422, resp_404):
+        body = resp.json()
+        assert body["ok"] is False, f"Expected ok=false, got {body}"
+        error = body.get("error", {})
+        assert error, "error field must be present and non-empty"
+        assert isinstance(error.get("message"), str) and error["message"], (
+            "error.message must be a non-empty string"
+        )
+        assert body.get("request_id"), "request_id must be present and non-empty"
+
+
+def test_success_response_has_ok_true(monkeypatch):
+    """Successful query response returns HTTP 200 with the QueryResponse schema."""
+    with _patched_client(monkeypatch) as client:
+        response = client.post("/query", json={"query": "hello"})
+
+    assert response.status_code == 200
+    body = response.json()
+    # QueryResponse is returned directly (not wrapped in an ok-envelope).
+    # A 200 response must include the 'query' field from QueryResponse.
+    assert "query" in body
+
+
+def test_500_error_does_not_leak_traceback(monkeypatch):
+    """Internal server error must not expose raw Python tracebacks."""
+    with _patched_client(monkeypatch, fail_query=True) as client:
+        response = client.post("/query", json={"query": "hello"})
+
+    assert response.status_code == 500
+    error_msg = response.json()["error"]["message"]
+    assert "Traceback" not in error_msg
+    assert "File " not in error_msg

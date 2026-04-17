@@ -50,6 +50,10 @@ def _build_chain_for_budget_tests() -> RAGChain:
     chain.reranker = None
     chain._guardrails_input_executor = None
     chain._guardrails_output_executor = None
+    chain._guardrails_merge_gate = None
+    chain._visual_retrieval_enabled = False
+    chain._visual_model = None
+    chain._visual_processor = None
     chain._embedding_cache = OrderedDict()
     chain._embedding_cache_max = 128
     return chain
@@ -81,12 +85,74 @@ def test_run_short_circuits_on_budget_after_query_processing(monkeypatch):
         ),
     )
 
+    # overall_timeout_ms=-1: elapsed_ms() > -1 is always True, guaranteeing
+    # budget exhaustion without relying on wall-clock timing.
     response = chain.run(
         "what is rag",
-        overall_timeout_ms=0,
+        overall_timeout_ms=-1,
     )
 
     assert response.action == "ask_user"
     assert response.budget_exhausted is True
     assert response.budget_exhausted_stage == "query_processing"
     assert response.clarification_message is not None
+
+
+# ---------------------------------------------------------------------------
+# Token budget tests
+# ---------------------------------------------------------------------------
+
+
+def test_token_budget_usage_does_not_exceed_100_with_many_large_chunks():
+    """Many large chunks must not push usage_percent above 100."""
+    from src.platform.token_budget.provider import calculate_budget
+    from src.platform.token_budget.schemas import ModelCapabilities
+
+    caps = ModelCapabilities(
+        model_name="test-model",
+        context_length=2048,
+    )
+    # 20 chunks of ~200 chars each — deliberately exceeds the effective budget
+    large_chunks = ["x" * 200 for _ in range(20)]
+    snapshot = calculate_budget(
+        capabilities=caps,
+        chunks=large_chunks,
+        query="what is rag",
+    )
+    assert snapshot.usage_percent <= 100.0
+
+
+def test_token_budget_zero_context_length_does_not_raise():
+    """context_length=0 edge case must not cause a ZeroDivisionError."""
+    from src.platform.token_budget.provider import calculate_budget
+    from src.platform.token_budget.schemas import ModelCapabilities
+
+    caps = ModelCapabilities(
+        model_name="test-model",
+        context_length=0,
+    )
+    # Should not raise regardless of content
+    snapshot = calculate_budget(
+        capabilities=caps,
+        query="any query",
+    )
+    # usage_percent is clamped to [0, 100]
+    assert 0.0 <= snapshot.usage_percent <= 100.0
+
+
+def test_token_budget_empty_chunks_gives_low_usage():
+    """Empty chunk list + short query should give well below 100% usage."""
+    from src.platform.token_budget.provider import calculate_budget
+    from src.platform.token_budget.schemas import ModelCapabilities
+
+    caps = ModelCapabilities(
+        model_name="test-model",
+        context_length=2048,
+    )
+    snapshot = calculate_budget(
+        capabilities=caps,
+        chunks=[],
+        query="hi",
+    )
+    assert snapshot.usage_percent < 50.0
+    assert snapshot.breakdown.retrieval_chunks == 0

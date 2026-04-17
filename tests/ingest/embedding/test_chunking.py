@@ -290,3 +290,53 @@ class TestChunkingExceptionHandling:
         errors = result.get("errors", state.get("errors", []))
         assert chunks == []
         assert len(errors) > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: partial state resilience (optional upstream fields absent/None)
+# ---------------------------------------------------------------------------
+
+class TestPartialStateResilience:
+    """Chunking node must handle None/absent optional upstream fields gracefully."""
+
+    def test_refactored_text_none_uses_cleaned_text(self):
+        """When refactored_text is None (not just empty), cleaned_text is used."""
+        from src.ingest.embedding.nodes.chunking import chunking_node
+
+        state = _make_state(cleaned="# Cleaned\nCleaned body.", refactored="")
+        # Replace with explicit None to simulate absent optional field.
+        state["refactored_text"] = None
+
+        with (
+            patch(_EXTRACT_METADATA, return_value=MagicMock()),
+            patch(_METADATA_TO_DICT, return_value={}),
+            patch(_NORMALIZE_HEADINGS, side_effect=lambda t: t) as mock_norm,
+            patch(_CHUNK_MARKDOWN, return_value=_fake_chunk_dicts()),
+        ):
+            result = chunking_node(state)
+
+        # Node must not raise; must produce chunks.
+        chunks = result.get("chunks", state.get("chunks", []))
+        assert chunks is not None
+        # normalize_headings must be called with cleaned_text (not None).
+        call_arg = mock_norm.call_args[0][0]
+        assert call_arg is not None
+        assert call_arg == "# Cleaned\nCleaned body."
+
+    def test_docling_document_none_uses_markdown_path(self):
+        """When docling_document is None the markdown fallback is used without error."""
+        from src.ingest.embedding.nodes.chunking import chunking_node
+
+        state = _make_state()
+        state["docling_document"] = None
+
+        with (
+            patch(_EXTRACT_METADATA, return_value=MagicMock()),
+            patch(_METADATA_TO_DICT, return_value={}),
+            patch(_NORMALIZE_HEADINGS, side_effect=lambda t: t),
+            patch(_CHUNK_MARKDOWN, return_value=_fake_chunk_dicts()),
+        ):
+            result = chunking_node(state)
+
+        errors = result.get("errors", state.get("errors", []))
+        assert errors == []

@@ -120,7 +120,7 @@ def _stream_llm(
         context = "\n\n".join(f"[{i+1}] {chunk}" for i, chunk in enumerate(context_chunks))
     user_message = _build_user_prompt(context=context, question=query)
 
-    messages: list[dict] = [{"role": "system", "content": _get_gen_system_prompt()}]
+    messages: list[dict] = [{"role": "system", "content": _get_system_prompt()}]
     if memory_context:
         messages.append(
             {
@@ -151,10 +151,6 @@ def _stream_llm(
     ):
         yield token
     _record_stage("stream_tokens", "generation", stream_start)
-
-
-# Backward-compatible alias
-_stream_ollama = _stream_llm
 
 
 async def run_query(

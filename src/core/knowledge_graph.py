@@ -10,12 +10,14 @@ Extracts entities and relationships from document chunks using rule-based
 patterns, stores them in a NetworkX directed graph, and provides query-time
 expansion to augment BM25 search with related terms.
 """
+from __future__ import annotations
+
 
 import orjson
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Optional
 
 import networkx as nx
 
@@ -72,8 +74,14 @@ class GLiNEREntityExtractor:
     detection and relation extraction to the regex-based EntityExtractor.
     """
 
-    def __init__(self, model_path: str = None):
-        from gliner import GLiNER
+    def __init__(self, model_path: str | None = None):
+        try:
+            from gliner import GLiNER
+        except ImportError:
+            raise ImportError(
+                "GLiNER is required for GLiNEREntityExtractor. "
+                "Install it with: pip install ragweave[gliner]"
+            ) from None
         from config.settings import GLINER_MODEL_PATH, GLINER_ENTITY_LABELS
 
         model_path = model_path or GLINER_MODEL_PATH
@@ -86,7 +94,7 @@ class GLiNEREntityExtractor:
             self._regex_extractor = EntityExtractor()
         return self._regex_extractor
 
-    def extract_entities(self, text: str) -> Set[str]:
+    def extract_entities(self, text: str) -> set[str]:
         """Extract entities using GLiNER zero-shot NER."""
         clean = re.sub(r"^#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
 
@@ -102,13 +110,13 @@ class GLiNEREntityExtractor:
 
         return entities
 
-    def extract_acronym_aliases(self, text: str) -> Dict[str, str]:
+    def extract_acronym_aliases(self, text: str) -> dict[str, str]:
         """Delegate to regex extractor (GLiNER doesn't handle acronym patterns)."""
         return self._get_regex_extractor().extract_acronym_aliases(text)
 
     def extract_relations(
-        self, text: str, known_entities: Set[str]
-    ) -> List[Tuple[str, str, str]]:
+        self, text: str, known_entities: set[str]
+    ) -> list[tuple[str, str, str]]:
         """Delegate to regex extractor (GLiNER doesn't extract relations)."""
         return self._get_regex_extractor().extract_relations(text, known_entities)
 
@@ -124,7 +132,7 @@ class EntityExtractor:
         "Common", "Various", "Popular", "Important",
     })
 
-    def extract_entities(self, text: str) -> Set[str]:
+    def extract_entities(self, text: str) -> set[str]:
         """Extract named entities from text."""
         # Strip entire markdown header lines before extraction
         clean = re.sub(r"^#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
@@ -156,7 +164,7 @@ class EntityExtractor:
 
         return entities
 
-    def extract_acronym_aliases(self, text: str) -> Dict[str, str]:
+    def extract_acronym_aliases(self, text: str) -> dict[str, str]:
         """Find acronym expansions like 'Long Form (ACRO)' → {ACRO: Long Form}."""
         aliases = {}
 
@@ -175,8 +183,8 @@ class EntityExtractor:
         return aliases
 
     def extract_relations(
-        self, text: str, known_entities: Set[str]
-    ) -> List[Tuple[str, str, str]]:
+        self, text: str, known_entities: set[str]
+    ) -> list[tuple[str, str, str]]:
         """Extract (subject, relation, object) triples from text.
 
         Uses sentence-level regex patterns for common relationship forms.
@@ -289,9 +297,9 @@ class KnowledgeGraphBuilder:
 
     def __init__(self, use_gliner: bool = False):
         self.graph: nx.DiGraph = nx.DiGraph()
-        self._aliases: Dict[str, str] = {}
+        self._aliases: dict[str, str] = {}
         # Case-insensitive lookup: lowercase name → canonical node name
-        self._case_index: Dict[str, str] = {}
+        self._case_index: dict[str, str] = {}
 
         if use_gliner:
             try:
@@ -372,7 +380,7 @@ class KnowledgeGraphBuilder:
         return term
 
     def _upsert_node(
-        self, name: str, source: str, aliases: Optional[List[str]] = None
+        self, name: str, source: str, aliases: Optional[list[str]] = None
     ) -> None:
         if self.graph.has_node(name):
             data = self.graph.nodes[name]
@@ -459,13 +467,13 @@ class GraphQueryExpander:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
         # Build lowercase lookup index: name/alias -> canonical node name
-        self._index: Dict[str, str] = {}
+        self._index: dict[str, str] = {}
         for node, data in graph.nodes(data=True):
             self._index[node.lower()] = node
             for alias in data.get("aliases", []):
                 self._index[alias.lower()] = node
 
-    def find_entities_in_query(self, query: str) -> List[str]:
+    def find_entities_in_query(self, query: str) -> list[str]:
         """Match graph nodes against query text by substring."""
         query_lower = query.lower()
         matched = set()
@@ -475,7 +483,7 @@ class GraphQueryExpander:
                 matched.add(self._index[key])
         return list(matched)
 
-    def expand(self, query: str, depth: int = 1) -> List[str]:
+    def expand(self, query: str, depth: int = 1) -> list[str]:
         """Return related entity names to augment the search query.
 
         Traverses the graph outward (and inward) from matched entities
@@ -500,7 +508,7 @@ class GraphQueryExpander:
         query_lower = query.lower()
         return [e for e in expanded if e.lower() not in query_lower]
 
-    def get_context_summary(self, entities: List[str], max_lines: int = 5) -> str:
+    def get_context_summary(self, entities: list[str], max_lines: int = 5) -> str:
         """Build a short text summary of entity relationships."""
         lines = []
         for entity in entities:

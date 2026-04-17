@@ -1,11 +1,15 @@
 # @summary
 # End-to-end RAG pipeline for query processing, KG expansion, hybrid search, reranking,
-# visual retrieval, and LLM generation.
+# visual retrieval, and LLM generation.  KG graph_context (REQ-KG-794, REQ-KG-796) is
+# threaded from expansion to the generator prompt, placed before document chunks when
+# non-empty and omitted entirely when empty.
 # Main classes: RAGChain, RAGResponse. Deps: src.vector_db, src.guardrails, src.retrieval.generation.nodes.generator, src.retrieval.query.nodes.query_processor, src.retrieval.common.schemas, src.core, src.platform
 # @end-summary
 """Main RAG chain that orchestrates the full retrieval pipeline."""
+from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+
+from typing import Any, Optional
 import logging
 import statistics
 import time
@@ -259,7 +263,7 @@ class RAGChain:
 
     def _run_visual_retrieval(
         self, processed_query: str, tenant_id: Optional[str]
-    ) -> List[VisualPageResult]:
+    ) -> list[VisualPageResult]:
         """Execute the visual retrieval track. FR-601, FR-605, FR-607, FR-609
 
         Encodes the processed query via ColQwen2, searches the visual collection,
@@ -310,9 +314,9 @@ class RAGChain:
             get_page_image_url,
         )
 
-        results: List[VisualPageResult] = []
+        results: list[VisualPageResult] = []
         with self.tracer.span("visual_retrieval.presigned_urls"):
-            minio_client = create_minio_client()
+            minio_client = create_client()
             for record in page_records:
                 try:
                     url = get_page_image_url(
@@ -383,7 +387,7 @@ class RAGChain:
             raise
 
     @staticmethod
-    def _ranked_from_search_results(search_results, top_k: int) -> List[RankedResult]:
+    def _ranked_from_search_results(search_results, top_k: int) -> list[RankedResult]:
         """Convert search results into a sorted RankedResult list."""
         _t0 = time.perf_counter()
         ranked = [
@@ -411,9 +415,9 @@ class RAGChain:
         max_query_iterations: int = MAX_SANITIZATION_ITERATIONS,
         fast_path: Optional[bool] = None,
         overall_timeout_ms: int = RAG_RETRIEVAL_TIMEOUT_MS,
-        stage_budget_overrides: Optional[Dict[str, int]] = None,
+        stage_budget_overrides: Optional[dict[str, int]] = None,
         memory_context: Optional[str] = None,
-        memory_recent_turns: Optional[List[Dict[str, str]]] = None,
+        memory_recent_turns: Optional[list[dict[str, str]]] = None,
         conversation_id: Optional[str] = None,
         retry_count: int = 0,
     ) -> RAGResponse:
@@ -643,9 +647,17 @@ class RAGChain:
             t0 = time.perf_counter()
             with self.tracer.span("rag_chain.kg_expand", parent=root_span) as kg_span:
                 kg_expanded_terms = []
+                graph_context = ""
                 if self._kg_expander:
-                    kg_expanded_terms = self._kg_expander.expand(processed_query, depth=1)
+                    expansion_result = self._kg_expander.expand(processed_query, depth=1)
+                    kg_expanded_terms = (
+                        expansion_result.terms
+                        if hasattr(expansion_result, "terms")
+                        else list(expansion_result)
+                    )
+                    graph_context = getattr(expansion_result, "graph_context", "")
                 kg_span.set_attribute("kg_expanded_terms_count", len(kg_expanded_terms))
+                kg_span.set_attribute("kg_graph_context_len", len(graph_context))
             tp.record("kg_expansion", "retrieval", started_at=t0)
             if tp.check_stage_budget("kg_expansion"):
                 tp.mark_budget_exhausted("kg_expansion")
@@ -995,6 +1007,7 @@ class RAGChain:
                                 scores=None,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
+                                graph_context=graph_context,
                             )
                         else:
                             generated_answer = self._generator.generate(
@@ -1003,6 +1016,7 @@ class RAGChain:
                                 scores=scores,
                                 memory_context=effective_memory,
                                 recent_turns=effective_turns,
+                                graph_context=graph_context,
                             )
                     generate_span.set_attribute("generated_answer_present", bool(generated_answer))
                 tp.record("generation", "generation", started_at=t0)
@@ -1014,7 +1028,7 @@ class RAGChain:
             try:
                 context_texts = [r.text for r in reranked]
                 snapshot = calculate_budget(
-                    system_prompt=_get_gen_system_prompt(),
+                    system_prompt=_get_system_prompt(),
                     memory_context=memory_context,
                     chunks=context_texts,
                     query=processed_query,
@@ -1086,7 +1100,7 @@ class RAGChain:
                 from src.retrieval.generation.nodes import sanitize_answer
                 generated_answer = sanitize_answer(
                     generated_answer,
-                    system_prompt=_get_gen_system_prompt(),
+                    system_prompt=_get_system_prompt(),
                 )
 
             # Stage 7.5: Composite confidence scoring + routing (REQ-701, REQ-706)
@@ -1253,7 +1267,6 @@ class RAGChain:
                 generation_source=generation_source,
                 llm_confidence=llm_confidence,
             )
-
 
 
 __all__ = ["RAGChain", "RAGResponse"]

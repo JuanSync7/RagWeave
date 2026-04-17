@@ -58,6 +58,7 @@ services:
     restart: unless-stopped
 
   temporal-db:
+    profiles: ["temporal"]
     image: postgres:16-alpine
     container_name: rag-temporal-db
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
@@ -75,6 +76,7 @@ services:
       retries: 10
 
   temporal:
+    profiles: ["temporal"]
     image: temporalio/auto-setup:latest
     container_name: rag-temporal
     ports:
@@ -93,6 +95,7 @@ services:
         condition: service_healthy
 
   temporal-ui:
+    profiles: ["temporal"]
     image: temporalio/ui:latest
     container_name: rag-temporal-ui
     ports:

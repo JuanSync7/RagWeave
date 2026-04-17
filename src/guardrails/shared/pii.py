@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 logger = logging.getLogger("rag.guardrails.pii")
 
@@ -25,7 +25,7 @@ logger = logging.getLogger("rag.guardrails.pii")
 # Regex fallback patterns (used when Presidio is not installed)
 # ---------------------------------------------------------------------------
 
-_CORE_PATTERNS: Dict[str, re.Pattern] = {
+_CORE_PATTERNS: dict[str, re.Pattern] = {
     "EMAIL": re.compile(
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
     ),
@@ -35,7 +35,7 @@ _CORE_PATTERNS: Dict[str, re.Pattern] = {
     "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
 }
 
-_EXTENDED_PATTERNS: Dict[str, re.Pattern] = {
+_EXTENDED_PATTERNS: dict[str, re.Pattern] = {
     "CREDIT_CARD": re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
     "DOB": re.compile(
         r"\b(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\d|3[01])/(?:19|20)\d{2}\b"
@@ -106,7 +106,7 @@ class PIIDetector:
         self._score_threshold = score_threshold
         self._presidio_analyzer = None
         self._presidio_anonymizer = None
-        self._presidio_entities: List[str] = (
+        self._presidio_entities: list[str] = (
             _EXTENDED_PRESIDIO_ENTITIES if extended else _DEFAULT_PRESIDIO_ENTITIES
         )
         self._use_presidio = False
@@ -123,7 +123,7 @@ class PIIDetector:
             )
         except (ImportError, RuntimeError) as e:
             logger.info("Presidio not available (%s) — using regex fallback", e)
-            self._regex_patterns: Dict[str, re.Pattern] = dict(_CORE_PATTERNS)
+            self._regex_patterns: dict[str, re.Pattern] = dict(_CORE_PATTERNS)
             if extended:
                 self._regex_patterns.update(_EXTENDED_PATTERNS)
             logger.info(
@@ -174,7 +174,7 @@ class PIIDetector:
         )
         self._presidio_anonymizer = AnonymizerEngine()
 
-    def detect(self, text: str) -> List[PIIDetection]:
+    def detect(self, text: str) -> list[PIIDetection]:
         """Find all PII occurrences in text.
 
         Runs the primary detector (Presidio or regex) and optionally
@@ -204,7 +204,7 @@ class PIIDetector:
 
         return primary
 
-    def _detect_presidio(self, text: str) -> List[PIIDetection]:
+    def _detect_presidio(self, text: str) -> list[PIIDetection]:
         """Detect PII using Presidio NLP.
 
         Args:
@@ -231,7 +231,7 @@ class PIIDetector:
         detections.sort(key=lambda d: d.start, reverse=True)
         return detections
 
-    def _detect_regex(self, text: str) -> List[PIIDetection]:
+    def _detect_regex(self, text: str) -> list[PIIDetection]:
         """Detect PII using regex fallback patterns.
 
         Args:
@@ -240,7 +240,7 @@ class PIIDetector:
         Returns:
             Reverse-sorted list of detections for safe replacement.
         """
-        detections: List[PIIDetection] = []
+        detections: list[PIIDetection] = []
         for pii_type, pattern in self._regex_patterns.items():
             for match in pattern.finditer(text):
                 detections.append(
@@ -254,7 +254,7 @@ class PIIDetector:
         detections.sort(key=lambda d: d.start, reverse=True)
         return detections
 
-    def redact(self, text: str) -> Tuple[str, List[PIIDetection]]:
+    def redact(self, text: str) -> tuple[str, list[PIIDetection]]:
         """Detect and redact PII, returning redacted text and detections.
 
         Replaces PII with type-tagged placeholders (e.g., [EMAIL_ADDRESS_REDACTED]).
@@ -272,7 +272,7 @@ class PIIDetector:
             redacted = redacted[: d.start] + d.placeholder + redacted[d.end :]
 
         if detections:
-            counts: Dict[str, int] = {}
+            counts: dict[str, int] = {}
             for d in detections:
                 counts[d.pii_type] = counts.get(d.pii_type, 0) + 1
             logger.info(

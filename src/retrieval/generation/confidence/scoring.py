@@ -16,7 +16,6 @@ Default weights: retrieval=0.50, llm=0.25, citation=0.25.
 from __future__ import annotations
 
 import re
-from typing import List
 
 from src.retrieval.generation.confidence.schemas import ConfidenceBreakdown
 
@@ -33,7 +32,7 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def compute_retrieval_confidence(
-    reranker_scores: List[float],
+    reranker_scores: list[float],
     top_n: int = 3,
 ) -> float:
     """Compute retrieval confidence from reranker scores.
@@ -92,7 +91,7 @@ _CITATION_RE = re.compile(r"\[(\d+)\]")
 
 def compute_citation_coverage(
     answer: str,
-    retrieved_texts: List[str],
+    retrieved_texts: list[str],
     min_overlap_words: int = 5,
 ) -> float:
     """Compute citation coverage using a dual approach.
@@ -144,8 +143,8 @@ def compute_citation_coverage(
 
 
 def _compute_ngram_overlap(
-    sentences: List[str],
-    retrieved_texts: List[str],
+    sentences: list[str],
+    retrieved_texts: list[str],
     min_overlap_words: int = 5,
 ) -> float:
     """Compute n-gram overlap score between sentences and retrieved text."""
@@ -171,10 +170,10 @@ def _compute_ngram_overlap(
 
 
 def compute_composite_confidence(
-    reranker_scores: List[float],
+    reranker_scores: list[float],
     llm_confidence_text: str,
     answer: str,
-    retrieved_texts: List[str],
+    retrieved_texts: list[str],
     retrieval_weight: float = 0.50,
     llm_weight: float = 0.25,
     citation_weight: float = 0.25,
@@ -225,7 +224,7 @@ def compute_composite_confidence(
     )
 
 
-def _split_sentences(text: str) -> List[str]:
+def _split_sentences(text: str) -> list[str]:
     """Split text into sentences using punctuation boundaries.
 
     Filters out very short fragments (< 4 words) that are likely

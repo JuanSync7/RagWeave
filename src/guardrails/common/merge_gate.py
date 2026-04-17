@@ -16,7 +16,7 @@ Requirements references (from internal docs): REQ-707.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from src.guardrails.common.schemas import InputRailResult, RailVerdict
 
@@ -38,7 +38,7 @@ class RailMergeGate:
         self,
         query_result: Any,
         rail_result: InputRailResult,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Return merged routing decision and payload.
 
         Returns a dict with:
@@ -74,7 +74,7 @@ class RailMergeGate:
 
         # Priority 3: topic safety (LLM-based off-topic detection)
         if rail_result.topic_off_topic:
-            from src.guardrails.shared import REJECTION_MESSAGE
+            from src.guardrails.shared.topic_safety import REJECTION_MESSAGE as TOPIC_MSG
 
             logger.info("Merge gate: CANNED (topic_safety: off-topic)")
             return {

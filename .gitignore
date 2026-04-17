@@ -1,3 +1,6 @@
+# Claude
+.claude/
+
 # Weaviate data
 .weaviate_data/
 
@@ -57,7 +60,14 @@ certs/*
 
 # Test runner ephemeral output
 .tmp-test-results/
+.tmp*
 
 # Autonomous run artifacts
 .autonomous/
 .parallel-dispatch-tmp/
+
+# Auto Research
+auto-research
+
+# Tooling binaries downloaded ad-hoc (not project source)
+git-filter-repo

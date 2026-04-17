@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 class RailVerdict(Enum):
@@ -38,7 +38,7 @@ class RailExecution:
     rail_name: str
     verdict: RailVerdict
     execution_ms: float
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -59,11 +59,11 @@ class InputRailResult:
     intent: str = "rag_search"
     intent_confidence: float = 1.0
     injection_verdict: RailVerdict = RailVerdict.PASS
-    pii_redactions: List[Dict[str, str]] = field(default_factory=list)
+    pii_redactions: list[dict[str, str]] = field(default_factory=list)
     redacted_query: Optional[str] = None
     toxicity_verdict: RailVerdict = RailVerdict.PASS
     topic_off_topic: bool = False
-    rail_executions: List[RailExecution] = field(default_factory=list)
+    rail_executions: list[RailExecution] = field(default_factory=list)
 
 
 @dataclass
@@ -84,11 +84,11 @@ class OutputRailResult:
     faithfulness_score: float = 1.0
     faithfulness_verdict: RailVerdict = RailVerdict.PASS
     faithfulness_warning: bool = False
-    claim_scores: List[Dict[str, Any]] = field(default_factory=list)
-    pii_redactions: List[Dict[str, str]] = field(default_factory=list)
+    claim_scores: list[dict[str, Any]] = field(default_factory=list)
+    pii_redactions: list[dict[str, str]] = field(default_factory=list)
     toxicity_verdict: RailVerdict = RailVerdict.PASS
     final_answer: Optional[str] = None
-    rail_executions: List[RailExecution] = field(default_factory=list)
+    rail_executions: list[RailExecution] = field(default_factory=list)
 
 
 @dataclass
@@ -107,8 +107,8 @@ class GuardrailsMetadata:
     """
 
     enabled: bool = True
-    input_rails: List[RailExecution] = field(default_factory=list)
-    output_rails: List[RailExecution] = field(default_factory=list)
+    input_rails: list[RailExecution] = field(default_factory=list)
+    output_rails: list[RailExecution] = field(default_factory=list)
     intent: Optional[str] = None
     intent_confidence: Optional[float] = None
     faithfulness_score: Optional[float] = None

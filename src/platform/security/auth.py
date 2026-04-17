@@ -206,7 +206,7 @@ def _principal_from_jwt(raw_jwt: str) -> Principal:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid OIDC bearer token: {exc}",
             ) from exc
-        roles = payload.get(AUTH_OIDC_ROLES_CLAIM, payload.get("roles", ["query"]))
+        roles = payload.get(AUTH_OIDC_ROLES_CLAIM, payload.get("roles", []))
         if isinstance(roles, str):
             roles = [roles]
         return Principal(

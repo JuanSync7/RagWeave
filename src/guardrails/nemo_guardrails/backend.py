@@ -16,7 +16,6 @@ All RAG_NEMO_* config is read here; ``rag_chain.py`` only sees the
 from __future__ import annotations
 
 import logging
-from typing import List, Tuple
 
 from src.guardrails.backend import GuardrailBackend
 from src.guardrails.common import (
@@ -161,7 +160,7 @@ class NemoBackend(GuardrailBackend):
         """
         return self._input_executor.execute(query, tenant_id)
 
-    def run_output_rails(self, answer: str, context_chunks: List[str]) -> OutputRailResult:
+    def run_output_rails(self, answer: str, context_chunks: list[str]) -> OutputRailResult:
         """Run all output rails via NeMo executor.
 
         Args:
@@ -173,7 +172,7 @@ class NemoBackend(GuardrailBackend):
         """
         return self._output_executor.execute(answer, context_chunks)
 
-    def redact_pii(self, text: str) -> Tuple[str, list]:
+    def redact_pii(self, text: str) -> tuple[str, list]:
         """Redact PII using the input executor's PII detector.
 
         Returns ``(text, [])`` when PII detection is disabled (no PII detector

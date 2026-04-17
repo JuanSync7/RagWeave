@@ -3,9 +3,11 @@
 These dataclasses define retry policies and operation metadata shared across
 retry provider implementations.
 """
+from __future__ import annotations
+
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple, Type
+from typing import Callable, Optional, Type
 
 
 @dataclass(frozen=True)
@@ -16,7 +18,7 @@ class RetryPolicy:
     initial_backoff_seconds: float = 0.5
     max_backoff_seconds: float = 5.0
     backoff_multiplier: float = 2.0
-    retryable_exceptions: Tuple[Type[BaseException], ...] = (Exception,)
+    retryable_exceptions: tuple[Type[BaseException], ...] = (Exception,)
 
 
 @dataclass(frozen=True)

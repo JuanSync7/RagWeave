@@ -3,14 +3,15 @@
 # Exports: DocumentProcessingState
 # Deps: src.ingest.common.types
 # Fields: runtime, source_*, raw_text, structure, multimodal_notes, cleaned_text,
-#   refactored_text, errors, should_skip, processing_log, docling_document (Optional[Any])
+#   refactored_text, errors, should_skip, processing_log, docling_document (Optional[Any]),
+#   trace_id (str, FR-3051)
 # @end-summary
 
 """State contract for the Document Processing Pipeline (Phase 1, nodes 1–5)."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 from src.ingest.common import Runtime
 
@@ -72,13 +73,17 @@ class DocumentProcessingState(TypedDict, total=False):
     connector: str
     source_version: str
     raw_text: str
-    structure: Dict[str, Any]
-    multimodal_notes: List[str]
+    structure: dict[str, Any]
+    multimodal_notes: list[str]
     cleaned_text: str
     refactored_text: Optional[str]
-    errors: List[str]
+    errors: list[str]
     should_skip: bool
-    processing_log: List[str]
+    processing_log: list[str]
+    trace_id: str
+    """UUID v4 trace ID generated at workflow start (FR-3051). Empty string
+    when absent for backward compatibility.
+    """
     docling_document: Optional[Any]
     """Native DoclingDocument object from Docling parse. None if Docling
     parsing was disabled or failed. Propagated to CleanDocumentStore and

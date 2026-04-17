@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, Optional
 
 from src.vector_db.common import (
     DocumentRecord,
@@ -63,7 +63,7 @@ class VectorBackend(ABC):
     def add_documents(
         self,
         client: Any,
-        documents: List[DocumentRecord],
+        documents: list[DocumentRecord],
         collection: Optional[str] = None,
     ) -> int:
         """Insert documents with pre-computed embeddings.
@@ -74,16 +74,37 @@ class VectorBackend(ABC):
         ...
 
     @abstractmethod
+    def update_chunk_content(
+        self,
+        client: Any,
+        chunk_uuid: str,
+        *,
+        text: str,
+        content_hash: str,
+        fuzzy_fingerprint: Optional[str] = None,
+        collection: Optional[str] = None,
+    ) -> bool:
+        """Replace a canonical chunk's text + dedup metadata (FR-3432).
+
+        Used by the cross-document dedup node when an incoming chunk is richer
+        than the existing canonical chunk it fuzzy-matches.
+
+        Returns:
+            True on success, False on error (caller treats as non-fatal).
+        """
+        ...
+
+    @abstractmethod
     def search(
         self,
         client: Any,
         query: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         alpha: float,
         limit: int,
-        filters: Optional[List[SearchFilter]] = None,
+        filters: Optional[list[SearchFilter]] = None,
         collection: Optional[str] = None,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Perform a hybrid (keyword + vector) search against one collection.
 
         Args:
@@ -171,7 +192,7 @@ class VectorBackend(ABC):
     def add_visual_documents(
         self,
         client: Any,
-        documents: List[dict[str, Any]],
+        documents: list[dict[str, Any]],
         collection: Optional[str] = None,
     ) -> int:
         """Batch-insert visual page objects. FR-507

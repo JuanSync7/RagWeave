@@ -17,7 +17,7 @@ All functions are deterministic and side-effect-free.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 logger = logging.getLogger("rag.output_sanitizer")
 
@@ -61,7 +61,7 @@ def sanitize_answer(
         return answer
 
     lines = answer.split("\n")
-    cleaned_lines: List[str] = []
+    cleaned_lines: list[str] = []
 
     for line in lines:
         stripped = line.strip()

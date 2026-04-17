@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Optional
 
 import litellm
 from litellm import Router
@@ -68,7 +68,7 @@ def _build_router_from_env(config: LLMConfig) -> Router:
     Returns:
         A configured `litellm.Router` instance.
     """
-    model_list: List[Dict[str, Any]] = [
+    model_list: list[dict[str, Any]] = [
         {
             "model_name": "default",
             "litellm_params": {
@@ -185,7 +185,7 @@ class LLMProvider:
         model_alias: str = "default",
         user_id: Optional[str] = None,
         **overrides: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build base keyword arguments for `Router.completion()` calls.
 
         Args:
@@ -197,7 +197,7 @@ class LLMProvider:
         Returns:
             Keyword arguments for a Router completion call.
         """
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": model_alias,
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
@@ -209,12 +209,12 @@ class LLMProvider:
 
     def generate(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         model_alias: str = "default",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
+        response_format: Optional[dict[str, Any]] = None,
         timeout: Optional[int] = None,
         user_id: Optional[str] = None,
     ) -> LLMResponse:
@@ -263,7 +263,7 @@ class LLMProvider:
 
     def generate_stream(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         model_alias: str = "default",
         temperature: Optional[float] = None,
@@ -301,12 +301,12 @@ class LLMProvider:
 
     async def agenerate(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         model_alias: str = "default",
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
+        response_format: Optional[dict[str, Any]] = None,
         timeout: Optional[int] = None,
         user_id: Optional[str] = None,
     ) -> LLMResponse:
@@ -355,7 +355,7 @@ class LLMProvider:
 
     async def agenerate_stream(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         model_alias: str = "default",
         temperature: Optional[float] = None,
@@ -393,7 +393,7 @@ class LLMProvider:
 
     def json_completion(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         model_alias: str = "default",
         temperature: Optional[float] = None,

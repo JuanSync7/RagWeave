@@ -112,9 +112,11 @@ def get_document(
     )
     try:
         resp = client.get_object(bucket, f"{document_id}{_CONTENT_SUFFIX}")
-        content = resp.read().decode("utf-8")
-        resp.close()
-        resp.release_conn()
+        try:
+            content = resp.read().decode("utf-8")
+        finally:
+            resp.close()
+            resp.release_conn()
     except S3Error as exc:
         if exc.code in ("NoSuchKey", "NoSuchBucket"):
             span.end(status="ok")
@@ -124,11 +126,15 @@ def get_document(
     metadata: dict = {}
     try:
         resp_meta = client.get_object(bucket, f"{document_id}{_METADATA_SUFFIX}")
-        metadata = json.loads(resp_meta.read().decode("utf-8"))
-        resp_meta.close()
-        resp_meta.release_conn()
-    except S3Error:
-        pass  # metadata sidecar missing — not fatal
+        try:
+            metadata = json.loads(resp_meta.read().decode("utf-8"))
+        finally:
+            resp_meta.close()
+            resp_meta.release_conn()
+    except S3Error as exc:
+        if exc.code not in ("NoSuchKey", "NoSuchBucket"):
+            raise
+        # metadata sidecar missing — not fatal
 
     span.end(status="ok")
     return {"document_id": document_id, "content": content, "metadata": metadata}
@@ -152,8 +158,9 @@ def delete_document(
     for suffix in (_CONTENT_SUFFIX, _METADATA_SUFFIX):
         try:
             client.remove_object(bucket, f"{document_id}{suffix}")
-        except S3Error:
-            pass
+        except S3Error as exc:
+            if exc.code not in ("NoSuchKey", "NoSuchBucket"):
+                raise
     span.end(status="ok")
     return existed
 
@@ -167,7 +174,9 @@ def document_exists(
     try:
         client.stat_object(bucket, f"{document_id}{_CONTENT_SUFFIX}")
         return True
-    except S3Error:
+    except S3Error as exc:
+        if exc.code not in ("NoSuchKey", "NoSuchBucket"):
+            raise
         return False
 
 
@@ -215,11 +224,15 @@ def list_documents(
         source_key = stem
         try:
             resp = client.get_object(bucket, f"{stem}{_METADATA_SUFFIX}")
-            meta = json.loads(resp.read().decode("utf-8"))
-            resp.close()
-            resp.release_conn()
+            try:
+                meta = json.loads(resp.read().decode("utf-8"))
+            finally:
+                resp.close()
+                resp.release_conn()
             source_key = meta.get("source_key", stem)
-        except S3Error:
+        except S3Error as exc:
+            if exc.code not in ("NoSuchKey", "NoSuchBucket"):
+                raise
             logger.warning(
                 "list_documents: sidecar missing for %r; using stem as source_key", name
             )

@@ -141,7 +141,7 @@ def _init_backend() -> ObservabilityBackend:
 
     if provider == "langfuse":
         try:
-            from src.platform.observability.langfuse import LangfuseBackend
+            from src.platform.observability.langfuse.backend import LangfuseBackend
             return LangfuseBackend()
         except Exception as exc:
             logger.warning(

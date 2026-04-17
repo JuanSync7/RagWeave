@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+COPY pyproject.toml /app/pyproject.toml
 COPY containers/requirements-worker.txt /app/requirements-worker.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && pip install --prefix=/install -r /app/requirements-worker.txt \

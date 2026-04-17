@@ -8,10 +8,12 @@
 These dataclasses define the minimal configuration and response envelope used
 by the platform LLM provider facade.
 """
+from __future__ import annotations
+
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 
 _OLLAMA_PORT = os.environ.get("RAG_OLLAMA_PORT", "11434")
 
@@ -26,7 +28,7 @@ class LLMConfig:
     max_tokens: int = 2048
     temperature: float = 0.2
     num_retries: int = 3
-    fallback_models: List[str] = field(default_factory=list)
+    fallback_models: list[str] = field(default_factory=list)
     vision_model: Optional[str] = None
     query_model: Optional[str] = None
 

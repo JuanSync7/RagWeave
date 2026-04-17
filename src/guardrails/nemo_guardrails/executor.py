@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from src.common import make_query_hash
 from src.guardrails.common import (
@@ -42,29 +42,25 @@ from src.platform import measure_ms
 logger = logging.getLogger("rag.guardrails.executor")
 
 # Prometheus metrics for guardrails (REQ-905)
-try:
-    from prometheus_client import Counter, Histogram
+# prometheus_client is a main dependency and already loaded via src.platform above.
+from prometheus_client import Counter, Histogram
 
-    GUARDRAIL_EXECUTIONS = Counter(
-        "rag_guardrail_executions_total",
-        "Total guardrail executions",
-        ["rail_name", "verdict"],
-    )
-    GUARDRAIL_EXECUTION_MS = Histogram(
-        "rag_guardrail_execution_ms",
-        "Guardrail execution time in milliseconds",
-        ["rail_name"],
-        buckets=[10, 50, 100, 250, 500, 1000, 2000, 5000, 10000],
-    )
-    GUARDRAIL_REJECTIONS = Counter(
-        "rag_guardrail_rejections_total",
-        "Total guardrail rejections",
-        ["rail_name", "reason"],
-    )
-except ImportError:
-    GUARDRAIL_EXECUTIONS = None
-    GUARDRAIL_EXECUTION_MS = None
-    GUARDRAIL_REJECTIONS = None
+GUARDRAIL_EXECUTIONS = Counter(
+    "rag_guardrail_executions_total",
+    "Total guardrail executions",
+    ["rail_name", "verdict"],
+)
+GUARDRAIL_EXECUTION_MS = Histogram(
+    "rag_guardrail_execution_ms",
+    "Guardrail execution time in milliseconds",
+    ["rail_name"],
+    buckets=[10, 50, 100, 250, 500, 1000, 2000, 5000, 10000],
+)
+GUARDRAIL_REJECTIONS = Counter(
+    "rag_guardrail_rejections_total",
+    "Total guardrail rejections",
+    ["rail_name", "reason"],
+)
 
 
 def _record_metric(rail_name: str, verdict: RailVerdict, ms: float) -> None:
@@ -153,13 +149,13 @@ class InputRailExecutor:
             Aggregated `InputRailResult` including per-rail executions.
         """
         result = InputRailResult()
-        executions: List[RailExecution] = []
+        executions: list[RailExecution] = []
         query_hash = make_query_hash(query)
 
         with ThreadPoolExecutor(
             max_workers=5, thread_name_prefix="input_rail"
         ) as pool:
-            futures: Dict[str, Future] = {}
+            futures: dict[str, Future] = {}
 
             if self._intent:
                 futures["intent"] = pool.submit(self._intent.classify, query)
@@ -343,7 +339,7 @@ class OutputRailExecutor:
     def execute(
         self,
         answer: str,
-        context_chunks: List[str],
+        context_chunks: list[str],
         parent_span: Any = None,
     ) -> OutputRailResult:
         """Run enabled output rails and apply consensus/merge logic.
@@ -358,12 +354,12 @@ class OutputRailExecutor:
             modified `final_answer`.
         """
         result = OutputRailResult(final_answer=answer)
-        executions: List[RailExecution] = []
+        executions: list[RailExecution] = []
 
         with ThreadPoolExecutor(
             max_workers=3, thread_name_prefix="output_rail"
         ) as pool:
-            futures: Dict[str, Future] = {}
+            futures: dict[str, Future] = {}
 
             if self._faithfulness:
                 futures["faithfulness"] = pool.submit(
@@ -377,7 +373,7 @@ class OutputRailExecutor:
                 )
 
             # Collect results from all rails
-            rail_results: Dict[str, Any] = {}
+            rail_results: dict[str, Any] = {}
             for name, fut in futures.items():
                 t0 = time.perf_counter()
                 span = self._tracer.start_span(

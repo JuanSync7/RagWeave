@@ -10,6 +10,7 @@ from server.common import (
     console_ok,
     error_payload,
     request_id_from_request,
+    validate_optional_dependencies,
     validate_startup_config,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     "error_payload",
     "console_ok",
     "console_err",
+    "validate_optional_dependencies",
     "validate_startup_config",
 ]

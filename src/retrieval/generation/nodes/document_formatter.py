@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import PurePosixPath
-from typing import Any, Dict, List
+from typing import Any
 
 from src.retrieval.generation.schemas import FormattedContext, VersionConflict
 
 
 def format_context(
-    results: List[Any],
+    results: list[Any],
     include_scores: bool = True,
 ) -> FormattedContext:
     """Format ranked results into a structured context string.
@@ -98,7 +98,7 @@ def _format_chunk(
     return f"{header}\n{text}"
 
 
-def _extract_metadata_header(metadata: Dict[str, Any]) -> str:
+def _extract_metadata_header(metadata: dict[str, Any]) -> str:
     parts = []
 
     source = metadata.get("source") or metadata.get("filename")
@@ -130,8 +130,8 @@ def _extract_metadata_header(metadata: Dict[str, Any]) -> str:
     return " | ".join(parts)
 
 
-def _detect_version_conflicts(results: List[Any]) -> List[VersionConflict]:
-    stem_versions: Dict[str, set] = defaultdict(set)
+def _detect_version_conflicts(results: list[Any]) -> list[VersionConflict]:
+    stem_versions: dict[str, set] = defaultdict(set)
 
     for result in results:
         meta = getattr(result, "metadata", {}) or {}

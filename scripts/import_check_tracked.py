@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # @summary
-# Runs import_check only on git-tracked .py files under the project source
+# Runs import_mend only on git-tracked .py files under the project source
 # directories. Used as the L2 layer of `make precommit-check` so untracked
 # WIP does not block commits. `make all-check` still runs the full
 # `make import-check` which scans every .py file regardless of git state.
 # Exports: main
-# Deps: subprocess, import_check
+# Deps: subprocess, import_mend
 # @end-summary
 """L2 (import resolution + encapsulation) for tracked files only.
 
 The full ``make import-check`` target walks every .py file under
-``src/``, ``server/``, ``config/``, and ``import_check/``. That's the
-right behaviour for ``make all-check`` — a hygiene sweep should include
-work-in-progress. But for ``make precommit-check`` we want a gate that
-fires only on files git already knows about, so an uncommitted feature
-branch can't block a commit that doesn't touch it.
+``src/``, ``server/``, and ``config/``. That's the right behaviour for
+``make all-check`` — a hygiene sweep should include work-in-progress.
+But for ``make precommit-check`` we want a gate that fires only on files
+git already knows about, so an uncommitted feature branch can't block a
+commit that doesn't touch it.
 
 This script bridges the gap: it asks git for the tracked .py files under
 the scanned directories and hands the list to
-``import_check.checker.check_imports`` directly.
+``import_mend.checker.check_imports`` directly.
 
 Exit code:
     0 when no errors are found, 1 when any import error is found.
@@ -34,13 +34,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from import_check.checker import check_imports  # noqa: E402
-from import_check.schemas import ImportCheckConfig  # noqa: E402
+from import_mend.checker import check_imports  # noqa: E402
+from import_mend.schemas import ImportCheckConfig  # noqa: E402
 
 
 # The directories scanned by the regular `make import-check` target.
 # Keep in sync with `ImportCheckConfig.source_dirs` and the Makefile.
-_SCAN_DIRS = ("src", "server", "config", "import_check")
+_SCAN_DIRS = ("src", "server", "config")
 
 
 def get_tracked_py_files(root: Path) -> list[str]:

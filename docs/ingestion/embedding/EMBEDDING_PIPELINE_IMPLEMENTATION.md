@@ -4,7 +4,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the full Embedding Pipeline (FR-591–FR-1304) using a three-phase contract-first workflow that prevents test bias by isolating agent contexts.
+**Goal:** Implement the full Embedding Pipeline (FR-591–FR-1304, plus FR-1210–FR-1214 batch embedding optimisation) using a three-phase contract-first workflow that prevents test bias by isolating agent contexts.
 
 **Architecture:** The Embedding Pipeline is a LangGraph `StateGraph` DAG with 8 nodes processing clean Markdown documents from the Clean Document Store into vector embeddings (Weaviate) and optional knowledge graph triples. Nodes are plain functions (`def node_name(state: EmbeddingPipelineState) -> dict`), not classes. State flows through a single `EmbeddingPipelineState` TypedDict. Three nodes are conditional (cross-reference extraction, KG extraction, KG storage); the remaining five are mandatory. The pipeline is decoupled from the Document Processing Pipeline at the Clean Document Store boundary, enabling independent re-runs.
 
@@ -1839,6 +1839,288 @@ Expected: ALL PASS
 
 ---
 
+## Batch Embedding Optimisation (FR-1210–FR-1214)
+
+> **Added:** 2026-04-15. Implements batch embedding requirements from `EMBEDDING_PIPELINE_SPEC.md` section 3.7.1.
+
+This section covers the batch embedding implementation that groups chunks into configurable-size batches before sending them to the embedding model, replacing individual per-chunk embedding calls.
+
+### Task B-5.1 — Batch Formation Logic
+
+**Requirements:** FR-1210, FR-1212
+
+**Files:**
+- Modify: `src/ingest/embedding/nodes/embedding_storage.py`
+
+**Implementation:**
+
+The `embedding_storage_node` is updated to batch chunks before calling `embed_documents()`. Batch formation is a simple sequential split that preserves chunk order (FR-1210 AC-3).
+
+```python
+import math
+import time
+import logging
+from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.storage")
+
+
+def _form_batches(items: list, batch_size: int) -> list[list]:
+    """Split items into sequential batches of at most batch_size.
+
+    Handles partial final batches without error (FR-1212).
+    Returns an empty list if items is empty (FR-1212 AC-3).
+
+    >>> _form_batches([1,2,3,4,5], 2)
+    [[1, 2], [3, 4], [5]]
+    >>> _form_batches([], 64)
+    []
+    """
+    if not items:
+        return []
+    return [
+        items[i : i + batch_size]
+        for i in range(0, len(items), batch_size)
+    ]
+```
+
+- [ ] Step 1: Add `_form_batches()` utility to `embedding_storage.py`
+- [ ] Step 2: Refactor `embedding_storage_node` to use batch formation
+- [ ] Step 3: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_embedding_storage.py -v -k "batch_formation"
+```
+
+Expected: ALL PASS
+
+- [ ] Step 4: Commit
+
+---
+
+### Task B-5.2 — Batch Size Configuration
+
+**Requirements:** FR-1211
+
+**Files:**
+- Modify: `src/ingest/common/types.py` (IngestionConfig)
+- Modify: `config/settings.py` (env var)
+
+**Implementation:**
+
+```python
+# In src/ingest/common/types.py — IngestionConfig additions
+
+@dataclass
+class IngestionConfig:
+    # ... existing fields ...
+
+    # --- Batch embedding (FR-1211) ---
+    embedding_batch_size: int = 64
+
+    def __post_init__(self):
+        # Validate batch size range [1, 2048] (FR-1211 AC-3)
+        if not (1 <= self.embedding_batch_size <= 2048):
+            raise ValueError(
+                f"embedding.batch_size must be in range [1, 2048], "
+                f"got {self.embedding_batch_size}"
+            )
+```
+
+```python
+# In config/settings.py — env var support (FR-1211 AC-4)
+import os
+
+EMBEDDING_BATCH_SIZE = int(
+    os.environ.get("RAGWEAVE_EMBEDDING_BATCH_SIZE", "64")
+)
+```
+
+Configuration precedence (FR-1211 AC-5): config file value takes precedence over environment variable.
+
+```python
+# In config resolution logic:
+def resolve_batch_size(config_value: int | None, env_value: int) -> int:
+    """Config file wins over env var (FR-1211 AC-5)."""
+    if config_value is not None:
+        return config_value
+    return env_value
+```
+
+- [ ] Step 1: Add `embedding_batch_size` to `IngestionConfig` with validation
+- [ ] Step 2: Add `RAGWEAVE_EMBEDDING_BATCH_SIZE` env var to `config/settings.py`
+- [ ] Step 3: Implement precedence logic (config file > env var)
+- [ ] Step 4: Run tests:
+
+```bash
+pytest tests/ingest/test_config_validation.py -v -k "batch_size"
+```
+
+Expected: ALL PASS
+
+- [ ] Step 5: Commit
+
+---
+
+### Task B-5.3 — Batch Failure Isolation and Retry
+
+**Requirements:** FR-1213
+
+**Files:**
+- Modify: `src/ingest/embedding/nodes/embedding_storage.py`
+
+**Implementation:**
+
+Each batch is embedded independently. On failure, only the failed batch is retried. Successfully embedded batches are never re-embedded. After exhausting retries, the failed batch's chunks are excluded from storage and the failure is recorded.
+
+```python
+_BATCH_MAX_RETRIES = 3
+_BATCH_RETRY_DELAY = 1.0  # seconds
+
+
+def _embed_batches(
+    embedder,
+    text_batches: list[list[str]],
+    max_retries: int = _BATCH_MAX_RETRIES,
+) -> tuple[list[list[float]], list[dict[str, Any]]]:
+    """Embed text batches with per-batch retry isolation.
+
+    Returns:
+        (all_vectors, errors) where all_vectors is the flat list of
+        embedding vectors for successfully embedded batches, and errors
+        is a list of error dicts for failed batches.
+
+    Successfully embedded batches are NOT re-embedded during retry
+    (FR-1213 AC-1). Failed batch chunks are excluded from output
+    (FR-1213 AC-4).
+    """
+    all_vectors: list[list[float]] = []
+    errors: list[dict[str, Any]] = []
+    success_mask: list[bool] = [False] * len(text_batches)
+
+    for batch_idx, batch_texts in enumerate(text_batches):
+        batch_vectors = None
+        last_error = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                batch_vectors = embedder.embed_documents(batch_texts)
+                break
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "batch %d/%d failed attempt %d/%d: %s",
+                    batch_idx + 1, len(text_batches), attempt, max_retries, exc,
+                )
+                if attempt < max_retries:
+                    time.sleep(_BATCH_RETRY_DELAY * attempt)
+
+        if batch_vectors is not None:
+            all_vectors.extend(batch_vectors)
+            success_mask[batch_idx] = True
+        else:
+            # Batch exhausted retries (FR-1213 AC-3)
+            chunk_start = sum(len(b) for b in text_batches[:batch_idx])
+            chunk_end = chunk_start + len(batch_texts)
+            errors.append({
+                "type": "batch_embedding_failure",
+                "batch_index": batch_idx + 1,
+                "chunk_range": f"{chunk_start}-{chunk_end - 1}",
+                "error": str(last_error),
+            })
+            logger.error(
+                "batch %d/%d exhausted retries batch_index=%d chunk_range=%d-%d",
+                batch_idx + 1, len(text_batches),
+                batch_idx + 1, chunk_start, chunk_end - 1,
+            )
+
+    return all_vectors, errors, success_mask
+```
+
+- [ ] Step 1: Implement `_embed_batches()` with per-batch retry
+- [ ] Step 2: Update `embedding_storage_node` to use `_embed_batches()`
+- [ ] Step 3: Ensure failed batch chunks are excluded from `DocumentRecord` list
+- [ ] Step 4: Record batch errors in pipeline state `errors` list
+- [ ] Step 5: Run tests:
+
+```bash
+pytest tests/ingest/nodes/test_embedding_storage.py -v -k "batch_retry"
+```
+
+Expected: ALL PASS
+
+- [ ] Step 6: Commit
+
+---
+
+### Task B-5.4 — Batch Observability Metrics
+
+**Requirements:** FR-1214
+
+**Files:**
+- Modify: `src/ingest/embedding/nodes/embedding_storage.py`
+
+**Implementation:**
+
+Structured log entries per batch and a summary line after all batches complete (FR-1214 AC-1, AC-2, AC-3):
+
+```python
+def _log_batch_metrics(
+    batch_idx: int,
+    total_batches: int,
+    chunk_count: int,
+    latency_ms: float,
+) -> None:
+    """Log per-batch embedding metrics (FR-1214 AC-1)."""
+    logger.info(
+        "embedding_batch_complete",
+        extra={
+            "batch_index": batch_idx,
+            "total_batches": total_batches,
+            "chunk_count": chunk_count,
+            "latency_ms": round(latency_ms, 1),
+        },
+    )
+
+
+def _log_batch_summary(
+    total_chunks: int,
+    total_batches: int,
+    total_ms: float,
+) -> None:
+    """Log aggregate embedding throughput (FR-1214 AC-2)."""
+    throughput = (total_chunks / (total_ms / 1000.0)) if total_ms > 0 else 0.0
+    logger.info(
+        "embedding_batch_summary",
+        extra={
+            "total_chunks": total_chunks,
+            "total_batches": total_batches,
+            "total_ms": round(total_ms, 1),
+            "throughput_chunks_per_sec": round(throughput, 2),
+        },
+    )
+```
+
+Integration into `_embed_batches()`:
+
+```python
+# Inside the per-batch loop:
+start_time = time.monotonic()
+batch_vectors = embedder.embed_documents(batch_texts)
+elapsed_ms = (time.monotonic() - start_time) * 1000
+_log_batch_metrics(batch_idx + 1, len(text_batches), len(batch_texts), elapsed_ms)
+
+# After all batches:
+_log_batch_summary(total_embedded, len(text_batches), total_elapsed_ms)
+```
+
+- [ ] Step 1: Add `_log_batch_metrics()` and `_log_batch_summary()` helpers
+- [ ] Step 2: Integrate timing and logging into `_embed_batches()`
+- [ ] Step 3: Verify structured log output in tests
+- [ ] Step 4: Commit
+
+---
+
 ## Task Dependency Graph
 
 ```
@@ -1946,12 +2228,16 @@ Expected: ALL PASS
 | 4.2 Langfuse Observability | — | `tests/ingest/test_langfuse_integration.py` | — (cross-cutting) |
 | 4.3 Batch Processing Hardening | — | `tests/ingest/test_batch_processing.py` | — (cross-cutting) |
 | 4.4 Schema Migration | — | `tests/ingest/test_schema_migration.py` | — (cross-cutting) |
+| 5.1 Batch Formation Logic | 0.1, 0.4 | `tests/ingest/nodes/test_embedding_storage.py` | FR-1210, FR-1212 |
+| 5.2 Batch Size Configuration | 0.5 | `tests/ingest/test_config_validation.py` | FR-1211 |
+| 5.3 Batch Failure Isolation | 0.1, 0.3 | `tests/ingest/nodes/test_embedding_storage.py` | FR-1213 |
+| 5.4 Batch Observability Metrics | — | `tests/ingest/nodes/test_embedding_storage.py` | FR-1214 |
 
 ---
 
 ## Requirement Coverage Verification
 
-All 57 requirements (FR-591 through FR-1304) are covered:
+All 62 requirements (FR-591 through FR-1304, plus FR-1210 through FR-1214) are covered:
 
 | Requirement Range | Count | Tasks |
 |-------------------|-------|-------|
@@ -1963,8 +2249,9 @@ All 57 requirements (FR-591 through FR-1304) are covered:
 | FR-1001–FR-1009 (KG Extraction) | 9 | 3.3a, 3.3b |
 | FR-1101–FR-1105 (Quality Validation) | 5 | 4.0 |
 | FR-1201–FR-1209 (Embedding & Storage) | 9 | 1.7, 1.8 |
+| FR-1210–FR-1214 (Batch Embedding Optimisation) | 5 | 5.1, 5.2, 5.3, 5.4 |
 | FR-1301–FR-1304 (KG Storage) | 4 | 3.3c |
-| **Total** | **57** | |
+| **Total** | **62** | |
 
 ---
 
@@ -1972,7 +2259,7 @@ All 57 requirements (FR-591 through FR-1304) are covered:
 
 | Document | Role |
 |----------|------|
-| `EMBEDDING_PIPELINE_SPEC.md` | Authoritative requirements baseline (FR-591–FR-1304) |
+| `EMBEDDING_PIPELINE_SPEC.md` | Authoritative requirements baseline (FR-591–FR-1304, FR-1210–FR-1214) |
 | `EMBEDDING_PIPELINE_SPEC_SUMMARY.md` | Concise requirements digest |
 | `EMBEDDING_PIPELINE_DESIGN.md` | Task descriptions, subtasks, code appendix |
 | `EMBEDDING_PIPELINE_IMPLEMENTATION.md` (this document) | Three-phase implementation plan with test isolation |

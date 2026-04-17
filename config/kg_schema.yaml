@@ -1,0 +1,937 @@
+# Knowledge Graph Schema Definition
+# Source of truth for entity types, edge types, and their properties.
+# Used by: LLM extraction prompts, GLiNER label derivation, validation, parser mapping.
+#
+# Phase activation rules (REQ-KG-107):
+#   phase_1   — active in Phase 1 (regex + GLiNER extractors)
+#   phase_1b  — active in Phase 1b and later (requires SV parser)
+#   phase_2   — active in Phase 2 and later (community detection, Neo4j)
+#
+# GLiNER label derivation (REQ-KG-108):
+#   Use gliner_label when present; fall back to the type name otherwise.
+#   All gliner_label values MUST be unique across node types.
+
+version: "1.0"
+description: "ASIC-focused knowledge graph schema for RagWeave"
+
+# ---------------------------------------------------------------------------
+# Node Types
+# ---------------------------------------------------------------------------
+node_types:
+
+  structural:
+    # -----------------------------------------------------------------------
+    # Phase 1 baseline — detectable by regex and GLiNER extractors.
+    # These 7 types cover the fundamental module hierarchy and are active
+    # from the very first extraction pass.
+    # -----------------------------------------------------------------------
+
+    RTL_Module:
+      description: "A hardware module definition (module...endmodule) in SystemVerilog"
+      category: structural
+      phase: phase_1
+      extraction: parser  # deterministic parser extraction
+      properties:
+        - name
+        - file_path
+        - port_count
+        - line_start
+        - line_end
+      gliner_label: "RTL module"
+      extraction_hints: "Identified by `module <name>` declarations in SystemVerilog source files"
+
+    Port:
+      description: "An input, output, or inout port on a module"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      properties:
+        - name
+        - direction      # input | output | inout
+        - width
+        - type           # logic, wire, reg, etc.
+        - parent_module
+      gliner_label: "port"
+      extraction_hints: "Declared in module port list or body (input, output, inout keywords)"
+
+    Parameter:
+      description: "A parameterizable value in a module (parameter, localparam)"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      properties:
+        - name
+        - default_value
+        - type
+        - parent_module
+      gliner_label: "parameter"
+      extraction_hints: "Declared with `parameter` or `localparam` keywords inside a module"
+
+    Instance:
+      description: "An instantiation of one module inside another"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      properties:
+        - name
+        - module_type    # name of the instantiated module
+        - parent_module
+        - line
+      gliner_label: "instance"
+      extraction_hints: "Module instantiation syntax: `<ModuleType> <instance_name> (...)` inside a parent module"
+
+    Signal:
+      description: "A wire, reg, or logic signal declaration"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      properties:
+        - name
+        - signal_type    # wire | reg | logic | etc.
+        - width
+        - parent_module
+      gliner_label: "signal"
+      extraction_hints: "Declared with wire, reg, or logic keywords inside a module body"
+
+    Interface:
+      description: "A SystemVerilog interface definition"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      properties:
+        - name
+        - file_path
+        - port_count
+      gliner_label: "interface"
+      extraction_hints: "Defined with `interface <name>...endinterface` in SystemVerilog"
+
+    Package:
+      description: "A SystemVerilog package definition"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      properties:
+        - name
+        - file_path
+      gliner_label: "package"
+      extraction_hints: "Defined with `package <name>...endpackage` in SystemVerilog"
+
+    # -----------------------------------------------------------------------
+    # Phase 1b specialized — require SV parser (tree-sitter-verilog) for
+    # reliable extraction. Activated when runtime phase >= phase_1b.
+    # -----------------------------------------------------------------------
+
+    ClockDomain:
+      description: "A clock domain grouping signals and logic driven by the same clock"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - clock_signal
+        - frequency_mhz
+      gliner_label: "clock domain"
+      extraction_hints: "Identified from clock signal declarations and always blocks sensitive to a clock edge"
+
+    TypeDef:
+      description: "A typedef or enum type definition in SystemVerilog"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - base_type
+        - parent_package
+      gliner_label: "typedef"
+      extraction_hints: "Declared with `typedef` keyword; enum types use `typedef enum`"
+
+    FSM_State:
+      description: "A state in a finite state machine"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - fsm_name
+        - parent_module
+      gliner_label: "FSM"  # short natural-language label preferred by GLiNER
+      extraction_hints: "Identified by enum state declarations or case statements inside always blocks; look for state register patterns"
+
+    Generate:
+      description: "A generate block (generate...endgenerate) using for, if, or case"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - generate_type  # for | if | case
+        - parent_module
+      gliner_label: "generate block"
+      extraction_hints: "Enclosed in `generate...endgenerate` blocks with genvar loop variables or conditional logic"
+
+    Task_Function:
+      description: "A task or function definition in SystemVerilog"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - kind           # task | function
+        - return_type
+        - parent_module
+      gliner_label: "task or function"
+      extraction_hints: "Declared with `task <name>...endtask` or `function <name>...endfunction`"
+
+    SVA_Assertion:
+      description: "A SystemVerilog assertion (assert, assume, cover property)"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - assertion_type  # assert | assume | cover
+        - property_expr
+        - parent_module
+      gliner_label: "SVA assertion"
+      extraction_hints: "Uses assert property, assume property, or cover property syntax; may be named with a label"
+
+    UVM_Component:
+      description: "A UVM component class (uvm_test, uvm_env, uvm_agent, uvm_driver, etc.)"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - uvm_base_class  # uvm_test | uvm_env | uvm_agent | etc.
+        - file_path
+      gliner_label: "UVM component"
+      extraction_hints: "Classes that extend uvm_* base classes; look for `extends uvm_test`, `extends uvm_env`, etc."
+
+    TestCase:
+      description: "A verification test case or test program"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - file_path
+        - test_type       # directed | constrained-random | formal
+      gliner_label: "test case"
+      extraction_hints: "Test programs or UVM test classes that exercise a design under test"
+
+    CoverGroup:
+      description: "A SystemVerilog coverage group definition (covergroup...endgroup)"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - parent_module
+        - coverpoints
+      gliner_label: "covergroup"
+      extraction_hints: "Defined with `covergroup <name>...endgroup`; contains coverpoints and cross coverage"
+
+    Sequence:
+      description: "A sequence definition for SystemVerilog assertions or UVM sequences"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - kind            # sv_sequence | uvm_sequence
+        - parent_module
+      gliner_label: "sequence"
+      extraction_hints: "SVA sequences defined with `sequence <name>...endsequence`; UVM sequences extend uvm_sequence"
+
+    Constraint:
+      description: "A constraint block in a randomizable class"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - parent_class
+      gliner_label: "constraint"
+      extraction_hints: "Declared with `constraint <name> { ... }` inside a class that extends uvm_object or similar"
+
+    Pipeline_Stage:
+      description: "A pipeline stage in a datapath or arithmetic design"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - stage_index
+        - parent_module
+      gliner_label: "pipeline stage"
+      extraction_hints: "Registers between combinational logic stages; often identified by naming conventions (e.g., _stage1_, _pipe_)"
+
+    FIFO_Buffer:
+      description: "A FIFO or buffer component used for flow control or data buffering"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - depth
+        - width
+        - parent_module
+      gliner_label: "FIFO"
+      extraction_hints: "Modules named with fifo, buffer, or queue; typically have rd/wr pointers and full/empty flags"
+
+    Arbiter:
+      description: "An arbitration component that selects among multiple requestors"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - arbitration_scheme  # round-robin | fixed-priority | weighted
+        - num_requestors
+        - parent_module
+      gliner_label: "arbiter"
+      extraction_hints: "Modules named with arb or arbiter; implement grant/request handshake logic"
+
+    Decoder_Encoder:
+      description: "A decoder or encoder component for signal demultiplexing or encoding"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - kind            # decoder | encoder | priority_encoder
+        - input_width
+        - output_width
+        - parent_module
+      gliner_label: "decoder or encoder"
+      extraction_hints: "Modules or combinational blocks named with dec, decoder, enc, or encoder"
+
+    RegisterFile:
+      description: "A register file or register bank containing addressable registers"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - num_registers
+        - data_width
+        - addr_width
+        - parent_module
+      gliner_label: "register file"
+      extraction_hints: "Arrays of registers addressable by an index or address; often named regfile, rf, or reg_bank"
+
+    MemoryMap:
+      description: "A memory map or address map defining address regions and register offsets"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      properties:
+        - name
+        - base_address
+        - size
+        - file_path
+      gliner_label: "memory map"
+      extraction_hints: "Address maps in SystemVerilog UVM RAL, spreadsheets, or header files defining BASE_ADDR and offset constants"
+
+  semantic:
+    # -----------------------------------------------------------------------
+    # All semantic types are Phase 1 — extractable by LLM/NER from prose
+    # documents (specs, design notes, review comments, etc.).
+    # -----------------------------------------------------------------------
+
+    Specification:
+      description: "A formal specification or requirements document (e.g., design spec, databook)"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - version
+        - status         # draft | approved | deprecated
+        - file_path
+      gliner_label: "specification"
+      extraction_hints: "Documents titled with spec, specification, databook, or TRM; often versioned with revision numbers"
+
+    DesignDecision:
+      description: "A documented design choice or architectural decision and its rationale"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - rationale
+        - alternatives_considered
+        - decision_date
+      gliner_label: "design decision"
+      extraction_hints: "Statements of the form 'we decided to...', 'chosen approach is...', or ADR-style records"
+
+    Requirement:
+      description: "A functional or non-functional requirement that the design must satisfy"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - requirement_id  # e.g., REQ-001
+        - priority        # MUST | SHOULD | MAY
+        - status          # open | met | deferred
+      gliner_label: "requirement"
+      extraction_hints: "Statements using MUST, SHALL, SHOULD, or requirement ID labels like REQ-XXX"
+
+    TradeOff:
+      description: "A documented trade-off between competing design goals or quality attributes"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - dimension_a     # e.g., area
+        - dimension_b     # e.g., speed
+        - resolution
+      gliner_label: "trade-off"
+      extraction_hints: "Statements discussing compromises between area/speed/power, latency/throughput, or cost/performance"
+
+    KnownIssue:
+      description: "A documented known issue, bug, limitation, or errata"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - issue_id
+        - severity        # critical | major | minor
+        - workaround
+        - status          # open | resolved
+      gliner_label: "known issue"
+      extraction_hints: "Sections titled errata, known issues, or limitations; bug tracker references"
+
+    Assumption:
+      description: "A documented assumption underlying a design or decision"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - rationale
+        - owner
+      gliner_label: "assumption"
+      extraction_hints: "Statements beginning with 'we assume', 'it is assumed', or 'assuming that'"
+
+    Person:
+      description: "An individual (engineer, designer, reviewer, or author)"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - role            # designer | reviewer | PM | etc.
+        - email
+      gliner_label: "person"
+      extraction_hints: "Named individuals in author, reviewer, or contact fields; signatures in documents"
+
+    Team:
+      description: "A team or organizational unit responsible for part of the design"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - department
+        - contact
+      gliner_label: "team"
+      extraction_hints: "Org unit names in ownership, escalation, or contact sections of documents"
+
+    Project:
+      description: "A project or program that encompasses a set of design deliverables"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - status          # planning | active | completed | cancelled
+        - tapeout_target
+      gliner_label: "project"
+      extraction_hints: "Project names, program names, or chip names referenced in document headers or scope sections"
+
+    Review:
+      description: "A design review, code review, or sign-off event"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - review_type     # design-review | code-review | sign-off
+        - date
+        - outcome         # approved | approved-with-action-items | rejected
+      gliner_label: "review"
+      extraction_hints: "Design review meetings, code review records, milestone sign-offs; look for date + reviewer + outcome"
+
+    Protocol:
+      description: "A communication protocol or bus standard (AXI, APB, SPI, I2C, PCIe, etc.)"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - version         # e.g., AXI4, PCIe Gen4
+        - standard_body   # AMBA, IEEE, etc.
+      gliner_label: "protocol"
+      extraction_hints: "Named bus or communication protocols; common examples include AXI, AHB, APB, SPI, I2C, PCIe, USB, DDR"
+
+    IP_Block:
+      description: "A reusable IP block or hard macro integrated into the design"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - vendor
+        - version
+        - license_type    # open | commercial | internal
+      gliner_label: "IP block"
+      extraction_hints: "Referenced as third-party IP, purchased macro, or reused block from a library; often named with vendor prefix"
+
+    EDA_Tool:
+      description: "An EDA tool used in the design flow (Synopsys DC, Cadence Innovus, etc.)"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - vendor          # Synopsys | Cadence | Mentor | Siemens | etc.
+        - version
+        - flow_stage      # synthesis | place-and-route | simulation | formal | etc.
+      gliner_label: "EDA tool"
+      extraction_hints: "Tool names such as Design Compiler, Genus, Innovus, VCS, ModelSim, Questasim, Jasper, Formality"
+
+    Script:
+      description: "An automation script used in the design or verification flow (TCL, Python, shell)"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - language        # tcl | python | bash | perl | makefile
+        - file_path
+        - purpose
+      gliner_label: "script"
+      extraction_hints: "Referenced automation scripts, run scripts, or makefiles; file extensions .tcl, .py, .sh, .pl"
+
+    TimingConstraint:
+      description: "A timing constraint specifying clock period, setup/hold margins, or multicycle paths"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - constraint_type  # clock | setup | hold | multicycle | false-path
+        - value
+        - unit             # ns | ps | MHz
+      gliner_label: "timing constraint"
+      extraction_hints: "SDC commands like create_clock, set_input_delay, set_multicycle_path; or prose references to timing targets"
+
+    AreaConstraint:
+      description: "An area constraint or die/block utilization target"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - target_value
+        - unit             # um2 | gates | cells | %
+        - block
+      gliner_label: "area constraint"
+      extraction_hints: "References to area budget, utilization target, cell count limit, or die size constraint"
+
+    PowerConstraint:
+      description: "A power constraint or power domain definition with leakage/dynamic targets"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      properties:
+        - name
+        - power_domain
+        - target_value
+        - unit             # mW | uW
+        - power_type       # dynamic | leakage | total
+      gliner_label: "power constraint"
+      extraction_hints: "References to power budget, UPF/CPF power domain definitions, or power targets in specifications"
+
+
+    # -----------------------------------------------------------------------
+    # Phase 2 parser types — Python and Bash structural extraction.
+    # Activated when runtime phase >= phase_2.
+    # -----------------------------------------------------------------------
+
+    PythonClass:
+      description: "A Python class definition"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+        - base_classes
+      gliner_label: "python class"
+      extraction_hints: "Identified by `class <name>:` declarations in Python source files"
+
+    PythonFunction:
+      description: "A Python function or method definition"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+        - parent_class
+      gliner_label: "python function"
+      extraction_hints: "Identified by `def <name>` or `async def <name>` declarations"
+
+    PythonImport:
+      description: "A Python import dependency"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+      gliner_label: "python import"
+      extraction_hints: "Identified by `import` or `from ... import` statements"
+
+    PythonVariable:
+      description: "A Python module-level constant (ALL_CAPS assignment)"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+      gliner_label: "python constant"
+      extraction_hints: "Module-level ALL_CAPS variable assignments"
+
+    BashFunction:
+      description: "A Bash/Shell function definition"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+      gliner_label: "bash function"
+      extraction_hints: "Identified by `function <name>()` or `<name>() {` patterns"
+
+    BashScript:
+      description: "A sourced Bash/Shell script dependency"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+      gliner_label: "bash script"
+      extraction_hints: "Identified by `source <file>` or `. <file>` statements"
+
+    BashVariable:
+      description: "An exported or readonly Bash/Shell variable"
+      category: structural
+      phase: phase_2
+      extraction: parser
+      properties:
+        - name
+        - file_path
+      gliner_label: "bash variable"
+      extraction_hints: "Identified by `export VAR=` or `readonly VAR=` patterns"
+
+# ---------------------------------------------------------------------------
+# Edge Types
+# ---------------------------------------------------------------------------
+edge_types:
+
+  structural:
+    # -----------------------------------------------------------------------
+    # Phase 1 structural edges — active with basic regex/GLiNER extractors.
+    # -----------------------------------------------------------------------
+
+    depends_on:
+      description: "Component A depends on component B (generic dependency)"
+      category: structural
+      phase: phase_1
+      extraction: parser  # also regex
+      source_types: [RTL_Module, Instance, Package, Interface]
+      target_types: [RTL_Module, Package, Interface, IP_Block]
+
+    contains:
+      description: "Parent entity contains child entity (hierarchical membership)"
+      category: structural
+      phase: phase_1
+      extraction: parser
+      source_types: [RTL_Module, Package, Interface, RegisterFile, MemoryMap]
+      target_types:
+        - Port
+        - Parameter
+        - Signal
+        - Instance
+        - TypeDef
+        - Task_Function
+        - SVA_Assertion
+        - CoverGroup
+        - Sequence
+        - Constraint
+        - Generate
+        - RegisterFile
+
+    # -----------------------------------------------------------------------
+    # Phase 1b structural edges — require SV parser for deterministic extraction.
+    # -----------------------------------------------------------------------
+
+    instantiates:
+      description: "Module A instantiates module B (hierarchical instantiation)"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [RTL_Module, Instance]
+      target_types: [RTL_Module, IP_Block]
+
+    connects_to:
+      description: "Signal or port A connects to signal or port B across a module boundary"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [Port, Signal]
+      target_types: [Port, Signal, Instance]
+
+    parameterized_by:
+      description: "Module or instance is parameterized by a parameter value"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [RTL_Module, Instance]
+      target_types: [Parameter]
+
+    belongs_to_clock_domain:
+      description: "Signal or module belongs to a specific clock domain"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [Signal, RTL_Module, Port]
+      target_types: [ClockDomain]
+
+    implements_interface:
+      description: "Module implements or binds to a SystemVerilog interface"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [RTL_Module]
+      target_types: [Interface]
+
+    transitions_to:
+      description: "FSM state A transitions to state B"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [FSM_State]
+      target_types: [FSM_State]
+
+    drives:
+      description: "Signal or port drives (writes to) another signal or port"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [Signal, Port]
+      target_types: [Signal, Port]
+
+    reads:
+      description: "Component reads from a signal or register"
+      category: structural
+      phase: phase_1b
+      extraction: parser
+      source_types: [RTL_Module, Task_Function]
+      target_types: [Signal, RegisterFile]
+
+  semantic:
+    # -----------------------------------------------------------------------
+    # All semantic edges are Phase 1 — extractable by LLM from prose.
+    # -----------------------------------------------------------------------
+
+    specified_by:
+      description: "Component or feature is specified by a specification document"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [RTL_Module, IP_Block, Interface, Protocol]
+      target_types: [Specification]
+
+    verified_by:
+      description: "Component is verified by a test case, assertion, or coverage group"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [RTL_Module, IP_Block, Interface]
+      target_types: [TestCase, SVA_Assertion, CoverGroup]
+
+    authored_by:
+      description: "Document or component was authored or created by a person"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types:
+        - Specification
+        - DesignDecision
+        - Requirement
+        - Script
+        - TestCase
+      target_types: [Person]
+
+    reviewed_by:
+      description: "Document or component was reviewed (and potentially approved) by a person"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types:
+        - Specification
+        - DesignDecision
+        - RTL_Module
+        - Review
+      target_types: [Person]
+
+    blocks:
+      description: "Issue or dependency blocks progress on another item"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [KnownIssue, Requirement, TradeOff]
+      target_types:
+        - RTL_Module
+        - Requirement
+        - DesignDecision
+        - Project
+        - Review
+
+    supersedes:
+      description: "Document or version supersedes (replaces) a previous version or decision"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [Specification, Requirement, DesignDecision]
+      target_types: [Specification, Requirement, DesignDecision]
+
+    constrained_by:
+      description: "Component is constrained by a timing, area, or power constraint"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [RTL_Module, IP_Block, DesignDecision]
+      target_types: [TimingConstraint, AreaConstraint, PowerConstraint]
+
+    trades_off_against:
+      description: "Design decision trades off one quality attribute against another"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [DesignDecision, TradeOff]
+      target_types: [TradeOff, Requirement, TimingConstraint, AreaConstraint, PowerConstraint]
+
+    assumes:
+      description: "Design, decision, or specification assumes a precondition or external fact"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [DesignDecision, Specification, Requirement]
+      target_types: [Assumption]
+
+    complies_with:
+      description: "Component complies with a protocol, standard, or specification"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [RTL_Module, IP_Block, Interface]
+      target_types: [Protocol, Specification]
+
+    relates_to:
+      description: "Generic semantic relation when no more specific edge type applies"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: []   # unconstrained — any node type
+      target_types: []   # unconstrained — any node type
+
+    design_decision_for:
+      description: "A design decision applies to or governs a specific component or feature"
+      category: semantic
+      phase: phase_1
+      extraction: llm
+      source_types: [DesignDecision]
+      target_types:
+        - RTL_Module
+        - IP_Block
+        - Interface
+        - Protocol
+        - Specification
+        - Requirement
+
+
+# ---------------------------------------------------------------------------
+# Legacy Compatibility Types
+# Mapped from the current regex extractor in src/core/knowledge_graph.py.
+# These types may appear in existing graphs; they should be translated to
+# canonical schema types at import/merge time.
+# ---------------------------------------------------------------------------
+legacy_types:
+  node_types:
+    technology:
+      maps_to: RTL_Module   # CamelCase token detection heuristic in regex extractor
+      description: "Legacy type emitted by regex extractor for CamelCase tokens; maps to RTL_Module as the most common structural type"
+
+    acronym:
+      maps_to: null         # resolved via alias expansion system; no canonical equivalent
+      description: "Legacy type emitted by regex extractor for ALL-CAPS tokens; handled by alias/expansion system rather than mapped 1-to-1"
+
+    concept:
+      maps_to: null         # generic fallback; destination depends on context
+      description: "Legacy type emitted by regex extractor as default fallback; requires reclassification by LLM or manual tagging"
+
+  edge_types:
+    is_a:
+      maps_to: relates_to
+      description: "Legacy generalization edge; maps to relates_to (no subtyping hierarchy in current schema)"
+
+    subset_of:
+      maps_to: contains
+      description: "Legacy containment/subset edge; maps to contains"
+
+    used_for:
+      maps_to: depends_on
+      description: "Legacy usage edge; maps to depends_on"
+
+    uses:
+      maps_to: depends_on
+      description: "Legacy usage edge (alternate form); maps to depends_on"
+
+# ---------------------------------------------------------------------------
+# Verb Normalization
+# Maps edge type labels to natural-language verb phrases for path narratives.
+# Used by: GraphContextFormatter._normalize_predicate
+# ---------------------------------------------------------------------------
+verb_normalization:
+  depends_on: "depends on"
+  contains: "contains"
+  instantiates: "instantiates"
+  connects_to: "connects to"
+  parameterized_by: "is parameterized by"
+  belongs_to_clock_domain: "belongs to clock domain"
+  implements_interface: "implements"
+  transitions_to: "transitions to"
+  drives: "drives"
+  reads: "reads"
+  specified_by: "is specified by"
+  verified_by: "is verified by"
+  authored_by: "was authored by"
+  reviewed_by: "was reviewed by"
+  blocks: "blocks"
+  supersedes: "supersedes"
+  constrained_by: "is constrained by"
+  trades_off_against: "trades off against"
+  assumes: "assumes"
+  complies_with: "complies with"
+  relates_to: "relates to"
+  design_decision_for: "has design decision for"

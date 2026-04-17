@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 
 @dataclass
@@ -20,7 +19,7 @@ class VersionConflict:
     """
 
     spec_stem: str
-    versions: List[str]
+    versions: list[str]
 
 
 @dataclass
@@ -35,4 +34,4 @@ class FormattedContext:
 
     context_string: str
     chunk_count: int
-    version_conflicts: List[VersionConflict] = field(default_factory=list)
+    version_conflicts: list[VersionConflict] = field(default_factory=list)

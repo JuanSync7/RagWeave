@@ -36,6 +36,10 @@ def metadata_generation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         and an updated ``processing_log``.
     """
     config = state["runtime"].config
+    if not config.enable_llm_metadata:
+        return {
+            "processing_log": append_processing_log(state, "metadata_generation:skipped"),
+        }
     text = state.get("refactored_text") or state.get("cleaned_text", "")
     prompt = (
         'Return {"summary":"...","keywords":[]} for:\n'

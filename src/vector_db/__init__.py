@@ -3,7 +3,8 @@
 # single-collection search, multi-collection fan-out, aggregation, re-exported schemas,
 # and visual collection operations for the visual embedding pipeline.
 # Exports: create_persistent_client, get_client, close_client, ensure_collection,
-#          delete_collection, add_documents, delete_by_source, delete_by_source_key,
+#          delete_collection, add_documents, update_chunk_content,
+#          delete_by_source, delete_by_source_key,
 #          search, multi_search, aggregate_by_source, get_collection_stats, list_collections,
 #          ensure_visual_collection, add_visual_documents, delete_visual_by_source_key,
 #          search_visual, DocumentRecord, SearchResult, SearchFilter, build_chunk_id
@@ -27,7 +28,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, Optional
 
 from src.vector_db.backend import VectorBackend
 from src.vector_db.common import (
@@ -139,7 +140,7 @@ def delete_collection(client: Any, collection: Optional[str] = None) -> None:
 
 def add_documents(
     client: Any,
-    documents: List[DocumentRecord],
+    documents: list[DocumentRecord],
     collection: Optional[str] = None,
 ) -> int:
     """Insert documents with pre-computed embeddings.
@@ -153,6 +154,41 @@ def add_documents(
         Number of documents added.
     """
     return _get_vector_backend().add_documents(client, documents, collection)
+
+
+def update_chunk_content(
+    client: Any,
+    chunk_uuid: str,
+    *,
+    text: str,
+    content_hash: str,
+    fuzzy_fingerprint: Optional[str] = None,
+    collection: Optional[str] = None,
+) -> bool:
+    """Replace a canonical chunk's text + dedup metadata in place (FR-3432).
+
+    Used by the cross-document dedup node when a richer incoming chunk
+    replaces an existing canonical chunk via fuzzy match.
+
+    Args:
+        client: Vector store client handle.
+        chunk_uuid: UUID of the canonical chunk to update.
+        text: New canonical text.
+        content_hash: SHA-256 of the new normalised text.
+        fuzzy_fingerprint: Optional serialised MinHash signature.
+        collection: Target collection name. ``None`` uses the default.
+
+    Returns:
+        True on success, False on error (non-fatal to the pipeline).
+    """
+    return _get_vector_backend().update_chunk_content(
+        client,
+        chunk_uuid,
+        text=text,
+        content_hash=content_hash,
+        fuzzy_fingerprint=fuzzy_fingerprint,
+        collection=collection,
+    )
 
 
 def delete_by_source(
@@ -202,12 +238,12 @@ def delete_by_source_key(
 def search(
     client: Any,
     query: str,
-    query_embedding: List[float],
+    query_embedding: list[float],
     alpha: float,
     limit: int,
-    filters: Optional[List[SearchFilter]] = None,
+    filters: Optional[list[SearchFilter]] = None,
     collection: Optional[str] = None,
-) -> List[SearchResult]:
+) -> list[SearchResult]:
     """Perform a hybrid (keyword + vector) search against one collection.
 
     Args:
@@ -230,12 +266,12 @@ def search(
 def multi_search(
     client: Any,
     query: str,
-    query_embedding: List[float],
+    query_embedding: list[float],
     alpha: float,
     limit: int,
-    collections: Optional[List[str]] = None,
-    filters: Optional[List[SearchFilter]] = None,
-) -> List[SearchResult]:
+    collections: Optional[list[str]] = None,
+    filters: Optional[list[SearchFilter]] = None,
+) -> list[SearchResult]:
     """Fan-out hybrid search across multiple collections.
 
     Issues one search per collection in parallel, deduplicates results by
@@ -262,12 +298,12 @@ def multi_search(
 
     backend = _get_vector_backend()
 
-    def _search_one(col: str) -> List[SearchResult]:
+    def _search_one(col: str) -> list[SearchResult]:
         return backend.search(
             client, query, query_embedding, alpha, limit, filters, col
         )
 
-    all_results: List[SearchResult] = []
+    all_results: list[SearchResult] = []
     with ThreadPoolExecutor(max_workers=len(collections)) as pool:
         futures = {pool.submit(_search_one, col): col for col in collections}
         for future in as_completed(futures):
@@ -344,7 +380,7 @@ def ensure_visual_collection(
 
 def add_visual_documents(
     client: Any,
-    documents: List[dict[str, Any]],
+    documents: list[dict[str, Any]],
     collection: Optional[str] = None,
 ) -> int:
     """Batch-insert visual page objects into the visual collection.
@@ -420,6 +456,7 @@ __all__ = [
     "delete_collection",
     # Document operations
     "add_documents",
+    "update_chunk_content",
     "delete_by_source",
     "delete_by_source_key",
     # Search

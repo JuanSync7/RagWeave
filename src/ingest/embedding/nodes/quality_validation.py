@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -16,6 +17,8 @@ from src.ingest.common import (
     quality_score,
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
+
+logger = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -48,6 +51,7 @@ def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         try:
             score = quality_score(text)
         except Exception:
+            logger.debug("Quality score computation failed; defaulting to 0.0", exc_info=True)
             score = 0.0  # fail safe: low quality
         if score < config.min_quality_score:
             continue

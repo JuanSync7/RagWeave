@@ -14,6 +14,8 @@ Implements a creation/verification loop:
 
 Falls back to word-count heuristic if Ollama is unavailable.
 """
+from __future__ import annotations
+
 
 import orjson
 import logging
@@ -21,7 +23,7 @@ import os
 import re
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Optional
 
 from langgraph.graph import END, StateGraph
 
@@ -133,8 +135,8 @@ def _get_combined_prompt() -> str:
 # Knowledge graph vocabulary (loaded once, used for reformulation context)
 # ---------------------------------------------------------------------------
 
-_KG_TERMS: Optional[List[str]] = None
-_KG_WORD_INDEX: Optional[Dict[str, List[str]]] = None
+_KG_TERMS: Optional[list[str]] = None
+_KG_WORD_INDEX: Optional[dict[str, list[str]]] = None
 
 
 def _get_kg_terms() -> tuple:
@@ -190,10 +192,10 @@ def _get_kg_terms() -> tuple:
 # Guardrails — prompt injection detection (fallback when NeMo is disabled)
 # ---------------------------------------------------------------------------
 
-_INJECTION_PATTERNS: Optional[List[re.Pattern]] = None
+_INJECTION_PATTERNS: Optional[list[re.Pattern]] = None
 
 
-def _load_injection_patterns() -> List[re.Pattern]:
+def _load_injection_patterns() -> list[re.Pattern]:
     """Load injection patterns from config/injection_patterns.yaml.
 
     Patterns are loaded once and cached. Falls back to a minimal
@@ -354,7 +356,7 @@ def _detect_suppress_memory(query: str) -> bool:
 
 def _call_llm(prompt: str, system: str = "") -> Optional[str]:
     """Call LLM via LLMProvider. Returns response text or None on failure."""
-    messages: List[Dict[str, str]] = []
+    messages: list[dict[str, str]] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})

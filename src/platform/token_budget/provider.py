@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import orjson
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -41,7 +41,7 @@ _cached_capabilities: ModelCapabilities | None = None
 # ── Model capability discovery ────────────────────────────────────────
 
 
-def _fetch_via_litellm(model: str) -> Optional[Dict[str, Any]]:
+def _fetch_via_litellm(model: str) -> Optional[dict[str, Any]]:
     """Fetch model metadata via LiteLLM if available.
 
     Args:
@@ -62,7 +62,7 @@ def _fetch_via_litellm(model: str) -> Optional[Dict[str, Any]]:
 
 def _fetch_via_ollama(
     model_name: str, base_url: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Fetch model info from Ollama `/api/show`.
 
     Args:

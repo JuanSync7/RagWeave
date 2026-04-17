@@ -4,7 +4,8 @@
 # Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
 #          add_documents, hybrid_search, delete_collection,
 #          delete_documents_by_source, delete_documents_by_source_key,
-#          aggregate_by_source, get_collection_stats, list_collections
+#          aggregate_by_source, get_collection_stats, list_collections,
+#          update_chunk_content
 # Deps: weaviate, config.settings, src.platform.observability
 # @end-summary
 """Low-level Weaviate operations: connection, schema, CRUD, and search.
@@ -14,12 +15,14 @@ that defaults to ``WEAVIATE_COLLECTION_NAME``. This module is imported only
 by ``WeaviateBackend`` — pipeline code accesses these capabilities through
 ``src.vector_db`` instead.
 """
+from __future__ import annotations
+
 
 import hashlib
 import logging
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional
+from typing import Optional
 
 import weaviate
 from weaviate.classes.config import Configure, Property, DataType
@@ -40,9 +43,16 @@ tracer = get_tracer()
 def create_persistent_client() -> weaviate.WeaviateClient:
     """Create a long-lived Weaviate embedded client."""
     span = tracer.start_span("vector_store.create_persistent_client")
-    client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
-    span.end(status="ok")
-    return client
+    client: Optional[weaviate.WeaviateClient] = None
+    try:
+        client = weaviate.connect_to_embedded(persistence_data_path=WEAVIATE_DATA_DIR)
+        span.end(status="ok")
+        return client
+    except Exception:
+        span.end(status="error")
+        if client is not None:
+            client.close()
+        raise
 
 
 @contextmanager
@@ -97,6 +107,31 @@ def ensure_collection(
             Property(name="heading_level", data_type=DataType.INT),
             Property(name="tenant_id", data_type=DataType.TEXT),
             Property(name="document_id", data_type=DataType.TEXT),
+            # -- Cross-document dedup (FR-3430, FR-3431, FR-3432, FR-3433) --
+            Property(
+                name="content_hash",
+                data_type=DataType.TEXT,
+                description="SHA-256 of normalised chunk text for exact-match dedup",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="source_documents",
+                data_type=DataType.TEXT_ARRAY,
+                description="Array of source_key values for multi-document provenance",
+            ),
+            Property(
+                name="fuzzy_fingerprint",
+                data_type=DataType.TEXT,
+                description="Serialised MinHash signature (Tier 2 fuzzy dedup)",
+                index_filterable=False,
+                index_searchable=False,
+            ),
+            Property(
+                name="canonical",
+                data_type=DataType.BOOL,
+                description="Always true; reserved for future soft-delete flows",
+            ),
         ],
     )
     span.end(status="ok")
@@ -121,9 +156,9 @@ def _normalize_chunk_uuid(candidate: object, source: str, chunk_index: int, text
 
 def add_documents(
     client: weaviate.WeaviateClient,
-    texts: List[str],
-    embeddings: List[List[float]],
-    metadatas: Optional[List[dict]] = None,
+    texts: list[str],
+    embeddings: list[list[float]],
+    metadatas: Optional[list[dict]] = None,
     collection: str = WEAVIATE_COLLECTION_NAME,
 ) -> int:
     """Add documents with pre-computed embeddings to the named collection."""
@@ -194,12 +229,12 @@ def add_documents(
 def hybrid_search(
     client: weaviate.WeaviateClient,
     query: str,
-    query_embedding: List[float],
+    query_embedding: list[float],
     alpha: float = HYBRID_SEARCH_ALPHA,
     limit: int = SEARCH_LIMIT,
     filters: Optional[Filter] = None,
     collection: str = WEAVIATE_COLLECTION_NAME,
-) -> List[dict]:
+) -> list[dict]:
     """Perform hybrid search (BM25 + vector) on the named collection.
 
     Returns:
@@ -436,3 +471,60 @@ def list_collections(
         })
     span.end(status="ok")
     return results
+
+
+# ---------------------------------------------------------------------------
+# Cross-document dedup: canonical chunk updates (FR-3432)
+# ---------------------------------------------------------------------------
+
+
+def update_chunk_content(
+    client: weaviate.WeaviateClient,
+    chunk_uuid: str,
+    *,
+    text: str,
+    content_hash: str,
+    fuzzy_fingerprint: Optional[str] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> bool:
+    """Replace a canonical chunk's text + dedup metadata (Tier 2 replacement).
+
+    Used by the dedup node when an incoming chunk's text is longer/richer than
+    an existing canonical chunk that it fuzzy-matches against. The canonical
+    record is updated in place — source_documents provenance is NOT reset.
+
+    Args:
+        client: Weaviate client handle.
+        chunk_uuid: UUID of the canonical chunk to update.
+        text: New canonical text (replaces existing).
+        content_hash: SHA-256 of the new normalised text.
+        fuzzy_fingerprint: Optional new MinHash signature (hex string).
+        collection: Target collection name.
+
+    Returns:
+        True on success, False on error.
+    """
+    span = tracer.start_span(
+        "vector_store.update_chunk_content",
+        {"collection": collection, "chunk_uuid": chunk_uuid},
+    )
+    try:
+        col = client.collections.get(collection)
+        properties: dict = {
+            "text": text,
+            "content_hash": content_hash,
+        }
+        if fuzzy_fingerprint is not None:
+            properties["fuzzy_fingerprint"] = fuzzy_fingerprint
+        col.data.update(uuid=chunk_uuid, properties=properties)
+        span.end(status="ok")
+        return True
+    except Exception:
+        logger.error(
+            "Failed to update canonical chunk %s in %s",
+            chunk_uuid,
+            collection,
+            exc_info=True,
+        )
+        span.end(status="error")
+        return False

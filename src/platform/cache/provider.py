@@ -12,6 +12,7 @@ This module centralizes caching behind a small interface so callers can use
 
 from __future__ import annotations
 
+import logging
 import orjson
 import threading
 import time
@@ -23,6 +24,8 @@ from config.settings import (
     CACHE_TTL_SECONDS,
     CACHE_REDIS_URL,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CacheProvider:
@@ -198,6 +201,7 @@ def get_cache() -> CacheProvider:
             _CACHE = RedisCache(CACHE_REDIS_URL)
             return _CACHE
         except Exception:
+            logger.warning("Redis cache initialization failed; falling back to in-memory cache", exc_info=True)
             _CACHE = InMemoryTTLCache()
             return _CACHE
 

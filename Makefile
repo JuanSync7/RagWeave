@@ -9,7 +9,8 @@
         all-check precommit-check setup restart restart-all \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
-        container-build-podman container-probe container-sizes container-clean
+        container-build-podman container-probe container-sizes container-clean \
+        smoke-test container-build-and-test
 
 # Default target: print the help menu when `make` is run with no arguments.
 .DEFAULT_GOAL := help
@@ -35,15 +36,16 @@ help:
 	@echo "  console-build      Compile TS -> static/main.js"
 	@echo "  console-watch      Watch mode — rebuild on TS change"
 	@echo ""
-	@echo "Static checks (3 layers — each catches a distinct bug class)"
+	@echo "Static checks (4 layers — each catches a distinct bug class)"
 	@echo "  py-compile-check       L1 syntax: compileall across src/ server/ config/ import_check/"
 	@echo "  import-check           L2 internal: resolve imports + encapsulation (whole tree)"
 	@echo "  import-check-tracked   L2 internal but only for git-tracked files (for precommit)"
 	@echo "  dep-check              L3 external: pyproject.toml vs imports (deptry)"
+	@echo "  container-dep-check    L4 container: requirements-*.txt in sync with pyproject.toml"
 	@echo ""
 	@echo "Compound gates"
-	@echo "  precommit-check    L1 + L2(tracked) + L3 + npm ci + console-check (excludes WIP)"
-	@echo "  all-check          L1 + L2(all)     + L3 + npm ci + console-check (full sweep)"
+	@echo "  precommit-check    L1 + L2(tracked) + L3 + L4 + npm ci + console-check (excludes WIP)"
+	@echo "  all-check          L1 + L2(all)     + L3 + L4 + npm ci + console-check (full sweep)"
 	@echo ""
 	@echo "Tests"
 	@echo "  test               Run the pytest suite (not included in all-check)"
@@ -53,9 +55,11 @@ help:
 	@echo "  container-build-api     Build only rag-api"
 	@echo "  container-build-worker  Build only rag-worker"
 	@echo "  container-build-podman  Build both with podman (--format docker)"
-	@echo "  container-probe         Run the API import probe inside rag-api"
-	@echo "  container-sizes         Print current rag-api / rag-worker image sizes"
-	@echo "  container-clean         Remove local rag-api / rag-worker images"
+	@echo "  container-probe             Run the API import probe inside rag-api"
+	@echo "  container-sizes             Print current rag-api / rag-worker image sizes"
+	@echo "  container-clean             Remove local rag-api / rag-worker images + dangling images"
+	@echo "  smoke-test                  Full integration check: build + stack + tunnel + checks"
+	@echo "  container-build-and-test    Build images then immediately run smoke-test (SKIP_BUILD=1)"
 	@echo ""
 	@echo "Stack restart (uses scripts/restart_stack.sh — auto-detects docker/podman)"
 	@echo "  restart            Restart app + workers with rebuild"
@@ -192,6 +196,12 @@ test:
 dep-check:
 	uv run python -m deptry .
 
+# Layer 4: verify containers/requirements-*.txt stay in sync with pyproject.toml.
+# Catches deps added to a requirements file but missing from pyproject.toml, and
+# pyproject.toml deps absent from both container files without being allowlisted.
+container-dep-check:
+	uv run python scripts/check_container_deps.py
+
 # Layer 2 (all files): internal import resolution + encapsulation violations.
 # Scans every .py file in the source directories, including untracked WIP.
 import-check:
@@ -208,6 +218,7 @@ precommit-check:
 	$(MAKE) py-compile-check
 	$(MAKE) import-check-tracked
 	$(MAKE) dep-check
+	$(MAKE) container-dep-check
 	npm --prefix server/console/web ci
 	$(MAKE) console-check
 
@@ -217,13 +228,14 @@ all-check:
 	$(MAKE) py-compile-check
 	$(MAKE) import-check
 	$(MAKE) dep-check
+	$(MAKE) container-dep-check
 	npm --prefix server/console/web ci
 	$(MAKE) console-check
 
-restart:
-	./scripts/restart_stack.sh --app --workers --build
+restart: console-build
+	./scripts/restart_stack.sh --temporal --app --workers --build
 
-restart-all:
+restart-all: console-build
 	./scripts/restart_stack.sh --all --build
 
 # ---------------------------------------------------------------------------
@@ -240,8 +252,9 @@ restart-all:
 #   - Worker-side    → add to pyproject.toml AND containers/requirements-worker.txt
 # ---------------------------------------------------------------------------
 
-# Default: build both images with Docker (BuildKit enabled)
-container-build: container-build-api container-build-worker container-sizes
+# Default: build both images with Docker (BuildKit enabled).
+# console-build runs first so the compiled frontend JS is baked into rag-api.
+container-build: console-build container-build-api container-build-worker container-sizes
 
 container-build-api:
 	DOCKER_BUILDKIT=1 docker build -t rag-api -f containers/Dockerfile.api .
@@ -252,7 +265,8 @@ container-build-worker:
 # Build with Podman instead of Docker. Passes --format docker so HEALTHCHECK
 # directives are preserved if ever re-added (the compose-level healthcheck
 # works regardless of image format).
-container-build-podman:
+# console-build runs first so the compiled frontend JS is baked into rag-api.
+container-build-podman: console-build
 	podman build --format docker -t rag-api    -f containers/Dockerfile.api .
 	podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
 	@$(MAKE) container-sizes
@@ -281,7 +295,19 @@ container-sizes:
 		docker images --format "  {{.Repository}}:{{.Tag}}\t{{.Size}}" | grep -E "rag-(api|worker)" || true; \
 	fi
 
-# Remove locally-built rag-api / rag-worker images from both engines
+# Remove locally-built rag-api / rag-worker images and dangling (<none>) images from both engines
 container-clean:
 	-docker rmi rag-api rag-worker 2>/dev/null || true
+	-docker image prune -f 2>/dev/null || true
 	-podman rmi rag-api rag-worker 2>/dev/null || true
+	-podman image prune -f 2>/dev/null || true
+
+# Run the full integration smoke test (build + stack + cloudflare tunnel + checks + teardown).
+# Pass SKIP_BUILD=1 to reuse already-built images.
+smoke-test:
+	SKIP_BUILD=$${SKIP_BUILD:-0} bash scripts/smoke_test.sh
+
+# Build images then immediately run the smoke test. The smoke test skips its
+# own build step since container-build already produced fresh images.
+container-build-and-test: container-build
+	SKIP_BUILD=1 bash scripts/smoke_test.sh

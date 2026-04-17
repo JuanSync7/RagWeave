@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, Optional
 
 from src.vector_db.backend import VectorBackend
 from src.vector_db.common import (
@@ -38,6 +38,7 @@ from src.vector_db.weaviate.store import (
     aggregate_by_source as _wv_aggregate_by_source,
     get_collection_stats as _wv_get_collection_stats,
     list_collections as _wv_list_collections,
+    update_chunk_content as _wv_update_chunk_content,
 )
 from src.vector_db.weaviate.visual_store import (
     ensure_visual_collection as _wv_ensure_visual_collection,
@@ -70,7 +71,7 @@ class WeaviateBackend(VectorBackend):
     def add_documents(
         self,
         client: Any,
-        documents: List[DocumentRecord],
+        documents: list[DocumentRecord],
         collection: Optional[str] = None,
     ) -> int:
         return _wv_add_documents(
@@ -81,16 +82,35 @@ class WeaviateBackend(VectorBackend):
             collection=self._col(collection),
         )
 
+    def update_chunk_content(
+        self,
+        client: Any,
+        chunk_uuid: str,
+        *,
+        text: str,
+        content_hash: str,
+        fuzzy_fingerprint: Optional[str] = None,
+        collection: Optional[str] = None,
+    ) -> bool:
+        return _wv_update_chunk_content(
+            client,
+            chunk_uuid,
+            text=text,
+            content_hash=content_hash,
+            fuzzy_fingerprint=fuzzy_fingerprint,
+            collection=self._col(collection),
+        )
+
     def search(
         self,
         client: Any,
         query: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         alpha: float,
         limit: int,
-        filters: Optional[List[SearchFilter]] = None,
+        filters: Optional[list[SearchFilter]] = None,
         collection: Optional[str] = None,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         resolved = self._col(collection)
         wv_filter = self._translate_filters(filters)
         raw = _wv_hybrid_search(
@@ -166,7 +186,7 @@ class WeaviateBackend(VectorBackend):
     def add_visual_documents(
         self,
         client: Any,
-        documents: List[dict[str, Any]],
+        documents: list[dict[str, Any]],
         collection: Optional[str] = None,
     ) -> int:
         return _wv_add_visual_documents(
@@ -212,7 +232,7 @@ class WeaviateBackend(VectorBackend):
     # Filter translation
     # ------------------------------------------------------------------
 
-    def _translate_filters(self, filters: Optional[List[SearchFilter]]) -> Any:
+    def _translate_filters(self, filters: Optional[list[SearchFilter]]) -> Any:
         if not filters:
             return None
         clauses = [self._single_filter(f) for f in filters]

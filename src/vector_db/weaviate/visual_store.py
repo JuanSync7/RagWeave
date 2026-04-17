@@ -16,7 +16,7 @@ Functional requirements covered: FR-501 – FR-507.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import weaviate
 from weaviate.classes.config import Configure, DataType, Property
@@ -83,7 +83,7 @@ def ensure_visual_collection(
 
 def add_visual_documents(
     client: weaviate.WeaviateClient,
-    documents: List[dict[str, Any]],
+    documents: list[dict[str, Any]],
     collection: str = "RAGVisualPages",
 ) -> int:
     """Batch-insert visual page objects into the named collection.
