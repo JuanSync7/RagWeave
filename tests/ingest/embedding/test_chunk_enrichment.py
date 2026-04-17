@@ -216,3 +216,48 @@ class TestEmptyChunksNoOp:
         errors = result.get("errors", state.get("errors", []))
         assert out_chunks == []
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: partial state resilience (optional upstream fields absent/None)
+# ---------------------------------------------------------------------------
+
+class TestPartialStateResilience:
+    """chunk_enrichment_node must handle None/absent optional fields gracefully."""
+
+    def test_refactored_text_none_no_error(self):
+        """refactored_text=None must not raise KeyError or AttributeError."""
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        state = _make_state(chunks=[_make_chunk("body text")])
+        state["refactored_text"] = None  # absent optional upstream field
+
+        result = chunk_enrichment_node(state)
+        errors = result.get("errors", state.get("errors", []))
+        assert errors == []
+        chunks = _get_chunks(result, state)
+        assert len(chunks) == 1
+        assert "chunk_id" in chunks[0].metadata
+
+    def test_cleaned_text_absent_no_error(self):
+        """When cleaned_text is absent from state, node must not raise KeyError."""
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        state = _make_state(chunks=[_make_chunk("body text")])
+        state.pop("cleaned_text", None)  # simulate absent optional upstream field
+
+        result = chunk_enrichment_node(state)
+        errors = result.get("errors", state.get("errors", []))
+        assert errors == []
+
+    def test_document_id_defaults_to_empty_string(self):
+        """When document_id is absent from state, chunk.metadata['document_id'] is ''."""
+        from src.ingest.embedding.nodes.chunk_enrichment import chunk_enrichment_node
+
+        state = _make_state(chunks=[_make_chunk("text")])
+        state.pop("document_id", None)  # document_id set later by document_storage_node
+
+        result = chunk_enrichment_node(state)
+        chunk = _get_chunks(result, state)[0]
+        # document_id must be present in metadata and be an empty string (not raise)
+        assert chunk.metadata.get("document_id") == ""

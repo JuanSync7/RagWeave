@@ -108,20 +108,21 @@ class TestLLMEnabledPath:
 class TestFallbackPath:
     """When LLM is disabled or returns {}, fall back to heuristic extraction."""
 
-    def test_llm_disabled_uses_fallback(self):
-        """enable_llm_metadata=False: no LLM call, fallback used."""
+    def test_llm_disabled_skips_generation(self):
+        """enable_llm_metadata=False: node returns skipped log entry; no LLM or fallback call."""
         state = _make_state(enable_llm=False)
-        fallback_keywords = ["term1", "term2"]
 
         with (
             patch(_LLM_JSON) as mock_llm,
-            patch(_FALLBACK, return_value=fallback_keywords),
+            patch(_FALLBACK) as mock_fallback,
         ):
             result = _run(state)
 
-        # _llm_json is always called; it returns {} when disabled, causing fallback to be used
-        keywords = _get("metadata_keywords", result, state)
-        assert set(keywords).issuperset({"term1", "term2"}) or keywords == fallback_keywords
+        # Node short-circuits when LLM is disabled; neither LLM nor fallback is called.
+        mock_llm.assert_not_called()
+        mock_fallback.assert_not_called()
+        # The result contains only a processing_log entry indicating the stage was skipped.
+        assert any("skipped" in entry for entry in result.get("processing_log", []))
 
     def test_llm_empty_response_uses_fallback(self):
         """_llm_json returns {} → fallback keywords and first-sentence summary."""
@@ -249,3 +250,41 @@ class TestChunkProjection:
         assert keywords is not None
         out_chunks = _get("chunks", result, state)
         assert out_chunks == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: partial state resilience (optional upstream fields absent/None)
+# ---------------------------------------------------------------------------
+
+class TestPartialStateResilience:
+    """metadata_generation_node must handle None/absent optional upstream fields."""
+
+    def test_refactored_text_none_falls_back_to_cleaned(self):
+        """refactored_text=None must not raise; node falls back to cleaned_text."""
+        state = _make_state(enable_llm=True, cleaned="Some content here.")
+        state["refactored_text"] = None  # simulate absent optional upstream field
+
+        with (
+            patch(_LLM_JSON, return_value={"summary": "ok", "keywords": ["a"]}),
+            patch(_FALLBACK, return_value=[]),
+        ):
+            result = _run(state)
+
+        # Must not raise; summary should be populated.
+        summary = _get("metadata_summary", result, state)
+        assert summary is not None
+
+    def test_refactored_text_and_cleaned_empty_no_crash(self):
+        """When refactored_text is None and cleaned_text is empty string, node must not raise."""
+        state = _make_state(enable_llm=True, cleaned="")
+        state["refactored_text"] = None  # simulate absent optional upstream field
+
+        with (
+            patch(_LLM_JSON, return_value={}),
+            patch(_FALLBACK, return_value=["fallback"]),
+        ):
+            result = _run(state)
+
+        # Must not raise; result must be a dict.
+        assert result is not None
+        assert isinstance(result, dict)

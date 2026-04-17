@@ -191,3 +191,21 @@ def test_both_texts_empty_returns_empty():
     state = _make_state(cleaned="", refactored="")
     result = cross_reference_extraction_node(state)
     assert result["cross_references"] == []
+
+
+def test_partial_state_refactored_text_none():
+    """When refactored_text is None (absent optional field) cleaned_text is used."""
+    state = _make_state(cleaned="See DOC-7777 here.", refactored="")
+    state["refactored_text"] = None  # simulate absent optional upstream field
+    result = cross_reference_extraction_node(state)
+    values = _ref_values(result.get("cross_references", []))
+    assert any("DOC-7777" in v for v in values)
+
+
+def test_partial_state_cleaned_text_absent():
+    """When cleaned_text is absent from state, node returns cross_references (possibly empty)."""
+    state = _make_state(cleaned="DOC-1234", refactored="")
+    state.pop("cleaned_text", None)  # simulate absent optional upstream field
+    # node uses .get() so should gracefully fall back to empty string
+    result = cross_reference_extraction_node(state)
+    assert "cross_references" in result or "processing_log" in result

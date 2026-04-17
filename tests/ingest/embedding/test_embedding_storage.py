@@ -190,3 +190,47 @@ def test_all_chunks_fail_stored_count_zero():
         result = embedding_storage_node(state)
     assert result.get("stored_count", 0) == 0
     assert len(result.get("errors", [])) >= 1
+
+
+def test_should_skip_flag_skips_storage():
+    """When should_skip=True the node returns stored_count=0 without calling add_documents."""
+    chunks = [_make_chunk("some text")]
+    state = _make_state(chunks=chunks)
+    state["should_skip"] = True
+    with patch(_ADD_DOCS) as mock_add, patch(_ENSURE):
+        result = embedding_storage_node(state)
+    assert result["stored_count"] == 0
+    mock_add.assert_not_called()
+
+
+def test_vector_store_raises_propagated_as_error():
+    """When add_documents raises, the error is caught and stored in state.errors."""
+    chunks = [_make_chunk()]
+    state = _make_state(chunks=chunks)
+    state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+    with patch(_ADD_DOCS, side_effect=RuntimeError("weaviate down")), patch(_ENSURE):
+        result = embedding_storage_node(state)
+    assert len(result.get("errors", [])) >= 1
+    assert any("weaviate down" in str(e) or "embedding_storage" in str(e)
+               for e in result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Tests: partial state resilience (optional upstream fields absent/None)
+# ---------------------------------------------------------------------------
+
+def test_enriched_content_fallback_to_chunk_text():
+    """When enriched_content metadata is absent, node falls back to chunk.text."""
+    chunk = _make_chunk("raw chunk text")
+    # No enriched_content metadata key set (simulates prior node being skipped).
+    assert "enriched_content" not in chunk.metadata
+    state = _make_state(chunks=[chunk])
+    state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
+    with patch(_ADD_DOCS, return_value=1) as mock_add, patch(_ENSURE):
+        result = embedding_storage_node(state)
+    # Node must not raise; must attempt storage.
+    assert result.get("stored_count", 0) == 1
+    # Verify the text passed to embedder is the chunk's raw text.
+    embed_call_args = state["runtime"].embedder.embed_documents.call_args
+    texts_passed = embed_call_args[0][0]
+    assert texts_passed == ["raw chunk text"]

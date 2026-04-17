@@ -238,3 +238,82 @@ class TestLlmFailures:
 
         result = _llm_json("prompt", _make_config())
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Keyword extraction via LLM — regression tests
+# ---------------------------------------------------------------------------
+
+class TestKeywordExtraction:
+    """Regression tests for keyword extraction patterns via _llm_json.
+
+    These tests verify that keyword extraction prompts return usable output,
+    handle LLM timeout gracefully, and degrade cleanly on malformed output.
+    """
+
+    @patch("src.ingest.support.llm.get_llm_provider")
+    def test_keyword_extraction_happy_path(self, mock_get_provider):
+        """LLM returning a keywords list in JSON produces a usable dict."""
+        mock_provider = MagicMock()
+        mock_provider.json_completion.return_value = _make_mock_response(
+            '{"keywords": ["clock", "timing", "setup", "hold"]}'
+        )
+        mock_get_provider.return_value = mock_provider
+
+        result = _llm_json(
+            "Extract keywords from: timing analysis for clock domain crossing",
+            _make_config(),
+        )
+        assert isinstance(result, dict)
+        assert "keywords" in result
+        assert "clock" in result["keywords"]
+
+    @patch("src.ingest.support.llm.get_llm_provider")
+    def test_keyword_extraction_timeout_returns_empty(self, mock_get_provider):
+        """TimeoutError during keyword extraction must return {} — no exception propagated."""
+        mock_provider = MagicMock()
+        mock_provider.json_completion.side_effect = TimeoutError("LLM timed out")
+        mock_get_provider.return_value = mock_provider
+
+        result = _llm_json(
+            "Extract keywords from: important document content",
+            _make_config(timeout=1),
+        )
+        assert result == {}
+
+    @patch("src.ingest.support.llm.get_llm_provider")
+    def test_keyword_extraction_malformed_output_fallback(self, mock_get_provider):
+        """LLM returning non-JSON output for keyword extraction must return {} gracefully."""
+        mock_provider = MagicMock()
+        mock_provider.json_completion.return_value = _make_mock_response(
+            "I found the following keywords: clock, timing, setup"
+        )
+        mock_get_provider.return_value = mock_provider
+
+        result = _llm_json(
+            "Extract keywords from: clock domain timing setup",
+            _make_config(),
+        )
+        assert isinstance(result, dict)
+
+    @patch("src.ingest.support.llm.get_llm_provider")
+    def test_keyword_extraction_empty_keywords_list(self, mock_get_provider):
+        """LLM returning an empty keywords array must produce a dict with empty list."""
+        mock_provider = MagicMock()
+        mock_provider.json_completion.return_value = _make_mock_response(
+            '{"keywords": []}'
+        )
+        mock_get_provider.return_value = mock_provider
+
+        result = _llm_json("Extract keywords from: ...", _make_config())
+        assert result.get("keywords") == []
+
+    @patch("src.ingest.support.llm.get_llm_provider")
+    def test_keyword_extraction_disabled_returns_empty_without_call(self, mock_get_provider):
+        """When LLM is disabled, keyword extraction must return {} and never call the provider."""
+        result = _llm_json(
+            "Extract keywords from: some text",
+            _make_config(enabled=False),
+        )
+        assert result == {}
+        mock_get_provider.assert_not_called()

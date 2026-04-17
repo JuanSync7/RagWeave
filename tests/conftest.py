@@ -217,9 +217,16 @@ def _install_stub_modules() -> None:
         minio_error_mod = types.ModuleType("minio.error")
 
         class S3Error(Exception):
-            """Stub for minio.error.S3Error."""
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args)
+            """Stub for minio.error.S3Error.
+
+            The real minio S3Error stores the error code as ``self.code``.
+            Production code (e.g. src/db/minio/store.py) checks ``exc.code``
+            to distinguish recoverable NoSuchKey errors from real failures.
+            """
+
+            def __init__(self, code: str = "", *args, **kwargs):
+                super().__init__(code, *args)
+                self.code = code
 
         minio_error_mod.S3Error = S3Error
         minio_mod.error = minio_error_mod
@@ -228,6 +235,167 @@ def _install_stub_modules() -> None:
         # minio.commonconfig — sometimes imported for ObjectWriteResult etc.
         minio_commonconfig = types.ModuleType("minio.commonconfig")
         sys.modules["minio.commonconfig"] = minio_commonconfig
+
+    if "PIL" not in sys.modules:
+        pil = types.ModuleType("PIL")
+        pil_image = types.ModuleType("PIL.Image")
+
+        class Image:
+            size = (0, 0)
+
+            @staticmethod
+            def open(*args, **kwargs):
+                return Image()
+
+            def convert(self, mode):
+                return self
+
+            def tobytes(self):
+                return b""
+
+        # `from PIL import Image` resolves to the PIL.Image module; callers
+        # then call Image.open(...) at module level, not on the class.
+        pil_image.Image = Image
+        pil_image.open = Image.open
+        pil.Image = pil_image
+        sys.modules["PIL"] = pil
+        sys.modules["PIL.Image"] = pil_image
+
+    if "temporalio" not in sys.modules:
+        temporalio = types.ModuleType("temporalio")
+
+        activity_mod = types.ModuleType("temporalio.activity")
+        activity_mod.defn = lambda fn=None, **kw: (fn if fn else lambda f: f)
+
+        workflow_mod = types.ModuleType("temporalio.workflow")
+        workflow_mod.defn = lambda fn=None, **kw: (fn if fn else lambda f: f)
+        workflow_mod.run = lambda fn: fn
+
+        class _UnsafeCtx:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            @staticmethod
+            def imports_passed_through():
+                return _UnsafeCtx()
+
+        workflow_mod.unsafe = _UnsafeCtx()
+
+        common_mod = types.ModuleType("temporalio.common")
+        common_mod.RetryPolicy = type("RetryPolicy", (), {"__init__": lambda self, **kw: None})
+
+        client_mod = types.ModuleType("temporalio.client")
+        client_mod.Client = type("Client", (), {
+            "connect": staticmethod(lambda *a, **kw: None),
+        })
+
+        worker_mod = types.ModuleType("temporalio.worker")
+        worker_mod.Worker = type("Worker", (), {"__init__": lambda self, *a, **kw: None})
+
+        service_mod = types.ModuleType("temporalio.service")
+        service_mod.RPCError = type("RPCError", (Exception,), {})
+
+        api_mod = types.ModuleType("temporalio.api")
+        enums_mod = types.ModuleType("temporalio.api.enums")
+        enums_v1_mod = types.ModuleType("temporalio.api.enums.v1")
+        enums_v1_mod.TaskQueueType = type("TaskQueueType", (), {})
+
+        taskqueue_mod = types.ModuleType("temporalio.api.taskqueue")
+        taskqueue_v1_mod = types.ModuleType("temporalio.api.taskqueue.v1")
+        taskqueue_v1_mod.TaskQueue = type("TaskQueue", (), {"__init__": lambda self, **kw: None})
+
+        workflowservice_mod = types.ModuleType("temporalio.api.workflowservice")
+        workflowservice_v1_mod = types.ModuleType("temporalio.api.workflowservice.v1")
+        workflowservice_v1_mod.DescribeTaskQueueRequest = type("DescribeTaskQueueRequest", (), {"__init__": lambda self, **kw: None})
+        workflowservice_v1_mod.GetSystemInfoRequest = type("GetSystemInfoRequest", (), {"__init__": lambda self, **kw: None})
+
+        temporalio.activity = activity_mod
+        temporalio.workflow = workflow_mod
+        temporalio.common = common_mod
+        temporalio.client = client_mod
+        temporalio.worker = worker_mod
+        temporalio.service = service_mod
+        temporalio.api = api_mod
+        sys.modules["temporalio"] = temporalio
+        sys.modules["temporalio.activity"] = activity_mod
+        sys.modules["temporalio.workflow"] = workflow_mod
+        sys.modules["temporalio.common"] = common_mod
+        sys.modules["temporalio.client"] = client_mod
+        sys.modules["temporalio.worker"] = worker_mod
+        sys.modules["temporalio.service"] = service_mod
+        sys.modules["temporalio.api"] = api_mod
+        sys.modules["temporalio.api.enums"] = enums_mod
+        sys.modules["temporalio.api.enums.v1"] = enums_v1_mod
+        sys.modules["temporalio.api.taskqueue"] = taskqueue_mod
+        sys.modules["temporalio.api.taskqueue.v1"] = taskqueue_v1_mod
+        sys.modules["temporalio.api.workflowservice"] = workflowservice_mod
+        sys.modules["temporalio.api.workflowservice.v1"] = workflowservice_v1_mod
+
+    if "mcp" not in sys.modules:
+        mcp = types.ModuleType("mcp")
+        mcp_server = types.ModuleType("mcp.server")
+        mcp_server_fastmcp = types.ModuleType("mcp.server.fastmcp")
+
+        class FastMCP:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def tool(self, *args, **kwargs):
+                return lambda fn: fn
+
+            def resource(self, *args, **kwargs):
+                return lambda fn: fn
+
+            def run(self, *args, **kwargs):
+                pass
+
+        mcp_server_fastmcp.FastMCP = FastMCP
+        mcp.server = mcp_server
+        mcp_server.fastmcp = mcp_server_fastmcp
+        sys.modules["mcp"] = mcp
+        sys.modules["mcp.server"] = mcp_server
+        sys.modules["mcp.server.fastmcp"] = mcp_server_fastmcp
+
+    if "prometheus_client" not in sys.modules:
+        prom = types.ModuleType("prometheus_client")
+
+        class _MetricBase:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def labels(self, **kwargs):
+                return self
+
+            def inc(self, amount=1):
+                pass
+
+            def dec(self, amount=1):
+                pass
+
+            def set(self, value):
+                pass
+
+            def observe(self, value):
+                pass
+
+        class Counter(_MetricBase):
+            pass
+
+        class Gauge(_MetricBase):
+            pass
+
+        class Histogram(_MetricBase):
+            pass
+
+        prom.CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+        prom.generate_latest = lambda registry=None: b""
+        prom.Counter = Counter
+        prom.Gauge = Gauge
+        prom.Histogram = Histogram
+        sys.modules["prometheus_client"] = prom
 
     if "weaviate" not in sys.modules:
         weaviate = types.ModuleType("weaviate")

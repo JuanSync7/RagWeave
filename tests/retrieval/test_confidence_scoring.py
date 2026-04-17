@@ -197,3 +197,64 @@ class TestComputeCompositeConfidence:
         )
         assert result.composite == pytest.approx(0.8)
         assert result.retrieval_weight == 1.0
+
+    def test_invalid_weights_raises(self):
+        """Weights that do not sum to 1.0 must raise ValueError."""
+        with pytest.raises(ValueError, match="sum to 1.0"):
+            compute_composite_confidence(
+                reranker_scores=[0.8],
+                llm_confidence_text="high",
+                answer="test.",
+                retrieved_texts=["test."],
+                retrieval_weight=0.5,
+                llm_weight=0.5,
+                citation_weight=0.5,
+            )
+
+    def test_valid_weights_do_not_raise(self):
+        """Weights that sum exactly to 1.0 must not raise."""
+        result = compute_composite_confidence(
+            reranker_scores=[0.6],
+            llm_confidence_text="medium",
+            answer="test.",
+            retrieved_texts=["test."],
+            retrieval_weight=0.4,
+            llm_weight=0.4,
+            citation_weight=0.2,
+        )
+        assert 0.0 <= result.composite <= 1.0
+
+    @pytest.mark.parametrize("bad_score", [-0.5, -1.0, 1.5, 2.0])
+    def test_retrieval_score_clamped(self, bad_score):
+        """Individual reranker scores outside [0, 1] are clamped, not crashed."""
+        result = compute_composite_confidence(
+            reranker_scores=[bad_score],
+            llm_confidence_text="medium",
+            answer="test answer.",
+            retrieved_texts=["test answer."],
+            retrieval_weight=1.0,
+            llm_weight=0.0,
+            citation_weight=0.0,
+        )
+        assert 0.0 <= result.composite <= 1.0
+
+    def test_composite_formula_arithmetic(self):
+        """Verify weighted composite arithmetic with known, hand-computable inputs.
+
+        retrieval = top-1 of [0.8] = 0.8
+        llm       = parse_llm_confidence("high") = 0.85
+        citation  = compute_citation_coverage("", [...]) = 1.0  (empty answer → vacuously 1.0)
+        composite = 0.50*0.8 + 0.30*0.85 + 0.20*1.0
+                  = 0.40 + 0.255 + 0.20 = 0.855
+        """
+        result = compute_composite_confidence(
+            reranker_scores=[0.8],
+            llm_confidence_text="high",
+            answer="",           # empty answer → citation_score = 1.0
+            retrieved_texts=["any text"],
+            retrieval_weight=0.50,
+            llm_weight=0.30,
+            citation_weight=0.20,
+        )
+        expected = 0.50 * 0.8 + 0.30 * 0.85 + 0.20 * 1.0
+        assert result.composite == pytest.approx(expected, abs=1e-6)

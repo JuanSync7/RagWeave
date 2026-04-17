@@ -25,6 +25,7 @@ from src.ingest.common.shared import (
     map_chunk_provenance,
     append_processing_log,
 )
+from src.common.utils import parse_json_object
 
 
 # ---------------------------------------------------------------------------
@@ -350,3 +351,80 @@ class TestAppendProcessingLog:
         assert "stage1:ok" in log2
         assert "stage2:ok" in log2
         assert len(log2) == 2
+
+
+# ---------------------------------------------------------------------------
+# parse_json_object — JSON parsing edge cases (regression)
+# ---------------------------------------------------------------------------
+
+class TestParseJsonObject:
+    """Regression tests for parse_json_object JSON extraction helper.
+
+    These tests target the three-strategy cascade: direct orjson parse,
+    markdown fence strip, and raw_decode-from-first-brace.
+    """
+
+    def test_valid_json_object_returned(self):
+        result = parse_json_object('{"a": 1, "b": "hello"}')
+        assert result == {"a": 1, "b": "hello"}
+
+    def test_nested_braces_in_string_values(self):
+        """Values containing braces must NOT confuse the parser — regression for brace-counting bugs."""
+        raw = '{"a": "foo {bar} baz", "b": 2}'
+        result = parse_json_object(raw)
+        assert result == {"a": "foo {bar} baz", "b": 2}
+
+    def test_truncated_json_returns_empty(self):
+        """Truncated input must not crash — returns {} gracefully."""
+        result = parse_json_object('{"key": "val')
+        assert result == {}
+
+    def test_markdown_fence_json_extracted(self):
+        """JSON wrapped in ```json ... ``` fences must be parsed correctly."""
+        raw = "```json\n{\"answer\": 42}\n```"
+        result = parse_json_object(raw)
+        assert result == {"answer": 42}
+
+    def test_markdown_fence_without_language_tag(self):
+        """JSON wrapped in bare ``` fences must also be parsed correctly."""
+        raw = "```\n{\"x\": \"y\"}\n```"
+        result = parse_json_object(raw)
+        assert result == {"x": "y"}
+
+    def test_no_json_found_returns_empty(self):
+        """Input with no JSON object must return {} without raising."""
+        result = parse_json_object("There is no JSON here at all.")
+        assert result == {}
+
+    def test_empty_string_returns_empty(self):
+        """Empty string must return {} gracefully."""
+        result = parse_json_object("")
+        assert result == {}
+
+    def test_whitespace_only_returns_empty(self):
+        """Whitespace-only input must return {} gracefully."""
+        result = parse_json_object("   \n\t  ")
+        assert result == {}
+
+    def test_prose_wrapped_json_extracted(self):
+        """JSON embedded in surrounding prose must be extracted via raw_decode."""
+        raw = 'Here is the result:\n{"status": "ok"}\nLet me know if helpful.'
+        result = parse_json_object(raw)
+        assert result == {"status": "ok"}
+
+    def test_returns_dict_type(self):
+        """Return value must always be a dict, never None or another type."""
+        for raw in ['{"k": 1}', "", "not json", "```json\n{}\n```"]:
+            result = parse_json_object(raw)
+            assert isinstance(result, dict), f"Expected dict for input {raw!r}, got {type(result)}"
+
+    def test_json_array_returns_empty(self):
+        """A top-level JSON array (not object) must return {} since only objects are valid."""
+        result = parse_json_object("[1, 2, 3]")
+        assert result == {}
+
+    def test_deeply_nested_object(self):
+        """Deeply nested JSON must be parsed correctly without hitting recursion issues."""
+        raw = '{"a": {"b": {"c": {"d": "deep"}}}}'
+        result = parse_json_object(raw)
+        assert result == {"a": {"b": {"c": {"d": "deep"}}}}

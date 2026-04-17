@@ -4,9 +4,12 @@
 # Verifies that pyproject.toml and requirements.txt stay in sync, all third-party
 # imports are declared, ports/URLs are configurable via env vars, and README
 # documents installation steps.
+# Also contains exhaustive runtime tests for validate_all_config() and
+# validate_visual_retrieval_config() covering every validation rule enforced.
 # Exports: TestDependencyCompleteness, TestRequirementsTxtSync, TestReadmeInstallation,
-#          TestConfigNotHardcoded, TestDockerfileBuildDeps
-# Deps: pytest, pathlib, re, ast, tomllib
+#          TestConfigNotHardcoded, TestDockerfileBuildDeps, TestValidateAllConfig,
+#          TestValidateVisualRetrievalConfig
+# Deps: pytest, pathlib, re, ast, tomllib, config.settings
 # @end-summary
 """
 Static project configuration tests.
@@ -21,6 +24,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+import config.settings as _settings
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -547,3 +552,396 @@ class TestDockerfileBuildDeps:
         assert "RAG_API_PORT" in text, (
             "Dockerfile.api should use RAG_API_PORT environment variable"
         )
+
+
+# =========================================================================
+# Shared helpers for validate_*_config() tests
+# =========================================================================
+
+def _patch_and_call(monkeypatch, overrides: dict, fn) -> None:
+    """Apply attribute overrides to _settings, then invoke fn."""
+    for attr, val in overrides.items():
+        monkeypatch.setattr(_settings, attr, val)
+    fn()
+
+
+def _assert_valid(monkeypatch, overrides: dict, fn) -> None:
+    """Apply overrides and assert fn() raises no exception."""
+    _patch_and_call(monkeypatch, overrides, fn)
+
+
+def _assert_invalid(monkeypatch, overrides: dict, fn) -> None:
+    """Apply overrides and assert fn() raises ValueError."""
+    with pytest.raises(ValueError):
+        _patch_and_call(monkeypatch, overrides, fn)
+
+
+# =========================================================================
+# Test Class F: validate_all_config() — exhaustive rule coverage
+# =========================================================================
+
+
+class TestValidateAllConfig:
+    """Exhaustive tests for every rule in validate_all_config().
+
+    Each rule gets at least one passing case and one failing case.
+    monkeypatch.setattr is used to override module-level settings values
+    without touching environment variables or reloading the module.
+    """
+
+    @staticmethod
+    def _ok(monkeypatch, overrides: dict):
+        _assert_valid(monkeypatch, overrides, _settings.validate_all_config)
+
+    @staticmethod
+    def _fail(monkeypatch, overrides: dict):
+        _assert_invalid(monkeypatch, overrides, _settings.validate_all_config)
+
+    # ------------------------------------------------------------------
+    # Rule 1: Confidence threshold ordering — HIGH >= LOW
+    # ------------------------------------------------------------------
+
+    def test_confidence_threshold_ordering_valid(self, monkeypatch):
+        """HIGH=0.8, LOW=0.3 satisfies the ordering constraint."""
+        self._ok(monkeypatch, {
+            "RAG_CONFIDENCE_HIGH_THRESHOLD": 0.8,
+            "RAG_CONFIDENCE_LOW_THRESHOLD": 0.3,
+        })
+
+    def test_confidence_threshold_ordering_equal_valid(self, monkeypatch):
+        """HIGH == LOW is a valid edge case (ordering is satisfied)."""
+        self._ok(monkeypatch, {
+            "RAG_CONFIDENCE_HIGH_THRESHOLD": 0.5,
+            "RAG_CONFIDENCE_LOW_THRESHOLD": 0.5,
+        })
+
+    def test_confidence_threshold_ordering_invalid(self, monkeypatch):
+        """HIGH < LOW must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_CONFIDENCE_HIGH_THRESHOLD": 0.2,
+            "RAG_CONFIDENCE_LOW_THRESHOLD": 0.8,
+        })
+
+    # ------------------------------------------------------------------
+    # Rule 2: Quality threshold ordering — STRONG >= MODERATE >= WEAK
+    # ------------------------------------------------------------------
+
+    def test_quality_threshold_ordering_valid(self, monkeypatch):
+        """STRONG=0.9, MODERATE=0.6, WEAK=0.3 satisfies the ordering."""
+        self._ok(monkeypatch, {
+            "RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD": 0.9,
+            "RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD": 0.6,
+            "RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD": 0.3,
+        })
+
+    def test_quality_threshold_strong_equals_moderate_valid(self, monkeypatch):
+        """STRONG == MODERATE is still valid."""
+        self._ok(monkeypatch, {
+            "RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD": 0.5,
+            "RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD": 0.5,
+            "RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD": 0.2,
+        })
+
+    @pytest.mark.parametrize("strong,moderate,weak", [
+        (0.4, 0.6, 0.2),   # STRONG < MODERATE
+        (0.9, 0.3, 0.5),   # MODERATE < WEAK
+        (0.3, 0.6, 0.9),   # all inverted
+    ])
+    def test_quality_threshold_ordering_invalid(self, monkeypatch, strong, moderate, weak):
+        """Any violation of STRONG >= MODERATE >= WEAK must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_RETRIEVAL_QUALITY_STRONG_THRESHOLD": strong,
+            "RAG_RETRIEVAL_QUALITY_MODERATE_THRESHOLD": moderate,
+            "RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD": weak,
+        })
+
+    # ------------------------------------------------------------------
+    # Rule 3: All timeouts must be > 0
+    # ------------------------------------------------------------------
+
+    _TIMEOUT_ATTRS = [
+        "RAG_WORKFLOW_DEFAULT_TIMEOUT_MS",
+        "RAG_RETRIEVAL_TIMEOUT_MS",
+        "QUERY_PROCESSING_TIMEOUT",
+        "RAG_INGESTION_LLM_TIMEOUT_SECONDS",
+        "RAG_INGESTION_VISION_TIMEOUT_SECONDS",
+        "RAG_NEMO_RAIL_TIMEOUT_SECONDS",
+    ]
+
+    def test_all_timeouts_positive_valid(self, monkeypatch):
+        """All timeouts set to 1 (minimal positive) should pass."""
+        overrides = {attr: 1 for attr in self._TIMEOUT_ATTRS}
+        self._ok(monkeypatch, overrides)
+
+    @pytest.mark.parametrize("attr", _TIMEOUT_ATTRS)
+    def test_timeout_zero_invalid(self, monkeypatch, attr):
+        """Setting any single timeout to 0 must raise ValueError."""
+        self._fail(monkeypatch, {attr: 0})
+
+    @pytest.mark.parametrize("attr", _TIMEOUT_ATTRS)
+    def test_timeout_negative_invalid(self, monkeypatch, attr):
+        """Setting any single timeout to -1 must raise ValueError."""
+        self._fail(monkeypatch, {attr: -1})
+
+    # ------------------------------------------------------------------
+    # Rule 4: Port in [1, 65535]
+    # ------------------------------------------------------------------
+
+    def test_port_valid_low(self, monkeypatch):
+        """Port=1 is the minimum valid value."""
+        self._ok(monkeypatch, {"RAG_API_PORT": 1})
+
+    def test_port_valid_high(self, monkeypatch):
+        """Port=65535 is the maximum valid value."""
+        self._ok(monkeypatch, {"RAG_API_PORT": 65535})
+
+    def test_port_valid_typical(self, monkeypatch):
+        """Port=8000 is a typical valid value."""
+        self._ok(monkeypatch, {"RAG_API_PORT": 8000})
+
+    @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
+    def test_port_invalid(self, monkeypatch, port):
+        """Ports outside [1, 65535] must raise ValueError."""
+        self._fail(monkeypatch, {"RAG_API_PORT": port})
+
+    # ------------------------------------------------------------------
+    # Rule 5: 0.0–1.0 range checks
+    # ------------------------------------------------------------------
+
+    _FLOAT_01_ATTRS = [
+        "QUERY_CONFIDENCE_THRESHOLD",
+        "SEMANTIC_SIMILARITY_THRESHOLD",
+        "RAG_NEMO_TOXICITY_THRESHOLD",
+        "RAG_NEMO_FAITHFULNESS_THRESHOLD",
+        "RAG_NEMO_INTENT_CONFIDENCE_THRESHOLD",
+        "RAG_NEMO_PII_SCORE_THRESHOLD",
+        "RAG_CONFIDENCE_HIGH_THRESHOLD",
+        "RAG_CONFIDENCE_LOW_THRESHOLD",
+        "RAG_CONFIDENCE_RETRIEVAL_WEIGHT",
+        "RAG_CONFIDENCE_LLM_WEIGHT",
+        "RAG_CONFIDENCE_CITATION_WEIGHT",
+    ]
+
+    def test_float_thresholds_all_valid(self, monkeypatch):
+        """All float thresholds set to 0.5 should pass."""
+        overrides = {attr: 0.5 for attr in self._FLOAT_01_ATTRS}
+        # Ensure ordering constraints are also satisfied
+        overrides["RAG_CONFIDENCE_HIGH_THRESHOLD"] = 0.7
+        overrides["RAG_CONFIDENCE_LOW_THRESHOLD"] = 0.3
+        self._ok(monkeypatch, overrides)
+
+    def test_float_threshold_boundary_zero_valid(self, monkeypatch):
+        """Threshold value of 0.0 is the inclusive lower bound — must pass."""
+        # Only test attributes without ordering constraints against other attrs
+        self._ok(monkeypatch, {"SEMANTIC_SIMILARITY_THRESHOLD": 0.0})
+
+    def test_float_threshold_boundary_one_valid(self, monkeypatch):
+        """Threshold value of 1.0 is the inclusive upper bound — must pass."""
+        self._ok(monkeypatch, {"SEMANTIC_SIMILARITY_THRESHOLD": 1.0})
+
+    @pytest.mark.parametrize("attr", _FLOAT_01_ATTRS)
+    def test_float_threshold_below_zero_invalid(self, monkeypatch, attr):
+        """Any threshold set to -0.1 must raise ValueError."""
+        # For confidence ordering attrs, ensure the pair doesn't accidentally satisfy ordering
+        overrides = {attr: -0.1}
+        if attr == "RAG_CONFIDENCE_HIGH_THRESHOLD":
+            overrides["RAG_CONFIDENCE_LOW_THRESHOLD"] = -0.2
+        elif attr == "RAG_CONFIDENCE_LOW_THRESHOLD":
+            overrides["RAG_CONFIDENCE_HIGH_THRESHOLD"] = 0.5
+        self._fail(monkeypatch, overrides)
+
+    @pytest.mark.parametrize("attr", _FLOAT_01_ATTRS)
+    def test_float_threshold_above_one_invalid(self, monkeypatch, attr):
+        """Any threshold set to 1.1 must raise ValueError."""
+        overrides = {attr: 1.1}
+        if attr == "RAG_CONFIDENCE_LOW_THRESHOLD":
+            overrides["RAG_CONFIDENCE_HIGH_THRESHOLD"] = 1.1
+        self._fail(monkeypatch, overrides)
+
+    # ------------------------------------------------------------------
+    # Rule 9: Positive integers
+    # ------------------------------------------------------------------
+
+    _POSITIVE_INT_ATTRS = [
+        "GENERATION_MAX_TOKENS",
+        "LLM_MAX_TOKENS",
+        "RAG_WORKER_CONCURRENCY",
+        "RATE_LIMIT_WINDOW_SECONDS",
+        "RERANKER_BATCH_SIZE",
+        "RAG_INGESTION_LLM_MAX_KEYWORDS",
+    ]
+
+    def test_positive_integers_valid(self, monkeypatch):
+        """All positive-int settings set to 1 should pass."""
+        overrides = {attr: 1 for attr in self._POSITIVE_INT_ATTRS}
+        self._ok(monkeypatch, overrides)
+
+    @pytest.mark.parametrize("attr", _POSITIVE_INT_ATTRS)
+    def test_positive_integer_zero_invalid(self, monkeypatch, attr):
+        """Setting any positive-integer setting to 0 must raise ValueError."""
+        self._fail(monkeypatch, {attr: 0})
+
+    @pytest.mark.parametrize("attr", _POSITIVE_INT_ATTRS)
+    def test_positive_integer_negative_invalid(self, monkeypatch, attr):
+        """Setting any positive-integer setting to -5 must raise ValueError."""
+        self._fail(monkeypatch, {attr: -5})
+
+    # ------------------------------------------------------------------
+    # Vision feature dependency checks
+    # ------------------------------------------------------------------
+
+    def test_vision_enabled_with_provider_and_model_valid(self, monkeypatch):
+        """Vision enabled with both provider and model set should pass."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISION_ENABLED": True,
+            "RAG_INGESTION_VISION_PROVIDER": "openai",
+            "RAG_INGESTION_VISION_MODEL": "gpt-4o",
+        })
+
+    def test_vision_disabled_no_provider_valid(self, monkeypatch):
+        """Vision disabled with no provider/model is valid."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISION_ENABLED": False,
+            "RAG_INGESTION_VISION_PROVIDER": "",
+            "RAG_INGESTION_VISION_MODEL": "",
+        })
+
+    def test_vision_enabled_missing_provider_invalid(self, monkeypatch):
+        """Vision enabled but no provider must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_INGESTION_VISION_ENABLED": True,
+            "RAG_INGESTION_VISION_PROVIDER": "",
+            "RAG_INGESTION_VISION_MODEL": "gpt-4o",
+        })
+
+    def test_vision_enabled_missing_model_invalid(self, monkeypatch):
+        """Vision enabled but no model must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_INGESTION_VISION_ENABLED": True,
+            "RAG_INGESTION_VISION_PROVIDER": "openai",
+            "RAG_INGESTION_VISION_MODEL": "",
+        })
+
+    def test_vision_enabled_missing_both_invalid(self, monkeypatch):
+        """Vision enabled but neither provider nor model must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_INGESTION_VISION_ENABLED": True,
+            "RAG_INGESTION_VISION_PROVIDER": "",
+            "RAG_INGESTION_VISION_MODEL": "",
+        })
+
+    # ------------------------------------------------------------------
+    # Passing baseline — unmodified defaults must pass
+    # ------------------------------------------------------------------
+
+    def test_default_config_passes(self):
+        """The module's default (env-derived) values must pass validation."""
+        _settings.validate_all_config()
+
+
+# =========================================================================
+# Test Class G: validate_visual_retrieval_config()
+# =========================================================================
+
+
+class TestValidateVisualRetrievalConfig:
+    """Tests for validate_visual_retrieval_config() — called when visual
+    retrieval is enabled."""
+
+    @staticmethod
+    def _ok(monkeypatch, overrides: dict):
+        _assert_valid(monkeypatch, overrides, _settings.validate_visual_retrieval_config)
+
+    @staticmethod
+    def _fail(monkeypatch, overrides: dict):
+        _assert_invalid(monkeypatch, overrides, _settings.validate_visual_retrieval_config)
+
+    # ------------------------------------------------------------------
+    # Target collection must be non-empty
+    # ------------------------------------------------------------------
+
+    def test_target_collection_non_empty_valid(self, monkeypatch):
+        """Non-empty target collection with valid thresholds should pass."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "MyCollection",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.5,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 3600,
+        })
+
+    def test_target_collection_empty_invalid(self, monkeypatch):
+        """Empty target collection must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.5,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 3600,
+        })
+
+    # ------------------------------------------------------------------
+    # Score threshold in [0.0, 1.0]
+    # ------------------------------------------------------------------
+
+    def test_score_threshold_valid_min(self, monkeypatch):
+        """Score threshold of 0.0 is valid."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "Col",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.0,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 3600,
+        })
+
+    def test_score_threshold_valid_max(self, monkeypatch):
+        """Score threshold of 1.0 is valid."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "Col",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 1.0,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 3600,
+        })
+
+    @pytest.mark.parametrize("score", [-0.1, 1.1, -1.0, 2.0])
+    def test_score_threshold_out_of_range_invalid(self, monkeypatch, score):
+        """Score threshold outside [0.0, 1.0] must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "Col",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": score,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 3600,
+        })
+
+    # ------------------------------------------------------------------
+    # URL expiry in [60, 86400]
+    # ------------------------------------------------------------------
+
+    def test_url_expiry_valid_min(self, monkeypatch):
+        """URL expiry of 60 is the minimum valid value."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "Col",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.3,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 60,
+        })
+
+    def test_url_expiry_valid_max(self, monkeypatch):
+        """URL expiry of 86400 is the maximum valid value."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "Col",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.3,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 86400,
+        })
+
+    @pytest.mark.parametrize("expiry", [0, 59, 86401, -1])
+    def test_url_expiry_out_of_range_invalid(self, monkeypatch, expiry):
+        """URL expiry outside [60, 86400] must raise ValueError."""
+        self._fail(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "Col",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.3,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": expiry,
+        })
+
+    # ------------------------------------------------------------------
+    # Passing baseline
+    # ------------------------------------------------------------------
+
+    def test_default_visual_config_passes(self, monkeypatch):
+        """Default visual config values (non-empty collection, valid thresholds) pass."""
+        self._ok(monkeypatch, {
+            "RAG_INGESTION_VISUAL_TARGET_COLLECTION": "RAGVisualPages",
+            "RAG_VISUAL_RETRIEVAL_MIN_SCORE": 0.3,
+            "RAG_VISUAL_RETRIEVAL_URL_EXPIRY_SECONDS": 3600,
+        })
