@@ -5,9 +5,15 @@
 # IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool),
 #   enable_visual_embedding (bool), visual_target_collection (str), colqwen_model_name (str),
 #   colqwen_batch_size (int), page_image_quality (int), page_image_max_dimension (int)
+# IngestionConfig new fields (Data Lifecycle T1, T4): clean_store_bucket (str), gc_mode (str),
+#   gc_retention_days (int), gc_schedule (str)
+# IngestionConfig new fields (Parser Abstraction Phase 2.2): parser_strategy (str), chunker (str)
 # PIPELINE_NODE_NAMES includes "vlm_enrichment" between "chunking" and "chunk_enrichment"
 # PIPELINE_NODE_NAMES includes "visual_embedding" between "embedding_storage" and "knowledge_graph_storage" (FR-604)
 # IngestFileResult new field (Task 4.1): visual_stored_count (int, default 0, FR-605)
+# IngestFileResult new fields (Data Lifecycle T3, T6): trace_id (str, default ""), validation (dict, default {})
+# IngestionRunSummary new fields (Data Lifecycle T4): gc_soft_deleted, gc_hard_deleted, gc_retention_purged (int, default 0)
+# Runtime new field (Phase 2.2): parser_registry (Any, typed as Any to avoid circular import)
 # @end-summary
 
 """Shared ingestion pipeline types, configuration, and state contracts.
@@ -69,6 +75,7 @@ from config.settings import (
     RAG_INGESTION_COLQWEN_BATCH_SIZE,
     RAG_INGESTION_PAGE_IMAGE_QUALITY,
     RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION,
+    RAG_INGESTION_EMBEDDING_BATCH_SIZE,
 )
 from src.core import LocalBGEEmbeddings
 from src.core import KnowledgeGraphBuilder
@@ -181,6 +188,47 @@ class IngestionConfig:
     page_image_max_dimension: int = RAG_INGESTION_PAGE_IMAGE_MAX_DIMENSION
     """Max pixel dimension (longer edge) for page images. Range: 256-4096. Default: 1024. FR-106"""
 
+    # -- Batch embedding (FR-1211) --
+    embedding_batch_size: int = RAG_INGESTION_EMBEDDING_BATCH_SIZE
+    """Number of chunks per embedding batch. Range: 1-2048. Default: 64. FR-1211"""
+
+    # -- Data Lifecycle: MinIO clean store (Task 1) --
+    clean_store_bucket: str = ""
+    """MinIO bucket for clean store objects. Empty string reuses target_bucket."""
+
+    # -- Data Lifecycle: GC / Lifecycle (Task 4) --
+    gc_mode: str = "soft"
+    """Default GC delete mode: "soft" (default) or "hard"."""
+    gc_retention_days: int = 30
+    """Retention period in days for soft-deleted data before hard deletion."""
+    gc_schedule: str = ""
+    """Cron expression for scheduled GC runs. Empty string disables."""
+
+    # -- Cross-document deduplication (FR-3460) --
+    enable_cross_document_dedup: bool = True
+    """Enable cross-document chunk deduplication. Default: True. FR-3402, FR-3460."""
+    enable_fuzzy_dedup: bool = False
+    """Enable Tier 2 MinHash fuzzy dedup (requires enable_cross_document_dedup=True). Default: False. FR-3420."""
+    fuzzy_similarity_threshold: float = 0.95
+    """Jaccard similarity threshold for fuzzy match. Range: [0.0, 1.0]. Default: 0.95. FR-3422."""
+    fuzzy_shingle_size: int = 3
+    """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""
+    fuzzy_num_hashes: int = 128
+    """Number of MinHash permutations. Must be >= 16. Default: 128. FR-3421."""
+    dedup_override_sources: list = field(default_factory=list)
+    """List of source_keys exempt from dedup lookup (per-run). Default: []. FR-3450."""
+
+    # -- Parser Abstraction (Phase 2.2, FR-3301, FR-3320) --
+    parser_strategy: str = "auto"
+    """Parser selection: "auto" (extension-based routing), "document" (Docling),
+    "code" (tree-sitter), "text" (PlainTextParser). Default: "auto". FR-3301.
+    Env var: RAG_INGESTION_PARSER_STRATEGY"""
+    chunker: str = "native"
+    """Chunker selection: "native" (each parser's internal chunker) or
+    "markdown" (force heading-aware markdown splitting for all parsers).
+    Default: "native". FR-3320.
+    Env var: RAG_INGESTION_CHUNKER"""
+
     @property
     def generate_page_images(self) -> bool:
         """Derived flag: True when visual embedding is enabled. FR-107"""
@@ -223,6 +271,9 @@ class IngestFileResult:
     clean_hash: str
     # -- Visual embedding extension (FR-605) --
     visual_stored_count: int = 0  # FR-605: number of visual page objects stored
+    # -- Data Lifecycle additions (Task 3, Task 6) --
+    trace_id: str = ""                               # UUID v4 for manifest recording (FR-3050)
+    validation: dict = field(default_factory=dict)   # E2E validation result (FR-3061)
 
 
 @dataclass
@@ -245,6 +296,10 @@ class IngestionRunSummary:
     removed_sources: int
     errors: list[str]
     design_warnings: list[str] = field(default_factory=list)
+    # -- Data Lifecycle additions (Task 4) --
+    gc_soft_deleted: int = 0       # Number of sources soft-deleted during this run
+    gc_hard_deleted: int = 0       # Number of sources hard-deleted during this run
+    gc_retention_purged: int = 0   # Number of expired soft-deleted entries purged
 
 
 @dataclass
@@ -256,12 +311,17 @@ class Runtime:
         embedder: Embedding model wrapper used by storage stages.
         weaviate_client: Client used for vector and (optionally) metadata storage.
         kg_builder: Optional knowledge graph builder used by KG stages.
+        db_client: Optional database client for metadata storage.
+        parser_registry: Optional ParserRegistry instance. Typed as Any to avoid
+            a circular import between types.py and parser_registry.py. Populated
+            during pipeline initialisation in impl.py (Phase 3.2). FR-3303.
     """
     config: IngestionConfig
     embedder: LocalBGEEmbeddings
     weaviate_client: Any
     kg_builder: Optional[KnowledgeGraphBuilder]
     db_client: Optional[Any] = None
+    parser_registry: Optional[Any] = None  # ParserRegistry; typed Any to avoid circular import
 
 
 class IngestState(TypedDict):

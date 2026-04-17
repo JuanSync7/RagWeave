@@ -4,7 +4,8 @@
 # Exports: create_persistent_client, get_weaviate_client, ensure_collection, build_chunk_id,
 #          add_documents, hybrid_search, delete_collection,
 #          delete_documents_by_source, delete_documents_by_source_key,
-#          aggregate_by_source, get_collection_stats, list_collections
+#          aggregate_by_source, get_collection_stats, list_collections,
+#          update_chunk_content
 # Deps: weaviate, config.settings, src.platform.observability
 # @end-summary
 """Low-level Weaviate operations: connection, schema, CRUD, and search.
@@ -106,6 +107,31 @@ def ensure_collection(
             Property(name="heading_level", data_type=DataType.INT),
             Property(name="tenant_id", data_type=DataType.TEXT),
             Property(name="document_id", data_type=DataType.TEXT),
+            # -- Cross-document dedup (FR-3430, FR-3431, FR-3432, FR-3433) --
+            Property(
+                name="content_hash",
+                data_type=DataType.TEXT,
+                description="SHA-256 of normalised chunk text for exact-match dedup",
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="source_documents",
+                data_type=DataType.TEXT_ARRAY,
+                description="Array of source_key values for multi-document provenance",
+            ),
+            Property(
+                name="fuzzy_fingerprint",
+                data_type=DataType.TEXT,
+                description="Serialised MinHash signature (Tier 2 fuzzy dedup)",
+                index_filterable=False,
+                index_searchable=False,
+            ),
+            Property(
+                name="canonical",
+                data_type=DataType.BOOL,
+                description="Always true; reserved for future soft-delete flows",
+            ),
         ],
     )
     span.end(status="ok")
@@ -445,3 +471,60 @@ def list_collections(
         })
     span.end(status="ok")
     return results
+
+
+# ---------------------------------------------------------------------------
+# Cross-document dedup: canonical chunk updates (FR-3432)
+# ---------------------------------------------------------------------------
+
+
+def update_chunk_content(
+    client: weaviate.WeaviateClient,
+    chunk_uuid: str,
+    *,
+    text: str,
+    content_hash: str,
+    fuzzy_fingerprint: Optional[str] = None,
+    collection: str = WEAVIATE_COLLECTION_NAME,
+) -> bool:
+    """Replace a canonical chunk's text + dedup metadata (Tier 2 replacement).
+
+    Used by the dedup node when an incoming chunk's text is longer/richer than
+    an existing canonical chunk that it fuzzy-matches against. The canonical
+    record is updated in place — source_documents provenance is NOT reset.
+
+    Args:
+        client: Weaviate client handle.
+        chunk_uuid: UUID of the canonical chunk to update.
+        text: New canonical text (replaces existing).
+        content_hash: SHA-256 of the new normalised text.
+        fuzzy_fingerprint: Optional new MinHash signature (hex string).
+        collection: Target collection name.
+
+    Returns:
+        True on success, False on error.
+    """
+    span = tracer.start_span(
+        "vector_store.update_chunk_content",
+        {"collection": collection, "chunk_uuid": chunk_uuid},
+    )
+    try:
+        col = client.collections.get(collection)
+        properties: dict = {
+            "text": text,
+            "content_hash": content_hash,
+        }
+        if fuzzy_fingerprint is not None:
+            properties["fuzzy_fingerprint"] = fuzzy_fingerprint
+        col.data.update(uuid=chunk_uuid, properties=properties)
+        span.end(status="ok")
+        return True
+    except Exception:
+        logger.error(
+            "Failed to update canonical chunk %s in %s",
+            chunk_uuid,
+            collection,
+            exc_info=True,
+        )
+        span.end(status="error")
+        return False

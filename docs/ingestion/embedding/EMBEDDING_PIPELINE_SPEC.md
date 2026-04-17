@@ -1,4 +1,4 @@
-# Embedding Pipeline — Specification (v1.0.0)
+# Embedding Pipeline — Specification (v1.1.0)
 
 ## Document Information
 
@@ -10,14 +10,15 @@
 |-------|-------|
 | System | AION RAG Document Embedding Pipeline |
 | Document Type | Pipeline Specification — Embedding Phase |
-| Companion Documents | DOCUMENT_PROCESSING_SPEC.md (Document Processing Phase Functional Requirements), INGESTION_PLATFORM_SPEC.md (Platform/Cross-Cutting Requirements), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), EMBEDDING_PIPELINE_IMPLEMENTATION.md (Phase 2 Implementation Guide) |
-| Version | 1.0.0 |
+| Companion Documents | DOCUMENT_PROCESSING_SPEC.md (Document Processing Phase Functional Requirements), INGESTION_PLATFORM_SPEC.md (Platform/Cross-Cutting Requirements), CROSS_DOCUMENT_DEDUP_SPEC.md (Cross-Document Deduplication), DOCUMENT_PROCESSING_SPEC_SUMMARY.md (Phase 1 Summary), EMBEDDING_PIPELINE_SPEC_SUMMARY.md (Phase 2 Summary), EMBEDDING_PIPELINE_IMPLEMENTATION.md (Phase 2 Implementation Guide) |
+| Version | 1.1.0 |
 | Status | Draft |
 | Supersedes | INGESTION_PIPELINE_SPEC.md (sections 3.6–3.13) |
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-03-18 | AI Assistant | Created by splitting INGESTION_PIPELINE_SPEC.md at the Document Processing / Embedding boundary. Contains FR-600 through FR-1304 and adds the Clean Document Store input contract (FR-591–FR-595, a new section 3.0 before the chunking section). |
+| 1.1.0 | 2026-04-15 | AI Assistant | Added batch embedding optimisation requirements (FR-1210–FR-1214) to section 3.7 — batch request formation, batch size configuration, partial batch handling, batch failure isolation, and batch throughput observability. |
 
 ---
 
@@ -932,6 +933,66 @@ This section defines the input contract of the Embedding Pipeline — how it rea
 > 2. Both providers support the same set of metadata filters and hybrid search.
 > 3. An unsupported provider name produces a clear error at startup.
 
+#### 3.7.1 Batch Embedding Optimisation (FR-1210)
+
+> **FR-1210** | Priority: MUST
+>
+> **Description:** The system MUST group chunks into batches before sending them to the embedding model, rather than embedding chunks individually. The batch size SHALL be configurable via `embedding.batch_size`.
+>
+> **Rationale:** Embedding models — especially GPU-accelerated ones — achieve significantly higher throughput when processing batches of inputs. Individual embedding calls introduce per-request overhead (network round-trip, kernel launch, memory allocation) that dominates wall-clock time for small payloads. Batching amortises this overhead across many chunks.
+>
+> **Acceptance Criteria:**
+> 1. Given 200 surviving chunks and `embedding.batch_size: 64`, the system issues exactly 4 embedding requests (3 batches of 64 + 1 batch of 8) rather than 200 individual requests.
+> 2. The resulting embeddings are identical in order and value to those that would be produced by embedding each chunk individually.
+> 3. The batch formation logic does not reorder chunks; output embeddings maintain a 1:1 positional correspondence with input chunks.
+
+> **FR-1211** | Priority: MUST
+>
+> **Description:** The batch size MUST be configurable via `embedding.batch_size` with a default value of 64. The system SHALL enforce a minimum batch size of 1 and a maximum batch size of 2048. The batch size MAY also be overridden via the environment variable `RAGWEAVE_EMBEDDING_BATCH_SIZE`.
+>
+> **Rationale:** Optimal batch size depends on the embedding model, available GPU memory, and network constraints. A sensible default (64) works well for most API-based and mid-range GPU deployments, while the configurable range accommodates both constrained environments (small batches to avoid OOM) and high-throughput GPU clusters (large batches to saturate compute).
+>
+> **Acceptance Criteria:**
+> 1. Given no explicit configuration, the system uses a batch size of 64.
+> 2. Given `embedding.batch_size: 128`, the system uses batches of 128 chunks.
+> 3. Given `embedding.batch_size: 0` or `embedding.batch_size: 4096`, the system rejects the configuration at startup with a clear error message stating the valid range [1, 2048].
+> 4. Given the environment variable `RAGWEAVE_EMBEDDING_BATCH_SIZE=32` and no config file override, the system uses a batch size of 32.
+> 5. If both the config file and environment variable are set, the config file value takes precedence.
+
+> **FR-1212** | Priority: MUST
+>
+> **Description:** The system MUST handle a final partial batch (smaller than the configured batch size) without error. A document whose chunk count is not evenly divisible by the batch size SHALL still have all chunks embedded.
+>
+> **Rationale:** Real documents rarely produce chunk counts that are exact multiples of the batch size. The system must not silently drop trailing chunks or raise an error when the last batch is undersized.
+>
+> **Acceptance Criteria:**
+> 1. Given 100 chunks and `embedding.batch_size: 64`, the system processes one batch of 64 and one batch of 36, producing exactly 100 embeddings.
+> 2. Given 1 chunk and `embedding.batch_size: 64`, the system processes one batch of 1 and produces exactly 1 embedding.
+> 3. Given 0 chunks (all filtered by quality validation), the system issues zero embedding requests and returns `stored_count: 0`.
+
+> **FR-1213** | Priority: MUST
+>
+> **Description:** If an embedding batch fails, the system MUST retry only the failed batch, not the entire document's chunks. Successfully embedded batches SHALL NOT be re-embedded during retry. After exhausting retries for a batch, the system MUST record the failure and continue with remaining batches.
+>
+> **Rationale:** A transient failure (e.g., provider rate-limit, temporary OOM) affecting one batch should not force re-computation of embeddings that already succeeded. Isolating failures to the batch level minimises wasted compute and maximises the number of chunks that are successfully embedded even under degraded conditions.
+>
+> **Acceptance Criteria:**
+> 1. Given 4 batches where batch 3 fails with a transient error, the system retries batch 3 up to the configured retry limit without re-embedding batches 1, 2, or 4.
+> 2. If batch 3 succeeds on retry, all 4 batches' embeddings are stored.
+> 3. If batch 3 exhausts retries, the system logs an error identifying the failed batch (batch index, chunk range), stores the embeddings from batches 1, 2, and 4, and reports the partial failure in the pipeline state (`errors` list).
+> 4. The chunks from the failed batch are not written to the vector store without embeddings.
+
+> **FR-1214** | Priority: SHOULD
+>
+> **Description:** The system SHOULD log batch-level observability metrics: the number of chunks per batch, embedding latency per batch (wall-clock milliseconds), and aggregate throughput (chunks per second) across all batches for a document.
+>
+> **Rationale:** Without batch-level metrics, operators cannot diagnose throughput bottlenecks, detect degraded embedding provider performance, or right-size the batch size configuration. Per-batch granularity reveals whether specific batches are slower (e.g., due to longer text content) and supports capacity planning.
+>
+> **Acceptance Criteria:**
+> 1. Given a document processed in 4 batches, the system logs one entry per batch containing: batch index (1-based), chunk count in that batch, and wall-clock latency in milliseconds.
+> 2. After all batches complete, the system logs a summary line containing: total chunks embedded, total batches, total wall-clock time, and throughput in chunks per second.
+> 3. Log entries are structured (key-value or JSON) to support log aggregation and alerting.
+
 ---
 
 ### 3.8 Knowledge Graph Storage (FR-1300)
@@ -984,7 +1045,7 @@ This section defines the input contract of the Embedding Pipeline — how it rea
 
 ## Pipeline Requirements Traceability Matrix
 
-This matrix covers all requirements defined in this specification: the new Clean Document Store Input Contract (FR-591–FR-595) and the Embedding Pipeline functional requirements (FR-601–FR-1304).
+This matrix covers all requirements defined in this specification: the new Clean Document Store Input Contract (FR-591–FR-595) and the Embedding Pipeline functional requirements (FR-601–FR-1304, plus FR-1210–FR-1214 for batch embedding optimisation).
 
 ### Requirements by Section
 
@@ -1002,25 +1063,27 @@ This matrix covers all requirements defined in this specification: the new Clean
 | FR-1001–FR-1009 | 3.5 Knowledge Graph Extraction | MUST | Knowledge Graph Extraction |
 | FR-1101–FR-1105 | 3.6 Quality Validation | MUST | Quality Validation |
 | FR-1201–FR-1209 | 3.7 Embedding & Storage | MUST | Embedding & Storage |
+| FR-1210–FR-1213 | 3.7.1 Batch Embedding Optimisation | MUST | Embedding & Storage |
+| FR-1214 | 3.7.1 Batch Embedding Optimisation | SHOULD | Embedding & Storage |
 | FR-1301–FR-1304 | 3.8 Knowledge Graph Storage | MUST | Knowledge Graph Storage |
 
 ### Requirement Count Summary (This Specification Only)
 
 | Priority | Count | Requirements |
 |----------|-------|-------------|
-| MUST | 56 | FR-591–FR-594, FR-601–FR-611, FR-701–FR-705, FR-801–FR-806, FR-901–FR-905, FR-1001–FR-1009, FR-1101–FR-1105, FR-1201–FR-1209, FR-1301–FR-1304 |
-| SHOULD | 1 | FR-595 |
+| MUST | 60 | FR-591–FR-594, FR-601–FR-611, FR-701–FR-705, FR-801–FR-806, FR-901–FR-905, FR-1001–FR-1009, FR-1101–FR-1105, FR-1201–FR-1213, FR-1301–FR-1304 |
+| SHOULD | 2 | FR-595, FR-1214 |
 | MAY | 0 | — |
-| **Total** | **57** | |
+| **Total** | **62** | |
 
 ### Design Principle Coverage
 
 | Design Principle | Requirements That Implement It |
 |-----------------|-------------------------------|
 | Swappability over lock-in | FR-602, FR-611, FR-702, FR-806, FR-902, FR-1002, FR-1202, FR-1205, FR-1206, FR-1209, FR-1301, FR-1302, FR-1303 |
-| Fail-safe over fail-fast | FR-608, FR-704, FR-805, FR-903, FR-1007 |
+| Fail-safe over fail-fast | FR-608, FR-704, FR-805, FR-903, FR-1007, FR-1213 |
 | Context preservation over compression | FR-601, FR-604, FR-606, FR-703, FR-704, FR-705, FR-803, FR-804, FR-1006, FR-1105 |
-| Configuration-driven behaviour | FR-602, FR-603, FR-604, FR-702, FR-703, FR-806, FR-902, FR-1002, FR-1009, FR-1101, FR-1102, FR-1202, FR-1208, FR-1209, FR-1304 |
+| Configuration-driven behaviour | FR-602, FR-603, FR-604, FR-702, FR-703, FR-806, FR-902, FR-1002, FR-1009, FR-1101, FR-1102, FR-1202, FR-1208, FR-1209, FR-1211, FR-1304 |
 | Idempotency by construction | FR-605, FR-593, FR-1003, FR-1008 |
 | Controlled access over restriction | FR-594, FR-1104 |
 

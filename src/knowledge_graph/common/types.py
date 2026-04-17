@@ -235,6 +235,16 @@ class KGConfig:
     strict_path_validation: bool = False
     """REQ-KG-778: When True, PatternWarning promoted to KGConfigValidationError."""
 
+    # Phase 2 Retrieval: Community context + operator configurability (REQ-KG-1320..1326)
+    community_context_token_budget: int = 200
+    """REQ-KG-1320: Independent token budget for community context section. 0 = disabled."""
+
+    graph_context_marker_style: str = "markdown"
+    """REQ-KG-1322: Section marker style — 'markdown', 'xml', or 'plain'."""
+
+    max_hop_fanout: int = 50
+    """REQ-KG-1324: Max entities explored per hop in path pattern evaluation."""
+
     def __post_init__(self) -> None:
         if self.community_min_size < 1:
             raise ValueError(f"community_min_size must be >= 1, got {self.community_min_size}")
@@ -251,6 +261,17 @@ class KGConfig:
             )
         if self.graph_context_token_budget < 0:
             raise ValueError("graph_context_token_budget must be >= 0")
+        if self.community_context_token_budget < 0:
+            raise ValueError(
+                f"community_context_token_budget must be >= 0, got {self.community_context_token_budget}"
+            )
+        if self.graph_context_marker_style not in {"markdown", "xml", "plain"}:
+            raise ValueError(
+                f"graph_context_marker_style must be 'markdown', 'xml', or 'plain', "
+                f"got '{self.graph_context_marker_style}'"
+            )
+        if self.max_hop_fanout < 1:
+            raise ValueError(f"max_hop_fanout must be >= 1, got {self.max_hop_fanout}")
 
 
 # ---------------------------------------------------------------------------

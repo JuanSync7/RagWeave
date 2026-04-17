@@ -1,0 +1,53 @@
+# config/schema_changelog.yaml
+#
+# Machine-readable changelog mapping schema version transitions to
+# migration strategies (FR-3113). The migration runner reads this file
+# to determine the minimum-cost re-processing path for each document.
+#
+# migration_strategy values:
+#   none           -- No action needed. Version transition has no schema impact.
+#   metadata_only  -- Weaviate batch partial-update. No re-embedding. Cheap.
+#   full_phase2    -- Full Embedding Pipeline re-run. GPU-bound. Expensive.
+#   kg_reextract   -- Delete old triples, re-run KG extraction nodes. LLM-bound.
+#
+# IMPORTANT: PIPELINE_SCHEMA_VERSION in src/ingest/common/schemas.py must
+# match the latest version entry in this file.
+
+schema_versions:
+  - version: "0.0.0"
+    date: "2026-01-01"
+    description: "Pre-versioning baseline. Documents ingested before schema tracking."
+    migration_strategy: "none"
+    fields_added: []
+    fields_removed: []
+    fields_renamed: []
+
+  - version: "1.0.0"
+    date: "2026-04-15"
+    description: >
+      Initial versioned schema (ingestion hardening Phase 3). Adds schema_version,
+      trace_id, batch_id, deleted/deleted_at, validation, clean_hash to manifest.
+      Adds schema_version, trace_id, batch_id, deleted to Weaviate chunk metadata.
+      Adds MinIO clean store with metadata envelope.
+    migration_strategy: "metadata_only"
+    fields_added:
+      - "trace_id"
+      - "batch_id"
+      - "schema_version"
+      - "validation"
+      - "clean_hash"
+      - "deleted"
+      - "deleted_at"
+    fields_removed: []
+    fields_renamed: []
+
+  - version: "1.1.0"
+    date: "2026-04-16"
+    description: >
+      Schema migration system + E2E validation harness (Phase 3.4). No new
+      manifest fields; adds MigrationEngine, E2EValidator, changelog parser.
+      Migration from 1.0.0 requires only metadata_only (no re-embedding).
+    migration_strategy: "metadata_only"
+    fields_added: []
+    fields_removed: []
+    fields_renamed: []

@@ -59,11 +59,11 @@ from server.routes import (
     create_system_router,
 )
 from server.utils import console_ok as _console_ok, error_payload as _error_payload, validate_optional_dependencies as _validate_optional_dependencies, validate_startup_config as _validate_startup_config
+from config.settings import validate_all_config as _validate_all_config
 from server.schemas import (
     QueryRequest,
 )
 import src.db as _db
-import src.vector_db as _vector_db
 
 # Use uvicorn's logger/formatter so API logs match server output
 # (INFO prefix + colorized level formatting).
@@ -151,6 +151,7 @@ def _release_request_slot(acquired: bool) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_startup_config()
+    _validate_all_config()
     _validate_optional_dependencies()
     global _temporal_client
     logger.info("Connecting to Temporal at %s", TEMPORAL_TARGET_HOST)

@@ -3,7 +3,8 @@
 # single-collection search, multi-collection fan-out, aggregation, re-exported schemas,
 # and visual collection operations for the visual embedding pipeline.
 # Exports: create_persistent_client, get_client, close_client, ensure_collection,
-#          delete_collection, add_documents, delete_by_source, delete_by_source_key,
+#          delete_collection, add_documents, update_chunk_content,
+#          delete_by_source, delete_by_source_key,
 #          search, multi_search, aggregate_by_source, get_collection_stats, list_collections,
 #          ensure_visual_collection, add_visual_documents, delete_visual_by_source_key,
 #          search_visual, DocumentRecord, SearchResult, SearchFilter, build_chunk_id
@@ -153,6 +154,41 @@ def add_documents(
         Number of documents added.
     """
     return _get_vector_backend().add_documents(client, documents, collection)
+
+
+def update_chunk_content(
+    client: Any,
+    chunk_uuid: str,
+    *,
+    text: str,
+    content_hash: str,
+    fuzzy_fingerprint: Optional[str] = None,
+    collection: Optional[str] = None,
+) -> bool:
+    """Replace a canonical chunk's text + dedup metadata in place (FR-3432).
+
+    Used by the cross-document dedup node when a richer incoming chunk
+    replaces an existing canonical chunk via fuzzy match.
+
+    Args:
+        client: Vector store client handle.
+        chunk_uuid: UUID of the canonical chunk to update.
+        text: New canonical text.
+        content_hash: SHA-256 of the new normalised text.
+        fuzzy_fingerprint: Optional serialised MinHash signature.
+        collection: Target collection name. ``None`` uses the default.
+
+    Returns:
+        True on success, False on error (non-fatal to the pipeline).
+    """
+    return _get_vector_backend().update_chunk_content(
+        client,
+        chunk_uuid,
+        text=text,
+        content_hash=content_hash,
+        fuzzy_fingerprint=fuzzy_fingerprint,
+        collection=collection,
+    )
 
 
 def delete_by_source(
@@ -420,6 +456,7 @@ __all__ = [
     "delete_collection",
     # Document operations
     "add_documents",
+    "update_chunk_content",
     "delete_by_source",
     "delete_by_source_key",
     # Search
