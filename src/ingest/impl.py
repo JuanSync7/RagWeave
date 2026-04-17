@@ -297,7 +297,7 @@ def _check_docling_chunking_config(
     # Rule A: vlm_mode=builtin requires docling to be installed.
     if config.vlm_mode == "builtin":
         try:
-            from docling.document_converter import DocumentConverter  # noqa: F401
+            import docling.document_converter  # noqa: F401
         except ImportError:
             errors.append(
                 "vlm_mode=builtin requires docling to be installed (uv add docling)"

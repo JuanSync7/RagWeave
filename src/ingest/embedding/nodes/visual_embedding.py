@@ -35,6 +35,9 @@ from typing import Any
 
 from PIL import Image
 
+# Pillow 10+ moved LANCZOS to Image.Resampling; keep compatibility with both.
+_LANCZOS = getattr(getattr(Image, "Resampling", None), "LANCZOS", None) or getattr(Image, "LANCZOS", 1)
+
 from src.db.minio import (
     delete_page_images,
     store_page_images,
@@ -550,7 +553,7 @@ def _resize_page_images(
             new_w = max(1, int(orig_w * scale))
             new_h = max(1, int(orig_h * scale))
             try:
-                img = img.resize((new_w, new_h), Image.LANCZOS)
+                img = img.resize((new_w, new_h), _LANCZOS)
             except Exception as exc:  # pylint: disable=broad-except
                 logger.warning(
                     "_resize_page_images: failed to resize page %d (%dx%d -> %dx%d): %s",

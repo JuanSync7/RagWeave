@@ -206,7 +206,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     else:
         message = str(detail)
         details = None
-    code = f"HTTP_{exc.status_code}"
+    code = "INTERNAL_SERVER_ERROR" if exc.status_code == 500 else f"HTTP_{exc.status_code}"
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_payload(request, code=code, message=message, details=details),
