@@ -5,7 +5,8 @@
 # Exports: IngestDocumentWorkflow, IngestDirectoryWorkflow,
 #          IngestDocumentArgs, IngestDocumentResult,
 #          IngestDirectoryArgs, IngestDirectoryResult
-# Deps: temporalio, src.ingest.temporal.activities, src.ingest.temporal.constants
+# Deps: temporalio, src.ingest.temporal.activities, src.ingest.temporal.constants,
+#       config.settings
 # @end-summary
 """Temporal workflows for the two-phase ingestion pipeline.
 
@@ -41,6 +42,12 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from config.settings import (
+        RAG_INGEST_TEMPORAL_DOC_TIMEOUT_MIN,
+        RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN,
+        RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S,
+        RAG_INGEST_TEMPORAL_RETRY_MAX,
+    )
     from src.ingest.temporal.activities import (
         ActivityArgs,
         DocProcessingResult,
@@ -118,9 +125,12 @@ class IngestDirectoryResult:
 # Per-document workflow
 # ---------------------------------------------------------------------------
 
-_DOC_PROCESSING_TIMEOUT = timedelta(minutes=15)
-_EMBEDDING_TIMEOUT = timedelta(minutes=30)
-_RETRY_POLICY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=5))
+_DOC_PROCESSING_TIMEOUT = timedelta(minutes=RAG_INGEST_TEMPORAL_DOC_TIMEOUT_MIN)
+_EMBEDDING_TIMEOUT = timedelta(minutes=RAG_INGEST_TEMPORAL_EMB_TIMEOUT_MIN)
+_RETRY_POLICY = RetryPolicy(
+    maximum_attempts=RAG_INGEST_TEMPORAL_RETRY_MAX,
+    initial_interval=timedelta(seconds=RAG_INGEST_TEMPORAL_RETRY_INTERVAL_S),
+)
 
 
 @workflow.defn
