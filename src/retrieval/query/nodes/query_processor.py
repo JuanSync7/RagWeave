@@ -524,15 +524,16 @@ def reformulate_and_evaluate_node(state: QueryState) -> dict:
     if state["reasoning"]:
         # state["reasoning"] originates from the previous LLM response and
         # could contain adversarially crafted content if the user's original
-        # query was designed to elicit it. Truncate to a safe length and run
-        # the injection check before re-inserting into the next prompt.
-        safe_reasoning = state["reasoning"][:200]
-        if _detect_injection(safe_reasoning):
+        # query was designed to elicit it. Check the FULL text for injection
+        # patterns first, then truncate the clean version to a safe length.
+        if _detect_injection(state["reasoning"]):
             logger.warning(
                 "Injection-like content detected in LLM reasoning field — "
                 "omitting from next prompt iteration"
             )
             safe_reasoning = ""
+        else:
+            safe_reasoning = state["reasoning"][:200]
         if safe_reasoning:
             previous_feedback = f"Previous evaluator feedback: {safe_reasoning}"
 
