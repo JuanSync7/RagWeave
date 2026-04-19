@@ -97,7 +97,7 @@ def vlm_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             )
             result_chunks.append(enriched_chunk)
 
-        logger.info("vlm_enrichment complete: source=%s", state["source_name"])
+        logger.info("vlm_enrichment complete: source=%s", state.get("source_name", ""))
         return {
             "chunks": result_chunks,
             "processing_log": append_processing_log(
