@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,7 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
         In strict Docling mode, failures return an error payload with
         ``should_skip=True`` to short-circuit the workflow.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     registry = getattr(state["runtime"], "parser_registry", None)
     raw_text = state["raw_text"]
@@ -208,4 +210,5 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
         update["parser_instance"] = parser_instance
 
     logger.info("structure_detection complete: source=%s strategy=%s", state["source_name"], structure.get("strategy", "unknown"))
+    logger.debug("structure_detection_node completed in %.3fs", time.monotonic() - t0)
     return update

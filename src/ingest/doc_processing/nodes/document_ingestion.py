@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
         ``processing_log``. On read failure, returns an ``errors`` payload
         to short-circuit the workflow.
     """
+    t0 = time.monotonic()
     source_path = Path(state["source_path"])
     try:
         raw_text = read_text_with_fallbacks(source_path)
@@ -46,6 +48,7 @@ def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
         }
     source_hash = sha256_path(source_path)
     logger.info("document_ingestion complete: source=%s hash=%s len=%d", source_path.name, source_hash, len(raw_text))
+    logger.debug("document_ingestion_node completed in %.3fs", time.monotonic() - t0)
     return {
         "raw_text": raw_text,
         "source_hash": source_hash,

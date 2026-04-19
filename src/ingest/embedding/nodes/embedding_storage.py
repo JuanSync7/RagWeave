@@ -166,6 +166,7 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         ``processing_log``. When the workflow is skipped or there are no chunks,
         returns ``stored_count=0``.
     """
+    t0 = time.monotonic()
     if state.get("should_skip", False) or not state["chunks"]:
         return {
             "stored_count": 0,
@@ -227,6 +228,7 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         }
 
     existing_errors = state.get("errors", [])
+    logger.debug("embedding_storage_node completed in %.3fs", time.monotonic() - t0)
     return {
         "stored_count": stored_count,
         "errors": existing_errors + batch_errors,

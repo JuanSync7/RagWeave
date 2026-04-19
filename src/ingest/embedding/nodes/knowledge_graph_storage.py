@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_storage")
@@ -28,6 +29,7 @@ def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any
         stage is disabled or the runtime has no KG builder, returns only a
         skipped log entry.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     kg_builder = state["runtime"].kg_builder
     if not config.enable_knowledge_graph_storage or kg_builder is None:
@@ -47,6 +49,7 @@ def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any
             "processing_log": append_processing_log(state, "knowledge_graph_storage:error"),
         }
     logger.info("knowledge_graph_storage complete: source=%s chunks=%d", state["source_name"], len(state["chunks"]))
+    logger.debug("knowledge_graph_storage_node completed in %.3fs", time.monotonic() - t0)
     return {
         "processing_log": append_processing_log(state, "knowledge_graph_storage:ok")
     }

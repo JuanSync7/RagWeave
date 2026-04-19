@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re as _re
+import time
 import unicodedata
 from typing import Any
 
@@ -82,6 +83,7 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     Returns:
         Partial state update: {"chunks": list[ProcessedChunk], "processing_log": updated_log}
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     try:
         base_metadata = metadata_to_dict(
@@ -157,6 +159,7 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         }
 
     logger.info("chunking complete: source=%s chunks=%d", state["source_name"], len(chunks))
+    logger.debug("chunking_node completed in %.3fs", time.monotonic() - t0)
     return {
         "chunks": chunks,
         "processing_log": processing_log,

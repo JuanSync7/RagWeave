@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 from src.ingest.common import (
@@ -33,6 +34,7 @@ def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         Partial state update containing filtered ``chunks`` and an updated
         ``processing_log``. When disabled, returns only a skipped log entry.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     if not config.enable_quality_validation:
         return {
@@ -59,6 +61,7 @@ def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         filtered_chunks.append(chunk)
 
     logger.info("quality_validation complete: source=%s input=%d output=%d filtered=%d", state.get("source_name", ""), len(state["chunks"]), len(filtered_chunks), len(state["chunks"]) - len(filtered_chunks))
+    logger.debug("quality_validation_node completed in %.3fs", time.monotonic() - t0)
     return {
         "chunks": filtered_chunks,
         "processing_log": append_processing_log(state, "quality_validation:ok"),

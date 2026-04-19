@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.document_storage")
@@ -34,6 +35,7 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         Partial state update containing ``document_id`` and an updated
         ``processing_log``.
     """
+    t0 = time.monotonic()
     document_id = build_document_id(state["source_key"])
     runtime = state["runtime"]
 
@@ -65,6 +67,7 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         }
 
     logger.info("document_storage complete: doc_id=%s source=%s", document_id, state["source_key"])
+    logger.debug("document_storage_node completed in %.3fs", time.monotonic() - t0)
     return {
         "document_id": document_id,
         "processing_log": append_processing_log(state, "document_storage:ok"),

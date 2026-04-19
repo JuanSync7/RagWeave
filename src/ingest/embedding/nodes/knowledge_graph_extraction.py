@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_extraction")
@@ -29,6 +30,7 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
         updated ``processing_log``. When disabled, returns only a skipped log
         entry.
     """
+    t0 = time.monotonic()
     if not state["runtime"].config.enable_knowledge_graph_extraction:
         return {
             "processing_log": append_processing_log(
@@ -59,6 +61,7 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
         }
 
     logger.info("knowledge_graph_extraction complete: source=%s triples=%d", state["source_name"], len(triples))
+    logger.debug("knowledge_graph_extraction_node completed in %.3fs", time.monotonic() - t0)
     return {
         "kg_triples": triples,
         "processing_log": append_processing_log(

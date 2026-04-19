@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
         ``processing_log``. In strict vision mode, failures return an error
         payload with ``should_skip=True``.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     has_figures = state["structure"].get("has_figures", False)
     if not config.enable_multimodal_processing or not has_figures:
@@ -74,6 +76,7 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
         structure["vision_described_count"] = described_count
 
     logger.info("multimodal_processing complete: source=%s notes=%d", state["source_name"], len(notes))
+    logger.debug("multimodal_processing_node completed in %.3fs", time.monotonic() - t0)
     return {
         "multimodal_notes": notes,
         "structure": structure,
