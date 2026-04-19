@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.metadata_generation")
 
 from src.ingest.support import _llm_json
 from src.ingest.common import (

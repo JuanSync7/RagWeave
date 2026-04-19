@@ -8,8 +8,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.docproc.document_ingestion")
 
 from src.ingest.common import (
     read_text_with_fallbacks,

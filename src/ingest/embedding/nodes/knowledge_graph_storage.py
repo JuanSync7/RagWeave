@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_storage")
 
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState

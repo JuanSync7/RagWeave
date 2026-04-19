@@ -42,7 +42,7 @@ from src.ingest.support import (
     _extract_image_candidates,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.embedding.vlm_enrichment")
 
 
 # ── Public API ──────────────────────────────────────────────────────────────

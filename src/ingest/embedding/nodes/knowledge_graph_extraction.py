@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.knowledge_graph_extraction")
 
 from src.core import EntityExtractor
 from src.ingest.common import append_processing_log

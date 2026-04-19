@@ -59,7 +59,7 @@ from src.vector_db.weaviate import (
     ensure_visual_collection,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.embedding.visual_embedding")
 
 
 # ---------------------------------------------------------------------------

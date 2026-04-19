@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.document_storage")
 
 from src.db import build_document_id, ensure_bucket, put_document
 from src.ingest.common import append_processing_log

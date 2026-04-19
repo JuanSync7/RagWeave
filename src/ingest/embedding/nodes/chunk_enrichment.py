@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.chunk_enrichment")
 
 from src.vector_db import build_chunk_id
 from src.ingest.common import (

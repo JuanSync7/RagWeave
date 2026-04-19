@@ -22,7 +22,7 @@ from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
 from src.ingest.support import parse_with_docling
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.docproc.structure_detection")
 
 _FIGURE_PATTERN = re.compile(r"\b(?:Figure|Fig\.)\s*\d+[A-Za-z]?\b", re.IGNORECASE)
 _HEADING_PATTERN = re.compile(

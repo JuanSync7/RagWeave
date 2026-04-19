@@ -18,7 +18,7 @@ from src.ingest.common import (
 )
 from src.ingest.embedding.state import EmbeddingPipelineState
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("rag.ingest.embedding.quality_validation")
 
 _WHITESPACE_RE = re.compile(r"\s+")
 

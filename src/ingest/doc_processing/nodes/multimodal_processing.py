@@ -8,8 +8,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.docproc.multimodal_processing")
 
 from src.ingest.common import append_processing_log
 from src.ingest.doc_processing.state import DocumentProcessingState
