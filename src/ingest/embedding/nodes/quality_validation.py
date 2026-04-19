@@ -53,7 +53,7 @@ def quality_validation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         try:
             score = quality_score(text)
         except Exception:
-            logger.debug("Quality score computation failed; defaulting to 0.0", exc_info=True)
+            logger.warning("Quality score computation failed; defaulting to 0.0", exc_info=True)
             score = 0.0  # fail safe: low quality
         if score < config.min_quality_score:
             continue

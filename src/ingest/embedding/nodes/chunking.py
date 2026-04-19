@@ -152,6 +152,7 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             processing_log = append_processing_log(state, "chunking:legacy_markdown")
 
     except Exception as exc:
+        logger.error("chunking failed source=%s: %s", state.get("source_name", ""), exc, exc_info=True)
         return {
             **state,
             "errors": state.get("errors", []) + [f"chunking:{exc}"],

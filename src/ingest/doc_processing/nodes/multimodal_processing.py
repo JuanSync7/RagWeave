@@ -68,6 +68,13 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
                         "multimodal_processing:failed",
                     ),
                 }
+            else:
+                logger.warning(
+                    "vision_processing failed (non-strict) source=%s: %s",
+                    state.get("source_name", ""),
+                    exc,
+                    exc_info=True,
+                )
 
     structure = dict(state.get("structure", {}))
     if config.enable_vision_processing:

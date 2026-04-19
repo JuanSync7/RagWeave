@@ -92,7 +92,7 @@ def visual_embedding_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         Dict with keys: visual_stored_count, page_images (None), processing_log,
         and optionally errors.
     """
-    node_start = time.time()
+    node_start = time.monotonic()
 
     # ── Short-circuit: config flag ─────────────────────────────────────────
     runtime = state["runtime"]
@@ -387,7 +387,7 @@ def _run_visual_embedding(
         )
 
     # ── Step 8: Timing and processing log ──────────────────────────────────
-    elapsed_s = time.time() - node_start
+    elapsed_s = time.monotonic() - node_start
     log_entries = [
         f"visual_embedding:pages_extracted:{pages_extracted}",
         f"visual_embedding:pages_stored_minio:{pages_stored_minio}",

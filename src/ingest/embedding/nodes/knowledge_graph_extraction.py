@@ -55,6 +55,7 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
                 for subject, predicate, obj in relations
             )
     except Exception as exc:
+        logger.error("kg_extraction failed source=%s: %s", state.get("source_name", ""), exc, exc_info=True)
         return {
             **state,
             "errors": state.get("errors", []) + [f"kg_extraction:{exc}"],
