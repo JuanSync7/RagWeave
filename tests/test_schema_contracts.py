@@ -75,6 +75,20 @@ INGESTION_INFRA_ONLY_FIELDS = frozenset({
     "page_image_max_dimension",
     "page_image_quality",
     "visual_target_collection",
+    # Ingestion hardening (server-side infra controls, not user-facing API fields)
+    "chunker",
+    "clean_store_bucket",
+    "dedup_override_sources",
+    "embedding_batch_size",
+    "enable_cross_document_dedup",
+    "enable_fuzzy_dedup",
+    "fuzzy_num_hashes",
+    "fuzzy_shingle_size",
+    "fuzzy_similarity_threshold",
+    "gc_mode",
+    "gc_retention_days",
+    "gc_schedule",
+    "parser_strategy",
 })
 
 # Fields on ConsoleIngestionRequest that don't map to IngestionConfig

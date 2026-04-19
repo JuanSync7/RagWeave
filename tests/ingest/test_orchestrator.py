@@ -146,7 +146,7 @@ class TestIngestDirectoryNewFiles:
              patch("src.ingest.impl.save_manifest"), \
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
-             patch("src.ingest.impl.LocalBGEEmbeddings"), \
+             patch("src.ingest.impl.get_embedding_provider"), \
              patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file",
                    return_value=_mock_ingest_result()) as mock_if:
@@ -196,7 +196,7 @@ class TestIngestDirectorySkipUnchanged:
              patch("src.ingest.impl.save_manifest"), \
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
-             patch("src.ingest.impl.LocalBGEEmbeddings"), \
+             patch("src.ingest.impl.get_embedding_provider"), \
              patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file") as mock_if:
 
@@ -237,7 +237,7 @@ class TestIngestDirectoryRemoveDeleted:
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
              patch("src.ingest.impl.delete_by_source_key") as mock_del, \
-             patch("src.ingest.impl.LocalBGEEmbeddings"), \
+             patch("src.ingest.impl.get_embedding_provider"), \
              patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file",
                    return_value=_mock_ingest_result()):
@@ -274,7 +274,7 @@ class TestIngestDirectoryPartialFailure:
              patch("src.ingest.impl.save_manifest"), \
              patch("src.ingest.impl.delete_collection"), \
              patch("src.ingest.impl.ensure_collection"), \
-             patch("src.ingest.impl.LocalBGEEmbeddings"), \
+             patch("src.ingest.impl.get_embedding_provider"), \
              patch("src.ingest.impl.KnowledgeGraphBuilder"), \
              patch("src.ingest.impl.ingest_file", side_effect=_selective_ingest):
 

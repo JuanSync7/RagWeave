@@ -197,16 +197,24 @@ async def add_request_id_middleware(request: Request, call_next):
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Normalize HTTPException payloads to the API error envelope."""
     detail = exc.detail
-    if isinstance(detail, str):
+    # For 500, always return a generic message regardless of detail and use
+    # the same code as the unhandled exception handler for consistency.
+    if exc.status_code == 500:
+        code = "INTERNAL_SERVER_ERROR"
+        message = "Internal server error"
+        details = None
+    elif isinstance(detail, str):
+        code = f"HTTP_{exc.status_code}"
         message = detail
         details = None
     elif isinstance(detail, dict):
+        code = f"HTTP_{exc.status_code}"
         message = str(detail.get("message", "Request failed"))
         details = detail
     else:
+        code = f"HTTP_{exc.status_code}"
         message = str(detail)
         details = None
-    code = "INTERNAL_SERVER_ERROR" if exc.status_code == 500 else f"HTTP_{exc.status_code}"
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_payload(request, code=code, message=message, details=details),

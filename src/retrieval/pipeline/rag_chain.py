@@ -14,8 +14,8 @@ import logging
 import statistics
 import time
 
-from src.core import LocalBGEEmbeddings
-from src.retrieval.query.nodes import LocalBGEReranker
+from src.core import get_embedding_provider
+from src.retrieval.query.nodes import get_reranker_provider
 from src.retrieval.query.nodes import process_query
 from src.core import (
     GraphQueryExpander,
@@ -169,12 +169,12 @@ class RAGChain:
             try:
                 logger.info("Loading embedding model...")
                 _t_emb = time.perf_counter()
-                emb = LocalBGEEmbeddings()
-                logger.info("Embedding model loaded in %.1fms.", (time.perf_counter() - _t_emb) * 1000)
+                emb = get_embedding_provider()
+                logger.info("Embedding provider ready in %.1fms.", (time.perf_counter() - _t_emb) * 1000)
 
-                logger.info("Loading reranker model...")
+                logger.info("Loading reranker...")
                 _t_rer = time.perf_counter()
-                rer = LocalBGEReranker()
+                rer = get_reranker_provider()
                 logger.info("Reranker model loaded in %.1fms.", (time.perf_counter() - _t_rer) * 1000)
                 return emb, rer
             finally:

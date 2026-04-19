@@ -975,6 +975,21 @@ wheels = [
 ]
 
 [[package]]
+name = "datasketch"
+version = "1.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8d/73/8e9014887f9fca2d785777a0a6186813e4fc7faa24f05fc88c6420624891/datasketch-1.10.0.tar.gz", hash = "sha256:d23aea80ce4c40790ca7a40795659848be92ecc43db80942be26f21e81d24714", size = 91699, upload-time = "2026-04-17T23:06:56.388Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/e7/a94668082e078099eb0161635649510aa887690767b779fffe4bdc479913/datasketch-1.10.0-py3-none-any.whl", hash = "sha256:303dd90cda0948a21abba3aaefc9f8528fa12b8204edc5e1ae8b1d7b750234e7", size = 99914, upload-time = "2026-04-17T23:06:54.39Z" },
+]
+
+[[package]]
 name = "defusedxml"
 version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2573,6 +2588,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5b/f5/4ec618ed16cc4f8fb3b701563655a69816155e79e24a17b651541804721d/markdown_it_py-4.0.0.tar.gz", hash = "sha256:cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3", size = 73070, upload-time = "2025-08-11T12:57:52.854Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
+]
+
+[[package]]
+name = "markdownify"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/bc/c8c8eea5335341306b0fa7e1cb33c5e1c8d24ef70ddd684da65f41c49c92/markdownify-1.2.2.tar.gz", hash = "sha256:b274f1b5943180b031b699b199cbaeb1e2ac938b75851849a31fd0c3d6603d09", size = 18816, upload-time = "2025-11-16T19:21:18.565Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/ce/f1e3e9d959db134cedf06825fae8d5b294bd368aacdd0831a3975b7c4d55/markdownify-1.2.2-py3-none-any.whl", hash = "sha256:3f02d3cc52714084d6e589f70397b6fc9f2f3a8531481bf35e8cc39f975e186a", size = 15724, upload-time = "2025-11-16T19:21:17.622Z" },
 ]
 
 [[package]]
@@ -5152,6 +5180,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypandoc"
+version = "1.17"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/d6/410615fc433e5d1eacc00db2044ae2a9c82302df0d35366fe2bd15de024d/pypandoc-1.17.tar.gz", hash = "sha256:51179abfd6e582a25ed03477541b48836b5bba5a4c3b282a547630793934d799", size = 69071, upload-time = "2026-03-14T22:39:07.21Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/86/e2ffa604eacfbec3f430b1d850e7e04c4101eca1a5828f9ae54bf51dfba4/pypandoc-1.17-py3-none-any.whl", hash = "sha256:01fdbffa61edb9f8e82e8faad6954efcb7b6f8f0634aead4d89e322a00225a67", size = 23554, upload-time = "2026-03-14T22:38:46.007Z" },
+]
+
+[[package]]
 name = "pypdfium2"
 version = "5.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5504,6 +5541,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
+    { name = "datasketch" },
     { name = "docling" },
     { name = "fastapi" },
     { name = "langchain-core" },
@@ -5512,6 +5550,7 @@ dependencies = [
     { name = "langfuse" },
     { name = "langgraph" },
     { name = "litellm" },
+    { name = "markdownify" },
     { name = "mcp" },
     { name = "minio" },
     { name = "nemoguardrails" },
@@ -5523,12 +5562,14 @@ dependencies = [
     { name = "prometheus-client" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "pypandoc" },
     { name = "pyyaml" },
     { name = "redis" },
     { name = "sentence-transformers" },
     { name = "temporalio" },
     { name = "torch" },
     { name = "transformers" },
+    { name = "tree-sitter-python" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "weaviate-client" },
 ]
@@ -5601,6 +5642,7 @@ requires-dist = [
     { name = "bitsandbytes", marker = "extra == 'visual'", specifier = ">=0.43.0" },
     { name = "chromadb", marker = "extra == 'chromadb'" },
     { name = "colpali-engine", marker = "extra == 'visual'", specifier = ">=0.3.0" },
+    { name = "datasketch", specifier = ">=1.6.0" },
     { name = "deptry", marker = "extra == 'dev'" },
     { name = "docling", specifier = ">=2.82.0" },
     { name = "fastapi" },
@@ -5614,6 +5656,7 @@ requires-dist = [
     { name = "langgraph" },
     { name = "leidenalg", marker = "extra == 'kg'" },
     { name = "litellm" },
+    { name = "markdownify", specifier = ">=0.13.0" },
     { name = "mcp", specifier = ">=1.26.0" },
     { name = "minio" },
     { name = "nemoguardrails", specifier = ">=0.21.0" },
@@ -5627,6 +5670,7 @@ requires-dist = [
     { name = "prometheus-client" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyjwt", extras = ["crypto"] },
+    { name = "pypandoc", specifier = ">=1.13" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-json-report", marker = "extra == 'dev'", specifier = ">=1.5.0" },
@@ -5649,6 +5693,7 @@ requires-dist = [
     { name = "torch" },
     { name = "transformers" },
     { name = "tree-sitter", marker = "extra == 'kg'" },
+    { name = "tree-sitter-python", specifier = ">=0.23.0" },
     { name = "tree-sitter-verilog", marker = "extra == 'kg'" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "weaviate-client" },

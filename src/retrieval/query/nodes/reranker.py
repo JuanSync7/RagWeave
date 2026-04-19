@@ -1,12 +1,17 @@
 # @summary
-# Local BAAI bge-reranker-v2-m3 wrapper for reranking search results.
-# Key exports: LocalBGEReranker, RankedResult
-# Deps: transformers, torch, config.settings (RERANKER_MODEL_PATH, RERANK_TOP_K,
-#       RERANKER_MAX_LENGTH, RERANKER_BATCH_SIZE, RERANKER_PRECISION),
+# Reranker providers: local BAAI bge-reranker-v2-m3 and LiteLLM-backed vLLM.
+# Key exports: LocalBGEReranker, LiteLLMReranker, RankedResult, get_reranker_provider
+# Deps: transformers, torch (local path only), litellm (vllm path only),
+#       config.settings (RERANKER_MODEL_PATH, RERANK_TOP_K, RERANKER_MAX_LENGTH,
+#       RERANKER_BATCH_SIZE, RERANKER_PRECISION, INFERENCE_BACKEND, VLLM_TIMEOUT_SECONDS),
 #       src.vector_db.common.schemas, src.retrieval.common.schemas,
 #       src.retrieval.common.exceptions
 # @end-summary
-"""Local BAAI bge-reranker-v2-m3 wrapper for reranking search results.
+"""Reranker provider implementations and factory.
+
+Two backends:
+  local  — BAAI/bge-reranker-v2-m3 loaded in-process via transformers (default)
+  vllm   — Qwen3-Reranker served by a separate vLLM container via LiteLLM
 
 Uses transformers directly instead of FlagEmbedding to avoid compatibility
 issues with transformers >= 5.x.
@@ -27,6 +32,8 @@ from config.settings import (
     RERANKER_MAX_LENGTH,
     RERANKER_BATCH_SIZE,
     RERANKER_PRECISION,
+    INFERENCE_BACKEND,
+    VLLM_TIMEOUT_SECONDS,
 )
 from src.platform.observability import get_tracer
 from src.vector_db.common import SearchResult
@@ -208,4 +215,77 @@ class LocalBGEReranker:
             return top_results
 
 
-__all__ = ["LocalBGEReranker", "RankedResult"]
+class LiteLLMReranker:
+    """Reranker backed by ``litellm.rerank()`` routing to a vLLM /v1/rerank endpoint.
+
+    The ``model`` name is resolved by the LiteLLM router config
+    (``RAG_LLM_ROUTER_CONFIG``) to the actual backend URL and served-model name.
+    """
+
+    def __init__(self, model: str = "reranking", timeout: int = VLLM_TIMEOUT_SECONDS) -> None:
+        self.model = model
+        self.timeout = timeout
+        self.tracer = get_tracer()
+
+    def rerank(
+        self,
+        query: str,
+        documents: list[SearchResult],
+        top_k: int = RERANK_TOP_K,
+    ) -> list[RankedResult]:
+        """Rerank documents against a query via LiteLLM.
+
+        Args:
+            query: The search query.
+            documents: List of SearchResult objects from the vector DB layer.
+            top_k: Number of top results to return.
+
+        Returns:
+            Sorted list of RankedResult (highest relevance score first).
+        """
+        import litellm  # noqa: PLC0415 — deferred so API container never imports it
+
+        if not documents:
+            return []
+
+        with self.tracer.span(
+            "reranker.rerank",
+            {"input_count": len(documents), "top_k": top_k},
+        ) as span:
+            resp = litellm.rerank(
+                model=self.model,
+                query=query,
+                documents=[d.text for d in documents],
+                top_n=top_k,
+                timeout=self.timeout,
+            )
+            raw_results = resp.results or []
+            results = [
+                RankedResult(
+                    text=documents[r["index"]].text,
+                    score=r["relevance_score"],
+                    metadata=documents[r["index"]].metadata,
+                )
+                for r in sorted(raw_results, key=lambda x: x["relevance_score"], reverse=True)
+            ]
+            if results:
+                values = [r.score for r in results]
+                span.set_attribute("score_min", min(values))
+                span.set_attribute("score_max", max(values))
+                span.set_attribute("output_count", len(results))
+            return results
+
+
+def get_reranker_provider():
+    """Return the configured reranker provider.
+
+    Reads ``INFERENCE_BACKEND`` from settings:
+      - ``"vllm"``  → :class:`LiteLLMReranker` (routes via LiteLLM to vLLM)
+      - anything else → :class:`LocalBGEReranker` (in-process transformers)
+    """
+    if INFERENCE_BACKEND == "vllm":
+        return LiteLLMReranker(timeout=VLLM_TIMEOUT_SECONDS)
+    return LocalBGEReranker()
+
+
+__all__ = ["LocalBGEReranker", "LiteLLMReranker", "RankedResult", "get_reranker_provider"]

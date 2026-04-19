@@ -505,8 +505,7 @@ Health Score Trend:
 ## Part 4: Implementation Priority
 
 ### Phase 1: Foundation (Week 1-2)
-1. Create `requirements.txt` with pinned versions
-2. Set up `eval/` directory structure
+1. Set up `eval/` directory structure
 3. Write golden dataset (20-30 queries across all categories)
 4. Implement `eval/metrics.py` (automated metrics, no LLM needed)
 5. Implement basic `eval/run_eval.py` (no augmentation yet)

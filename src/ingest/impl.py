@@ -47,7 +47,7 @@ from config.settings import (
     RAG_INGESTION_MIRROR_DIR,
     RAG_INGESTION_EXPORT_EXTENSIONS,
 )
-from src.core import LocalBGEEmbeddings
+from src.core import get_embedding_provider
 from src.core import (
     KnowledgeGraphBuilder,
     export_obsidian,
@@ -782,7 +782,7 @@ def ingest_directory(
 
         runtime = Runtime(
             config=config,
-            embedder=LocalBGEEmbeddings(),
+            embedder=get_embedding_provider(),
             weaviate_client=client,
             kg_builder=KnowledgeGraphBuilder(use_gliner=GLINER_ENABLED)
             if config.build_kg

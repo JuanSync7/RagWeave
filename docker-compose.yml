@@ -58,7 +58,6 @@ services:
     restart: unless-stopped
 
   temporal-db:
-    profiles: ["temporal"]
     image: postgres:16-alpine
     container_name: rag-temporal-db
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
@@ -74,9 +73,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   temporal:
-    profiles: ["temporal"]
     image: temporalio/auto-setup:latest
     container_name: rag-temporal
     ports:
@@ -93,9 +92,9 @@ services:
     depends_on:
       temporal-db:
         condition: service_healthy
+    restart: unless-stopped
 
   temporal-ui:
-    profiles: ["temporal"]
     image: temporalio/ui:latest
     container_name: rag-temporal-ui
     ports:
@@ -105,6 +104,7 @@ services:
       - TEMPORAL_CORS_ORIGINS=http://localhost:${LANGFUSE_PORT:-3000}
     depends_on:
       - temporal
+    restart: unless-stopped
 
   rag-api:
     profiles: ["app"]
@@ -239,6 +239,8 @@ services:
     image: redis:7-alpine
     container_name: rag-redis
     command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${RAG_REDIS_PORT:-6379}:6379"
     volumes:
       - rag-redis-data:/data
     restart: unless-stopped
@@ -460,6 +462,68 @@ services:
       - "${LANGFUSE_PORT:-3000}:3000"
     restart: unless-stopped
 
+  rag-vllm-embed:
+    profiles: ["inference"]
+    image: vllm/vllm-openai:latest
+    container_name: rag-vllm-embed
+    ports:
+      - "${RAG_VLLM_EMBED_PORT:-8001}:8001"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    command: >
+      --host 0.0.0.0
+      --port 8001
+      --model ${RAG_VLLM_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
+      --served-model-name embedding
+      --dtype ${RAG_VLLM_DTYPE:-auto}
+    volumes:
+      - vllm-embed-cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  rag-vllm-rerank:
+    profiles: ["inference"]
+    image: vllm/vllm-openai:latest
+    container_name: rag-vllm-rerank
+    ports:
+      - "${RAG_VLLM_RERANK_PORT:-8002}:8002"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    command: >
+      --host 0.0.0.0
+      --port 8002
+      --model ${RAG_VLLM_RERANKER_MODEL:-Qwen/Qwen3-Reranker-0.6B}
+      --served-model-name reranking
+      --dtype ${RAG_VLLM_DTYPE:-auto}
+    volumes:
+      - vllm-rerank-cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   rag-nginx:
     profiles: ["app"]
     image: nginx:alpine
@@ -492,3 +556,5 @@ volumes:
   langfuse-minio-data:
   prometheus-data:
   grafana-data:
+  vllm-embed-cache:
+  vllm-rerank-cache:

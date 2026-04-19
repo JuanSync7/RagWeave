@@ -8,6 +8,37 @@ Operations and tooling scripts: container compose wrapper, backup/restore, DR dr
 
 This directory contains operations and development tooling scripts for running, scaling, and maintaining the RAG stack.
 
+## Quick Verification (LLM agents: read this first)
+
+When making changes — especially to deps, imports, or containers — run these checks in order:
+
+| Make target | What it catches | When to run |
+| --- | --- | --- |
+| `make py-compile-check` | Syntax errors in all `.py` files | After any Python edit |
+| `make import-check` | Broken internal imports, encapsulation violations | After any import change or refactor |
+| `make dep-check` | Missing/unused deps in `pyproject.toml` | After adding/removing a package |
+| `make container-dep-check` | `pyproject.toml` out of sync with `containers/requirements-*.txt` | After editing requirements files |
+| `make container-probe` | Worker import failures inside the built `rag-api` image | After rebuilding `rag-api` |
+| `make container-probe-worker` | Worker import failures inside the built `rag-worker` image | After rebuilding `rag-worker` |
+| `make container-probe-vllm` | vLLM embed + rerank container health | After `--profile inference up` or `make restart-vllm` |
+| `make restart-vllm` | Restart `rag-vllm-embed` + `rag-vllm-rerank` | After changing `RAG_VLLM_*` config |
+| `make vllm-pull-models` | Pre-warm Qwen3 model caches on first use | First-time vLLM inference setup |
+| `make test` | Full pytest suite | Before committing or after functional changes |
+| `make precommit-check` | L1+L2+L3+L4+TypeScript (tracked files only) | Before every commit |
+
+**Key rules for `containers/requirements-*.txt`:**
+- `requirements-api.txt` — deps for the FastAPI server (lean ~390 MB image; no torch/ML)
+- `requirements-worker.txt` — deps for the Temporal worker (heavy ~9 GB image; includes torch, docling, transformers)
+- If a dep is used by code that runs in the worker (anything under `src/`, `server/activities.py`, `server/worker.py`), it must be in `requirements-worker.txt` — not just `requirements-api.txt`.
+- `make container-dep-check` verifies pyproject.toml sync but does NOT validate which requirements file contains each dep. Use `make container-probe-worker` to catch missing worker deps without a full end-to-end run.
+- Adding deps to the worker image increases its size (~9 GB already); small packages (litellm, prometheus-client) add ~50–200 MB each.
+
+**Underlying scripts:**
+- `scripts/check_container_deps.py` — backing script for `make container-dep-check`
+- `scripts/import_check_tracked.py` — backing script for `make import-check-tracked`
+
+---
+
 ## Container Management
 
 | Script | Purpose |
@@ -48,14 +79,24 @@ This directory contains operations and development tooling scripts for running, 
 
 | Script | Purpose |
 | --- | --- |
+| `check_container_deps.py` | Verifies `containers/requirements-*.txt` stay in sync with `pyproject.toml`. Backing script for `make container-dep-check`. |
+| `import_check_tracked.py` | Checks internal imports for git-tracked files only. Backing script for `make import-check-tracked`. |
 | `ollama_host_proxy.py` | Proxy that forwards Ollama requests from containers to the host Ollama service (avoids `host.docker.internal` config). |
 | `warmup_docling_models.py` | Pre-downloads Docling layout and TableFormer models before ingestion runs. |
 | `temporal_worker.py` | Convenience script to start a Temporal worker (alternative to `python -m server.worker`). |
 | `format_spec_fr_blocks.py` | Developer utility: normalizes FR block formatting in spec Markdown documents. |
+| `fix-docker-networking.sh` | Fixes Docker bridge networking on WSL2 (run via `/etc/wsl.conf` on boot — not needed manually). |
 
 ## Usage Examples
 
 ```bash
+# Full verification sweep before committing
+make precommit-check
+
+# Check if container images have all required imports
+make container-probe        # API image
+make container-probe-worker # Worker image (catches missing ML/LLM deps)
+
 # Start infrastructure (auto-detects Docker vs Podman)
 ./scripts/compose.sh --profile temporal up -d
 

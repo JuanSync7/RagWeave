@@ -1,12 +1,11 @@
 # @summary
 # Static validation tests for project configuration, dependency declarations,
 # README installation instructions, and environment-driven config usage.
-# Verifies that pyproject.toml and requirements.txt stay in sync, all third-party
-# imports are declared, ports/URLs are configurable via env vars, and README
-# documents installation steps.
+# Verifies all third-party imports are declared, ports/URLs are configurable
+# via env vars, and README documents installation steps.
 # Also contains exhaustive runtime tests for validate_all_config() and
 # validate_visual_retrieval_config() covering every validation rule enforced.
-# Exports: TestDependencyCompleteness, TestRequirementsTxtSync, TestReadmeInstallation,
+# Exports: TestDependencyCompleteness, TestReadmeInstallation,
 #          TestConfigNotHardcoded, TestDockerfileBuildDeps, TestValidateAllConfig,
 #          TestValidateVisualRetrievalConfig
 # Deps: pytest, pathlib, re, ast, tomllib, config.settings
@@ -114,6 +113,10 @@ _PYPROJECT_IMPORT_MAP: dict[str, set[str]] = {
     "pyverilog": {"pyverilog"},
     "tree-sitter": {"tree_sitter"},
     "tree-sitter-verilog": {"tree_sitter_verilog"},
+    "tree-sitter-python": {"tree_sitter_python"},
+    "datasketch": {"datasketch"},
+    "markdownify": {"markdownify"},
+    "pypandoc": {"pypandoc"},
     # Dev deps
     "pytest": {"pytest"},
     "pytest-mock": {"pytest_mock"},
@@ -146,11 +149,6 @@ def project_root() -> Path:
 @pytest.fixture
 def pyproject_text(project_root: Path) -> str:
     return (project_root / "pyproject.toml").read_text()
-
-
-@pytest.fixture
-def requirements_text(project_root: Path) -> str:
-    return (project_root / "requirements.txt").read_text()
 
 
 @pytest.fixture
@@ -191,17 +189,6 @@ def _parse_pyproject_deps(text: str) -> list[str]:
     return deps
 
 
-def _parse_requirements_deps(text: str) -> list[str]:
-    """Extract dependency names from requirements.txt."""
-    deps: list[str] = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        match = re.match(r"([a-zA-Z0-9_-]+)", stripped)
-        if match:
-            deps.append(match.group(1).lower())
-    return deps
 
 
 def _collect_third_party_imports(source_dirs: list[Path]) -> set[str]:
@@ -288,46 +275,7 @@ class TestDependencyCompleteness:
 
 
 # =========================================================================
-# Test Class B: requirements.txt ↔ pyproject.toml Sync
-# =========================================================================
-
-class TestRequirementsTxtSync:
-    """Verify requirements.txt stays in sync with pyproject.toml."""
-
-    def test_requirements_matches_pyproject(
-        self, pyproject_text: str, requirements_text: str
-    ):
-        """Every dependency in pyproject.toml should appear in requirements.txt."""
-        pyproject_deps = set(_parse_pyproject_deps(pyproject_text))
-        req_deps = set(_parse_requirements_deps(requirements_text))
-        missing_from_req = pyproject_deps - req_deps
-        assert not missing_from_req, (
-            f"Dependencies in pyproject.toml but missing from requirements.txt: "
-            f"{sorted(missing_from_req)}"
-        )
-
-    def test_requirements_no_extras_vs_pyproject(
-        self, pyproject_text: str, requirements_text: str
-    ):
-        """requirements.txt should not list dependencies absent from pyproject.toml."""
-        pyproject_deps = set(_parse_pyproject_deps(pyproject_text))
-        req_deps = set(_parse_requirements_deps(requirements_text))
-        extra_in_req = req_deps - pyproject_deps
-        assert not extra_in_req, (
-            f"Dependencies in requirements.txt but not in pyproject.toml: "
-            f"{sorted(extra_in_req)}"
-        )
-
-    def test_requirements_has_header_comment(self, requirements_text: str):
-        """requirements.txt should document that it mirrors pyproject.toml."""
-        first_line = requirements_text.splitlines()[0].lower()
-        assert "pyproject" in first_line, (
-            "requirements.txt should reference pyproject.toml in its header comment"
-        )
-
-
-# =========================================================================
-# Test Class C: README Installation Instructions
+# Test Class B: README Installation Instructions
 # =========================================================================
 
 class TestReadmeInstallation:

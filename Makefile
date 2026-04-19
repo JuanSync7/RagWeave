@@ -7,9 +7,11 @@
 .PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check import-check-tracked \
         all-check precommit-check setup restart restart-all \
+        start dev tunnel restart-worker restart-vllm vllm-pull-models \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
-        container-build-podman container-probe container-sizes container-clean \
+        container-build-podman container-probe container-probe-worker container-probe-vllm \
+        container-sizes container-clean \
         smoke-test container-build-and-test
 
 # Default target: print the help menu when `make` is run with no arguments.
@@ -56,10 +58,22 @@ help:
 	@echo "  container-build-worker  Build only rag-worker"
 	@echo "  container-build-podman  Build both with podman (--format docker)"
 	@echo "  container-probe             Run the API import probe inside rag-api"
+	@echo "  container-probe-worker      Run the worker import probe inside rag-worker (catches missing deps)"
 	@echo "  container-sizes             Print current rag-api / rag-worker image sizes"
 	@echo "  container-clean             Remove local rag-api / rag-worker images + dangling images"
 	@echo "  smoke-test                  Full integration check: build + stack + tunnel + checks"
 	@echo "  container-build-and-test    Build images then immediately run smoke-test (SKIP_BUILD=1)"
+	@echo ""
+	@echo "Inference backend (vLLM — requires --profile inference)"
+	@echo "  restart-vllm           Restart rag-vllm-embed + rag-vllm-rerank (after config change)"
+	@echo "  container-probe-vllm   Health-check both vLLM containers on localhost"
+	@echo "  vllm-pull-models       Pre-warm Qwen3 model caches (first-time inference setup)"
+	@echo ""
+	@echo "Daily dev startup (cold start after WSL2 restart)"
+	@echo "  restart-worker     Rebuild + restart rag-worker (use after .env or code changes)"
+	@echo "  start              Bring up infra + workers (no rebuild)"
+	@echo "  dev                Start uvicorn with hot-reload (run in its own terminal)"
+	@echo "  tunnel             Start Cloudflare trycloudflare.com tunnel (run in its own terminal)"
 	@echo ""
 	@echo "Stack restart (uses scripts/restart_stack.sh — auto-detects docker/podman)"
 	@echo "  restart            Restart app + workers with rebuild"
@@ -232,6 +246,45 @@ all-check:
 	npm --prefix server/console/web ci
 	$(MAKE) console-check
 
+# ---------------------------------------------------------------------------
+# Daily dev startup
+#
+# Cold-start sequence after a WSL2 restart:
+#   1. (WSL2 only, auto via /etc/wsl.conf) fix-docker-networking.sh
+#   2. make start          — infra + workers in background
+#   3. make dev            — uvicorn in a dedicated terminal (hot-reload)
+#   4. make tunnel         — cloudflared in a dedicated terminal
+#
+# `make start` is idempotent — safe to re-run if containers are already up.
+# ---------------------------------------------------------------------------
+
+restart-worker:
+	./scripts/compose.sh --profile workers build rag-worker
+	./scripts/compose.sh --profile workers up -d --force-recreate rag-worker
+
+start:
+	docker compose up -d
+	./scripts/compose.sh --profile workers up -d
+	@# Start the Ollama host proxy so containers can reach Ollama on the host.
+	@# Ports come from .env (RAG_OLLAMA_PORT / RAG_OLLAMA_PROXY_PORT), defaulting to 11434/11435.
+	@# No-op if already running on the proxy port. Logs to /tmp/ollama_proxy.log.
+	@proxy_port=$$(grep -s '^RAG_OLLAMA_PROXY_PORT=' .env | cut -d= -f2); \
+	proxy_port=$${proxy_port:-11435}; \
+	if ! ss -tlnp 2>/dev/null | grep -q ":$$proxy_port "; then \
+		nohup env $$(grep -s '^RAG_OLLAMA' .env | xargs) \
+			$(shell pwd)/.venv/bin/python scripts/ollama_host_proxy.py \
+			> /tmp/ollama_proxy.log 2>&1 & \
+		echo ">>> Ollama proxy started on :$$proxy_port (pid $$!)"; \
+	else \
+		echo ">>> Ollama proxy already running on :$$proxy_port"; \
+	fi
+
+dev:
+	uv run uvicorn server.api:app --host 0.0.0.0 --port 8000 --reload
+
+tunnel:
+	cloudflared tunnel --url http://localhost:8000
+
 restart: console-build
 	./scripts/restart_stack.sh --temporal --app --workers --build
 
@@ -283,6 +336,51 @@ container-probe:
 	else \
 		echo "neither docker nor podman found"; exit 1; \
 	fi
+
+# Run the import probe inside the built worker image. Catches missing deps in
+# requirements-worker.txt (e.g. litellm, prometheus-client) that don't surface
+# until the worker tries to serve a real activity. Detects docker vs podman.
+container-probe-worker:
+	@if command -v docker >/dev/null 2>&1; then \
+		docker run --rm --entrypoint "" ragweave-rag-worker \
+			sh -c 'cd /app && python -c "from server.activities import execute_rag_query, init_rag_chain; print(\"[probe] worker import OK\")"'; \
+	elif command -v podman >/dev/null 2>&1; then \
+		podman run --rm --entrypoint "" ragweave-rag-worker \
+			sh -c 'cd /app && python -c "from server.activities import execute_rag_query, init_rag_chain; print(\"[probe] worker import OK\")"'; \
+	else \
+		echo "neither docker nor podman found"; exit 1; \
+	fi
+
+# Health-check the running vLLM inference containers (requires --profile inference).
+container-probe-vllm:
+	@curl -sf http://localhost:$${RAG_VLLM_EMBED_PORT:-8001}/health \
+		&& echo "[probe] vLLM embed OK" || echo "[probe] vLLM embed FAIL"
+	@curl -sf http://localhost:$${RAG_VLLM_RERANK_PORT:-8002}/health \
+		&& echo "[probe] vLLM rerank OK" || echo "[probe] vLLM rerank FAIL"
+
+# Restart the inference containers (force-recreate picks up model/config changes).
+restart-vllm:
+	./scripts/compose.sh --profile inference up -d --force-recreate rag-vllm-embed rag-vllm-rerank
+
+# Pre-warm the vLLM model caches (first-time setup — avoids cold-start timeout on container boot).
+# Reads RAG_VLLM_EMBEDDING_MODEL and RAG_VLLM_RERANKER_MODEL from the environment (or .env defaults).
+vllm-pull-models:
+	@embed_model=$$(grep -s '^RAG_VLLM_EMBEDDING_MODEL=' .env | cut -d= -f2); \
+	embed_model=$${embed_model:-Qwen/Qwen3-Embedding-0.6B}; \
+	echo "Pre-warming embed model cache: $$embed_model"; \
+	docker run --rm \
+		-e HUGGING_FACE_HUB_TOKEN=$${HUGGING_FACE_HUB_TOKEN:-} \
+		-v vllm-embed-cache:/root/.cache/huggingface \
+		vllm/vllm-openai:latest python -c \
+		"from huggingface_hub import snapshot_download; snapshot_download('$$embed_model')"
+	@rerank_model=$$(grep -s '^RAG_VLLM_RERANKER_MODEL=' .env | cut -d= -f2); \
+	rerank_model=$${rerank_model:-Qwen/Qwen3-Reranker-0.6B}; \
+	echo "Pre-warming rerank model cache: $$rerank_model"; \
+	docker run --rm \
+		-e HUGGING_FACE_HUB_TOKEN=$${HUGGING_FACE_HUB_TOKEN:-} \
+		-v vllm-rerank-cache:/root/.cache/huggingface \
+		vllm/vllm-openai:latest python -c \
+		"from huggingface_hub import snapshot_download; snapshot_download('$$rerank_model')"
 
 # Print current image sizes (podman reports actual disk usage, docker
 # underreports via .Size but shows true sum via 'images').

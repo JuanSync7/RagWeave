@@ -1401,8 +1401,8 @@ class TestAPIResponseSchemas:
 def _make_heavy_init_patches():
     """Return context manager that stubs out all RAGChain __init__ heavy loads."""
     return [
-        patch("src.retrieval.pipeline.rag_chain.LocalBGEEmbeddings"),
-        patch("src.retrieval.pipeline.rag_chain.LocalBGEReranker"),
+        patch("src.retrieval.pipeline.rag_chain.get_embedding_provider"),
+        patch("src.retrieval.pipeline.rag_chain.get_reranker_provider"),
         patch("src.core.knowledge_graph.KnowledgeGraphBuilder"),
         patch("src.retrieval.pipeline.rag_chain.OllamaGenerator"),
         patch("src.retrieval.pipeline.rag_chain.get_tracer", return_value=MagicMock()),
@@ -1468,8 +1468,8 @@ class TestRAGChainVisualTrack:
         mock_tracer.span.return_value.__enter__ = MagicMock(return_value=MagicMock())
         mock_tracer.span.return_value.__exit__ = MagicMock(return_value=False)
 
-        with patch("src.retrieval.pipeline.rag_chain.LocalBGEEmbeddings", return_value=mock_emb), \
-             patch("src.retrieval.pipeline.rag_chain.LocalBGEReranker", return_value=mock_rer), \
+        with patch("src.retrieval.pipeline.rag_chain.get_embedding_provider", return_value=mock_emb), \
+             patch("src.retrieval.pipeline.rag_chain.get_reranker_provider", return_value=mock_rer), \
              patch("src.retrieval.pipeline.rag_chain.OllamaGenerator", return_value=mock_gen), \
              patch("src.retrieval.pipeline.rag_chain.get_tracer", return_value=mock_tracer), \
              patch("src.retrieval.pipeline.rag_chain.get_retry_provider", return_value=MagicMock()), \

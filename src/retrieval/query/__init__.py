@@ -16,7 +16,9 @@ from src.retrieval.query.nodes import (
     QueryAction,
     QueryState,
     LocalBGEReranker,
+    LiteLLMReranker,
     RankedResult,
+    get_reranker_provider,
 )
 
 __all__ = [
@@ -26,5 +28,7 @@ __all__ = [
     "QueryAction",
     "QueryState",
     "LocalBGEReranker",
+    "LiteLLMReranker",
     "RankedResult",
+    "get_reranker_provider",
 ]

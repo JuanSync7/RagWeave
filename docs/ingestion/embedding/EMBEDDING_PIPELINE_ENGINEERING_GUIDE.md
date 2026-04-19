@@ -326,6 +326,25 @@ batch {n}/{total} exhausted retries batch_index={n} chunk_range={start}-{end}
 
 ## 7. Configuration
 
+### Inference backend
+
+```
+INFERENCE_BACKEND=local   # or: vllm
+```
+
+Controls which embedding provider is instantiated by `get_embedding_provider()` in
+`src/core/embeddings.py`:
+
+| Value | Provider class | Notes |
+|-------|---------------|-------|
+| `local` (default) | `LocalBGEEmbeddings` | BAAI/bge-m3 loaded in-process via `sentence-transformers` |
+| `vllm` | `LiteLLMEmbeddings` | Qwen3-Embedding served by the `rag-vllm-embed` Docker service via LiteLLM |
+
+When `INFERENCE_BACKEND=vllm`, `sentence-transformers` is not imported; the worker image
+can run without that package installed. Additional vLLM connection settings (`VLLM_*`) are
+read from `config/settings.py` and validated at startup — an invalid combination causes a
+fast-fail `ValueError` before any file processing begins.
+
 ### Environment variable
 
 ```

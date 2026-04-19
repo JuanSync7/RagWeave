@@ -38,9 +38,15 @@ Options:
   --health-timeout N Seconds to wait for health checks (default: 120)
   -h, --help         Show this help
 
+Note: Temporal (temporal-db, temporal, temporal-ui) is always-on infrastructure
+      and starts automatically with no profile flags needed.
+
 Examples:
-  # Restart infrastructure only (Temporal + DB + UI)
-  ./scripts/restart_stack.sh
+  # Restart infrastructure only (Temporal + Redis base + MinIO + Postgres)
+  docker compose up -d
+
+  # Restart with Redis + API server profile
+  docker compose up -d && docker compose --profile app up -d rag-redis
 
   # Restart with API + workers, force rebuild
   ./scripts/restart_stack.sh --app --workers --build
@@ -53,13 +59,13 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --temporal)      PROFILES+=("temporal"); shift ;;
+        --temporal)      shift ;;  # no-op: temporal is now always-on infrastructure
         --app)           PROFILES+=("app"); shift ;;
         --workers)       PROFILES+=("workers"); shift ;;
         --monitoring)    PROFILES+=("monitoring"); shift ;;
         --observability) PROFILES+=("observability"); shift ;;
         --all)
-            PROFILES+=("temporal" "app" "workers" "monitoring" "observability")
+            PROFILES+=("app" "workers" "monitoring" "observability")
             shift ;;
         --build)         BUILD=true; shift ;;
         --clean)         CLEAN_VOLUMES=true; shift ;;

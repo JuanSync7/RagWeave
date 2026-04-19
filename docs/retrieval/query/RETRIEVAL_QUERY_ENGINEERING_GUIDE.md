@@ -1117,6 +1117,7 @@ All parameters are externalized to configuration files per REQ-903. Changes take
 | `reranking.model` | `str` | — | `RERANKER_MODEL` | Reranking node |
 | `reranking.default_top_k` | `int` | `5` | `RERANK_TOP_K` | Reranking node |
 | `reranking.min_score_threshold` | `float` | `0.30` | `RERANK_MIN_SCORE` | Reranking node |
+| — | `str` | `local` | `INFERENCE_BACKEND` | `reranker.py` — selects `LocalBGEReranker` (`local`) or `LiteLLMReranker` (`vllm`) |
 
 ### Query Processing
 
@@ -1216,6 +1217,7 @@ Each document in `ranked_docs` must have this shape:
 - Expected latency: < 100ms per call (LRU cache eliminates repeated calls).
 
 **Reranker Model:**
+- Provider: selected by `get_reranker_provider()` in `src/retrieval/query/nodes/reranker.py` based on `INFERENCE_BACKEND`. `LocalBGEReranker` (BAAI/bge-reranker-v2-m3, in-process) is used when `INFERENCE_BACKEND=local`; `LiteLLMReranker` (Qwen3-Reranker via the `rag-vllm-rerank` service) is used when `INFERENCE_BACKEND=vllm`.
 - Input: list of `(query, document_text)` pairs.
 - Output: list of raw logit scores.
 - Score normalization: sigmoid applied in the reranking node to produce [0.0, 1.0] scores.

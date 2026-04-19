@@ -32,7 +32,8 @@ from config.settings import (
     RAG_INGESTION_DOCLING_ARTIFACTS_PATH,
     RAG_INGESTION_DOCLING_AUTO_DOWNLOAD,
 )
-from src.core import LocalBGEEmbeddings
+from langchain_core.embeddings import Embeddings
+from src.core import get_embedding_provider
 from src.core import KnowledgeGraphBuilder
 from src.ingest.common import (
     IngestionConfig,
@@ -50,7 +51,7 @@ logger = logging.getLogger("rag.ingest.temporal.activities")
 # Worker-level singletons (initialised once per worker process)
 # ---------------------------------------------------------------------------
 
-_embedder: Optional[LocalBGEEmbeddings] = None
+_embedder: Optional[Embeddings] = None
 _db_client: Optional[Any] = None
 
 
@@ -61,7 +62,7 @@ def prewarm_worker_resources() -> None:
     pay the model-load penalty.
     """
     global _embedder, _db_client
-    _embedder = LocalBGEEmbeddings()
+    _embedder = get_embedding_provider()
     _db_client = db.create_persistent_client()
     logger.info("worker resources prewarmed: embedder + db client ready")
 
@@ -84,10 +85,10 @@ def prewarm_worker_resources() -> None:
         logger.info("Docling disabled (RAG_INGESTION_DOCLING_ENABLED=false) — skipping model warmup")
 
 
-def _get_embedder() -> LocalBGEEmbeddings:
+def _get_embedder() -> Embeddings:
     global _embedder
     if _embedder is None:
-        _embedder = LocalBGEEmbeddings()
+        _embedder = get_embedding_provider()
     return _embedder
 
 

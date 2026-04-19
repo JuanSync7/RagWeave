@@ -1,7 +1,6 @@
 # Temporal worker dependencies — ML models, ingestion, embedding, KG.
 # API server deps are in requirements-api.txt.
 torch
-sentence-transformers
 transformers
 accelerate
 numpy
@@ -22,3 +21,5 @@ pyyaml
 orjson
 minio
 langdetect
+prometheus-client
+litellm

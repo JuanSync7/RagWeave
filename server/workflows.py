@@ -9,12 +9,11 @@
 from datetime import timedelta
 import math
 
-from config.settings import RAG_WORKFLOW_DEFAULT_TIMEOUT_MS
-
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from config.settings import RAG_WORKFLOW_DEFAULT_TIMEOUT_MS
     from server.activities import execute_rag_query
 
 RAG_QUERY_TASK_QUEUE = "rag-query"

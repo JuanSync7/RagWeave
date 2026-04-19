@@ -95,24 +95,130 @@ Redis starts automatically when you use the `app` or `workers` profiles (see bel
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings (LLM provider, API keys, etc.)
 ```
 
-Key settings:
+RagWeave will not start correctly without the three steps below. Everything else has a working default.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RAG_LLM_MODEL` | `ollama/qwen2.5:3b` | LiteLLM model string (`ollama/...`, `openai/...`, `anthropic/...`) |
-| `RAG_LLM_API_BASE` | `http://localhost:11434` | Base URL for local models (Ollama) |
-| `RAG_LLM_API_KEY` | (empty) | API key for cloud providers (OpenAI, Anthropic) |
+---
 
-See [.env.example](.env.example) for the full list.
+#### Step A — Download embedding and reranker models
 
-### 5. Pull an Ollama model (if using local LLM)
+The worker container loads BGE models from your local filesystem. They are not bundled in the image.
 
 ```bash
-ollama pull qwen2.5:3b
+# Option 1: huggingface-cli (recommended)
+pip install huggingface-hub
+huggingface-cli download BAAI/bge-m3 --local-dir ~/models/baai/bge-m3
+huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
+
+# Option 2: git-lfs
+git lfs install
+git clone https://huggingface.co/BAAI/bge-m3 ~/models/baai/bge-m3
+git clone https://huggingface.co/BAAI/bge-reranker-v2-m3 ~/models/baai/bge-reranker-v2-m3
 ```
+
+Then point `RAG_MODEL_ROOT` at the parent directory containing `baai/`:
+
+```bash
+# In .env:
+RAG_MODEL_ROOT=/home/you/models
+```
+
+Or create a symlink so the default (`./models`) resolves correctly:
+
+```bash
+ln -s ~/models <repo>/models
+```
+
+Expected layout inside `$RAG_MODEL_ROOT`:
+
+```
+$RAG_MODEL_ROOT/
+  baai/
+    bge-m3/               ← embedding model (~570 MB)
+    bge-reranker-v2-m3/   ← reranker model (~570 MB)
+```
+
+---
+
+#### Step B — Set up your LLM
+
+**Option 1 — Local (Ollama, default):**
+
+```bash
+# Ollama must be installed and running: https://ollama.com
+ollama pull qwen2.5:3b        # generation model (required)
+```
+
+No further `.env` changes needed — the defaults point at `localhost:11434`.
+
+**Option 2 — Cloud provider (OpenRouter, OpenAI, Anthropic, etc.):**
+
+```bash
+# In .env:
+RAG_LLM_MODEL=openrouter/anthropic/claude-3-haiku   # LiteLLM model string
+RAG_LLM_API_BASE=https://openrouter.ai/api/v1
+RAG_LLM_API_KEY=sk-or-v1-...
+```
+
+LiteLLM model strings follow the pattern `<provider>/<model-name>`. See [LiteLLM docs](https://docs.litellm.ai/docs/providers) for the full list.
+
+---
+
+#### Step C — (Optional) tune behaviour
+
+These have working defaults but are worth reviewing before production use:
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `RAG_LLM_TEMPERATURE` | `0.3` | Generation temperature |
+| `RAG_LLM_MAX_TOKENS` | `1024` | Max tokens per response |
+| `RAG_CACHE_TTL_SECONDS` | `120` | Query result cache lifetime |
+| `RAG_RATE_LIMIT_REQUESTS_PER_MINUTE` | `60` | Per-tenant rate limit |
+| `RAG_MEMORY_MAX_RECENT_TURNS` | `8` | Conversation history window |
+| `RAG_RETRIEVAL_TIMEOUT_MS` | `30000` | End-to-end query timeout |
+
+See [.env.example](.env.example) for all available settings.
+
+---
+
+#### Step D — (Optional) switch to vLLM inference backend
+
+By default, embeddings and reranking run **in-process** inside `rag-worker` using the BGE models from Step A. This works for local dev but loads ~3–4 GB of weights into the worker process and is slow on CPU.
+
+**vLLM mode** offloads inference to two dedicated containers (`rag-vllm-embed` and `rag-vllm-rerank`) running Qwen3 models, routed through LiteLLM. The worker becomes a lean HTTP coordinator and inference scales independently.
+
+```bash
+# 1. Start inference containers (requires Docker + ~1.2 GB HuggingFace download)
+./scripts/compose.sh --profile inference up -d
+
+# 2. Pre-warm Qwen3 model caches (first time only)
+make vllm-pull-models
+
+# 3. Verify both containers are healthy
+make container-probe-vllm
+
+# 4. In .env — switch the worker to vLLM mode:
+RAG_INFERENCE_BACKEND=vllm
+
+# 5. Restart the worker
+make restart-worker
+```
+
+**CPU vs GPU model selection** (set in `.env`):
+
+| Profile | `RAG_VLLM_EMBEDDING_MODEL` | `RAG_VLLM_RERANKER_MODEL` | Notes |
+|---------|---------------------------|--------------------------|-------|
+| CPU / WSL2 (default) | `Qwen/Qwen3-Embedding-0.6B` | `Qwen/Qwen3-Reranker-0.6B` | ~0.6 GB each |
+| GPU (NVIDIA) | `Qwen/Qwen3-Embedding-4B` | `Qwen/Qwen3-Reranker-4B` | ~4 GB each, fp16 |
+
+See the GPU profile comments in `.env.example` for the exact vars to uncomment.
+
+To revert to local BGE models: set `RAG_INFERENCE_BACKEND=local` and `make restart-worker`.
+
+---
+
+> **After changing `.env`:** most settings are read at startup. For changes to take effect in the containerised stack, run `make restart-worker` (worker config) or restart the API container. Generation model changes (e.g. switching Ollama model) only require a worker restart. Embedding or reranker model path changes require `make restart-worker` and confirming the new model files are mounted.
 
 ### 6. Run
 
@@ -132,27 +238,36 @@ python cli.py
 
 ## Running the API Server
 
-For multi-user / production use, run the API server with Temporal workers:
+### Option A — Local dev (fast iteration, no Docker rebuild)
 
 ```bash
-# Terminal 1: Start API server
-source .venv/bin/activate
-uvicorn server.api:app --host 0.0.0.0 --port 8000
+# Terminal 1: Start infrastructure
+./scripts/compose.sh up -d
+./scripts/compose.sh --profile app up -d rag-redis
 
-# Terminal 2: Start Temporal worker
-source .venv/bin/activate
-python -m server.worker
+# Terminal 2: Start API server
+uv run uvicorn server.api:app --host 0.0.0.0 --port 8000
+
+# Terminal 3: Start Temporal worker (optional — needed for ingestion/query workflows)
+uv run python -m server.worker
 ```
 
-Or use Docker/Podman profiles for a fully containerized stack:
+> **WSL2 users:** if inter-container networking is broken after a WSL2 restart, run
+> `sudo ./scripts/fix-docker-networking.sh` once, or set up the automatic fix in
+> `/etc/wsl.conf` — see [WSL2 Setup](#wsl2-setup) below.
+
+### Option B — Fully containerised stack
 
 ```bash
-./scripts/compose.sh --profile temporal --profile app --profile workers up -d
-# Scale workers: ./scripts/compose.sh --profile temporal --profile workers up -d --scale rag-worker=3
+# Start infrastructure + API + workers in containers
+./scripts/restart_stack.sh --app --workers
 
 # After code changes, rebuild + restart:
 make restart        # app + workers
 make restart-all    # all profiles (monitoring, gateway, etc.)
+
+# Scale workers horizontally:
+./scripts/compose.sh --profile workers up -d --scale rag-worker=3
 ```
 
 Then use the CLI client or web console:
@@ -163,6 +278,14 @@ python -m server.cli_client
 
 # User Console (chat):  open http://localhost:8000/console
 # Admin Console (ops):  open http://localhost:8000/console/admin
+```
+
+### Expose publicly via Cloudflare Tunnel (no account needed)
+
+```bash
+cloudflared tunnel --url http://localhost:8000
+# Prints a public https://*.trycloudflare.com URL — share it with anyone.
+# Kill with Ctrl+C when done.
 ```
 
 ## Running Tests
@@ -301,18 +424,47 @@ The `gateway` profile requires the `app` profile. See `certs/README.md` for deta
 
 ### Internet access (Cloudflare Tunnel)
 
-For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free) to get a public HTTPS URL:
+For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free, no account needed) to get a public HTTPS URL:
 
 ```bash
 # Install (one-time)
 sudo apt install cloudflared          # Debian/Ubuntu
 # brew install cloudflared             # macOS
 
-# Start a quick tunnel pointing to your local nginx
+# Point tunnel at the API server (local dev)
+cloudflared tunnel --url http://localhost:8000
+
+# Or point at nginx gateway (containerised stack with TLS)
 cloudflared tunnel --url https://localhost:443 --no-tls-verify
 ```
 
 This prints a public URL like `https://random-name.trycloudflare.com` — share it with anyone. Kill with Ctrl+C when done.
+
+## WSL2 Setup
+
+Docker bridge networking on WSL2 requires a one-time fix per WSL2 session (iptables FORWARD rules are reset when WSL2 restarts). To make it automatic, add a boot command to `/etc/wsl.conf`:
+
+```ini
+# /etc/wsl.conf  (create if it doesn't exist)
+[boot]
+command = "service docker start && iptables -P FORWARD ACCEPT"
+```
+
+After saving, restart WSL2 from PowerShell:
+
+```powershell
+wsl --shutdown
+```
+
+From that point on, Docker inter-container networking will work automatically on every WSL2 startup. No manual steps needed when cloning the repo on a new WSL2 machine.
+
+**Manual fix (current session only):**
+
+```bash
+sudo ./scripts/fix-docker-networking.sh
+```
+
+The script is WSL2-aware — it no-ops on Linux and macOS.
 
 ## Podman Setup
 
@@ -337,18 +489,6 @@ echo "CONTAINER_SOCK=\$XDG_RUNTIME_DIR/podman/podman.sock" >> .env
 
 See `docs/operations/PODMAN_SPEC.md` for full details.
 
-## Model Cache (Containerized Workers)
-
-Containerized workers expect embedding/reranker models mounted at `/models`. Set `RAG_MODEL_ROOT` to your local model directory:
-
-```bash
-export RAG_MODEL_ROOT=/path/to/your/models
-./scripts/compose.sh --profile temporal --profile workers up -d
-```
-
-Default model paths inside the container:
-- Embeddings: `/models/baai/bge-m3`
-- Reranker: `/models/baai/bge-reranker-v2-m3`
 
 ## Overview
 

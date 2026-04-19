@@ -6,7 +6,12 @@
 
 from src.retrieval.query.schemas import QueryAction, QueryResult, QueryState
 from src.retrieval.query.nodes.query_processor import process_query, warm_up_ollama
-from src.retrieval.query.nodes.reranker import LocalBGEReranker, RankedResult
+from src.retrieval.query.nodes.reranker import (
+    LocalBGEReranker,
+    LiteLLMReranker,
+    RankedResult,
+    get_reranker_provider,
+)
 
 __all__ = [
     "QueryAction",
@@ -15,7 +20,9 @@ __all__ = [
     "process_query",
     "warm_up_ollama",
     "LocalBGEReranker",
+    "LiteLLMReranker",
     "RankedResult",
+    "get_reranker_provider",
 ]
 
 # --- Auto-generated re-exports (fix_encapsulation.py) ---
