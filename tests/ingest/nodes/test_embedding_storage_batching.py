@@ -282,9 +282,9 @@ class TestEmbedBatches:
             _embed_batches(embedder, batches)
 
         assert mock_sleep.call_count == 2
-        # Delays: 1.0 * 1 = 1.0, then 1.0 * 2 = 2.0
-        assert mock_sleep.call_args_list[0] == call(1.0)
-        assert mock_sleep.call_args_list[1] == call(2.0)
+        # Delays: _BATCH_RETRY_DELAY * 1 = 0.3, then _BATCH_RETRY_DELAY * 2 = 0.6
+        assert mock_sleep.call_args_list[0] == call(0.3)
+        assert mock_sleep.call_args_list[1] == call(0.6)
 
     def test_empty_batches_list(self):
         embedder = MagicMock()
