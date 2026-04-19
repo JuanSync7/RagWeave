@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Optional
 
 from src.ingest.common import Runtime
@@ -61,6 +62,13 @@ def run_embedding_pipeline(
     Returns:
         Final ``EmbeddingPipelineState`` after all nodes have run.
     """
+    if docling_document is not None:
+        warnings.warn(
+            "docling_document parameter is deprecated and has no effect "
+            "(removed in Phase 3.2). It will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     initial_state: EmbeddingPipelineState = {
         "runtime": runtime,
         "source_key": source_key,

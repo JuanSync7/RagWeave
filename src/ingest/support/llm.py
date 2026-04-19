@@ -49,7 +49,3 @@ def _llm_json(
     except Exception:
         logger.warning("LLM JSON call failed, returning empty dict", exc_info=True)
         return {}
-
-
-# Backward-compatible alias for callers still using the old name.
-_ollama_json = _llm_json

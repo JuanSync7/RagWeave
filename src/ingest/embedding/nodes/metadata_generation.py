@@ -76,6 +76,7 @@ def metadata_generation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     logger.info("metadata_generation complete: source=%s summary_len=%d keywords=%d", state.get("source_name", ""), len(summary), len(parsed_keywords))
     logger.debug("metadata_generation_node completed in %.3fs", time.monotonic() - t0)
     return {
+        "chunks": state["chunks"],
         "metadata_summary": summary,
         "metadata_keywords": parsed_keywords,
         "processing_log": append_processing_log(state, "metadata_generation:ok"),
