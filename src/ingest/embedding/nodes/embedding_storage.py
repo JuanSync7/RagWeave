@@ -20,7 +20,6 @@ from typing import Any
 from src.vector_db import (
     add_documents,
     delete_by_source_key,
-    ensure_collection,
     DocumentRecord,
 )
 from src.ingest.common import append_processing_log
@@ -175,7 +174,6 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
 
     runtime = state["runtime"]
     try:
-        ensure_collection(runtime.weaviate_client)
         if runtime.config.update_mode:
             delete_by_source_key(
                 runtime.weaviate_client,
@@ -221,6 +219,7 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             collection=runtime.config.target_collection or None,
         )
     except Exception as exc:
+        logger.error("embedding_storage failed source=%s: %s", state.get("source_key", ""), exc, exc_info=True)
         return {
             **state,
             "errors": state.get("errors", []) + [f"embedding_storage:{exc}"],

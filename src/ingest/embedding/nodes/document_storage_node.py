@@ -13,7 +13,7 @@ from typing import Any
 
 logger = logging.getLogger("rag.ingest.embedding.document_storage")
 
-from src.db import build_document_id, ensure_bucket, put_document
+from src.db import build_document_id, put_document
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
@@ -57,9 +57,9 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     }
 
     try:
-        ensure_bucket(runtime.db_client, runtime.config.target_bucket or None)
         put_document(runtime.db_client, document_id, content, metadata, runtime.config.target_bucket or None)
     except Exception as exc:
+        logger.error("document_storage failed source=%s: %s", state.get("source_key", ""), exc, exc_info=True)
         return {
             **state,
             "errors": state.get("errors", []) + [f"document_storage:{exc}"],
