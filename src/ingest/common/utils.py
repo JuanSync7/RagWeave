@@ -21,11 +21,14 @@ from typing import Any
 from config.settings import INGESTION_MANIFEST_PATH
 from src.common import parse_json_object
 
-logger = logging.getLogger("rag.ingest.pipeline.stage")
+logger = logging.getLogger("rag.ingest.common.utils")
 
 
 def sha256_path(path: Path) -> str:
     """Compute the SHA-256 digest for a file path.
+
+    Uses chunked reads (64 KB blocks) to avoid loading large files
+    entirely into memory.
 
     Args:
         path: Path to the file to hash.
@@ -33,7 +36,11 @@ def sha256_path(path: Path) -> str:
     Returns:
         Lowercase hex-encoded SHA-256 digest.
     """
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def load_manifest(path: Path = INGESTION_MANIFEST_PATH) -> dict[str, Any]:

@@ -18,7 +18,7 @@ import difflib
 
 from src.ingest.common.types import IngestState
 
-logger = logging.getLogger("rag.ingest.pipeline.stage")
+logger = logging.getLogger("rag.ingest.common.shared")
 
 # -- Pre-compiled regex patterns -----------------------------------------------
 
