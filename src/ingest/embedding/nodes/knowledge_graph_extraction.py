@@ -18,6 +18,8 @@ from src.core import EntityExtractor
 from src.ingest.common import append_processing_log
 from src.ingest.embedding.state import EmbeddingPipelineState
 
+_EXTRACTOR = EntityExtractor()
+
 
 def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     """Extract entity relations and stage triples for downstream KG storage.
@@ -39,11 +41,10 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
         }
 
     try:
-        extractor = EntityExtractor()
         triples = []
         for chunk in state["chunks"]:
-            entities = extractor.extract_entities(chunk.text)
-            relations = extractor.extract_relations(chunk.text, entities)
+            entities = _EXTRACTOR.extract_entities(chunk.text)
+            relations = _EXTRACTOR.extract_relations(chunk.text, entities)
             triples.extend(
                 {
                     "subject": subject,
