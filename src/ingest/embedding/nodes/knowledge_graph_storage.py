@@ -46,6 +46,7 @@ def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any
             "errors": state.get("errors", []) + [f"kg_storage:{exc}"],
             "processing_log": append_processing_log(state, "knowledge_graph_storage:error"),
         }
+    logger.info("knowledge_graph_storage complete: source=%s chunks=%d", state["source_name"], len(state["chunks"]))
     return {
         "processing_log": append_processing_log(state, "knowledge_graph_storage:ok")
     }

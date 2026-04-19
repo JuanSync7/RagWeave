@@ -64,6 +64,7 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             "processing_log": append_processing_log(state, "document_storage:error"),
         }
 
+    logger.info("document_storage complete: doc_id=%s source=%s", document_id, state["source_key"])
     return {
         "document_id": document_id,
         "processing_log": append_processing_log(state, "document_storage:ok"),

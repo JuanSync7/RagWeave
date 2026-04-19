@@ -57,6 +57,7 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         chunk.metadata["citation_source_uri"] = state["source_uri"]
         chunk.metadata["document_id"] = state.get("document_id", "")
         chunk.metadata.update(provenance)
+    logger.info("chunk_enrichment complete: source=%s chunks=%d", state["source_name"], len(state["chunks"]))
     return {
         "chunks": state["chunks"],
         "processing_log": append_processing_log(state, "chunk_enrichment:ok"),

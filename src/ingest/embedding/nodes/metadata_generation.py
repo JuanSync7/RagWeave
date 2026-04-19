@@ -71,6 +71,7 @@ def metadata_generation_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         chunk.metadata["document_summary"] = summary
         chunk.metadata["document_keywords"] = joined_keywords
 
+    logger.info("metadata_generation complete: source=%s summary_len=%d keywords=%d", state.get("source_name", ""), len(summary), len(parsed_keywords))
     return {
         "metadata_summary": summary,
         "metadata_keywords": parsed_keywords,

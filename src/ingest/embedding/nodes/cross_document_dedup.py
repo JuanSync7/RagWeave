@@ -175,6 +175,7 @@ def cross_document_dedup_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     }
 
     log_tag = "cross_document_dedup:degraded" if degraded else "cross_document_dedup:ok"
+    logger.info("cross_document_dedup complete: source=%s", state.get("source_name", ""))
     return {
         "chunks": novel_chunks,
         "dedup_merge_report": merge_report,

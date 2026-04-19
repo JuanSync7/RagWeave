@@ -45,6 +45,7 @@ def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
             "processing_log": append_processing_log(state, "document_ingestion:failed"),
         }
     source_hash = sha256_path(source_path)
+    logger.info("document_ingestion complete: source=%s hash=%s len=%d", source_path.name, source_hash, len(raw_text))
     return {
         "raw_text": raw_text,
         "source_hash": source_hash,

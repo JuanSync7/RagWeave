@@ -73,6 +73,7 @@ def multimodal_processing_node(state: DocumentProcessingState) -> dict[str, Any]
         structure["vision_model"] = config.vision_model
         structure["vision_described_count"] = described_count
 
+    logger.info("multimodal_processing complete: source=%s notes=%d", state["source_name"], len(notes))
     return {
         "multimodal_notes": notes,
         "structure": structure,

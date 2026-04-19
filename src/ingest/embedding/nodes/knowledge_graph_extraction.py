@@ -58,6 +58,7 @@ def knowledge_graph_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
             "processing_log": append_processing_log(state, "knowledge_graph_extraction:error"),
         }
 
+    logger.info("knowledge_graph_extraction complete: source=%s triples=%d", state["source_name"], len(triples))
     return {
         "kg_triples": triples,
         "processing_log": append_processing_log(

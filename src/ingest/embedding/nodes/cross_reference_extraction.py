@@ -38,8 +38,10 @@ def cross_reference_extraction_node(state: EmbeddingPipelineState) -> dict[str, 
             )
         }
     text = state.get("refactored_text") or state.get("cleaned_text", "")
+    refs = cross_refs(text)
+    logger.info("cross_reference_extraction complete: source=%s refs=%d", state.get("source_name", ""), len(refs))
     return {
-        "cross_references": cross_refs(text),
+        "cross_references": refs,
         "processing_log": append_processing_log(
             state, "cross_reference_extraction:ok"
         ),

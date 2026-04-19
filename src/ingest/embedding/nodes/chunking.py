@@ -156,6 +156,7 @@ def chunking_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             "processing_log": append_processing_log(state, "chunking:error"),
         }
 
+    logger.info("chunking complete: source=%s chunks=%d", state["source_name"], len(chunks))
     return {
         "chunks": chunks,
         "processing_log": processing_log,

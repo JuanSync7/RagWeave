@@ -35,6 +35,7 @@ def text_cleaning_node(state: DocumentProcessingState) -> dict[str, Any]:
         cleaned += _FIGURE_NOTES_HEADER + "\n".join(
             f"- {note}" for note in state["multimodal_notes"]
         )
+    logger.info("text_cleaning complete: source=%s cleaned_len=%d", state.get("source_name", ""), len(cleaned))
     return {
         "cleaned_text": cleaned,
         "processing_log": append_processing_log(state, "text_cleaning:ok"),

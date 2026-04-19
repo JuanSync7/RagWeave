@@ -44,6 +44,7 @@ def document_refactoring_node(state: DocumentProcessingState) -> dict[str, Any]:
     prompt = _REFACTOR_PROMPT + state["cleaned_text"][:_MAX_REFACTOR_INPUT]
     response = _llm_json(prompt, config, _REFACTOR_MAX_TOKENS)
     refactored_text = str(response.get("refactored_text", "")).strip()
+    logger.info("document_refactoring complete: source=%s", state.get("source_name", ""))
     return {
         "refactored_text": refactored_text or state["cleaned_text"],
         "processing_log": append_processing_log(state, "document_refactoring:ok"),

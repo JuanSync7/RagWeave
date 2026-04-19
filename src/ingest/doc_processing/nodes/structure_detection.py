@@ -207,4 +207,5 @@ def structure_detection_node(state: DocumentProcessingState) -> dict[str, Any]:
     if parser_instance is not None:
         update["parser_instance"] = parser_instance
 
+    logger.info("structure_detection complete: source=%s strategy=%s", state["source_name"], structure.get("strategy", "unknown"))
     return update
