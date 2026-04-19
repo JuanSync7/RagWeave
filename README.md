@@ -103,31 +103,32 @@ RagWeave will not start correctly without the three steps below. Everything else
 
 #### Step A — Download embedding and reranker models
 
-The worker container loads BGE models from your local filesystem. They are not bundled in the image.
+The worker loads BGE models from your local filesystem — they are not bundled in the image.
+Download them anywhere you like, then tell RagWeave where they are via `RAG_MODEL_ROOT`.
+
+**1. Download the models** (pick one):
 
 ```bash
-# Option 1: huggingface-cli (recommended)
+# huggingface-cli (recommended)
 pip install huggingface-hub
 huggingface-cli download BAAI/bge-m3 --local-dir ~/models/baai/bge-m3
 huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
 
-# Option 2: git-lfs
+# git-lfs
 git lfs install
 git clone https://huggingface.co/BAAI/bge-m3 ~/models/baai/bge-m3
 git clone https://huggingface.co/BAAI/bge-reranker-v2-m3 ~/models/baai/bge-reranker-v2-m3
 ```
 
-Then point `RAG_MODEL_ROOT` at the parent directory containing `baai/`:
+**2. Point `RAG_MODEL_ROOT` at the parent directory** (pick one):
 
 ```bash
-# In .env:
+# Option A — set the env var directly in .env (works anywhere):
 RAG_MODEL_ROOT=/home/you/models
-```
 
-Or create a symlink so the default (`./models`) resolves correctly:
-
-```bash
+# Option B — symlink so the default (./models) resolves correctly:
 ln -s ~/models <repo>/models
+# then leave RAG_MODEL_ROOT=./models in .env (the default)
 ```
 
 Expected layout inside `$RAG_MODEL_ROOT`:
@@ -138,6 +139,10 @@ $RAG_MODEL_ROOT/
     bge-m3/               ← embedding model (~570 MB)
     bge-reranker-v2-m3/   ← reranker model (~570 MB)
 ```
+
+> **Sharing models across projects?** Keep them in one place (e.g. `~/models`) and point each project at them via `RAG_MODEL_ROOT` or a symlink. No duplication needed.
+
+> **Using vLLM instead?** Skip this step entirely — set `RAG_INFERENCE_BACKEND=vllm` and vLLM pulls Qwen3 weights from HuggingFace Hub automatically. See [Step D](#step-d--optional-switch-to-vllm-inference-backend).
 
 ---
 
