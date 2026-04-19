@@ -1,7 +1,7 @@
 # @summary
 # Ingestion common package: shared schemas, utilities, state/config types, node helpers, and inter-phase store.
 # Exports: ManifestEntry, SourceIdentity, ProcessedChunk, IngestState, IngestionConfig, Runtime,
-#          PIPELINE_NODE_NAMES, append_processing_log, sha256_path, load_manifest, save_manifest,
+#          PIPELINE_NODE_NAMES, append_processing_log, sha256_bytes, sha256_path, load_manifest, save_manifest,
 #          CleanDocumentStore, MinioCleanStore
 # Deps: src.ingest.common.schemas, src.ingest.common.utils, src.ingest.common.types, src.ingest.common.shared,
 #       src.ingest.common.clean_store, src.ingest.common.minio_clean_store
@@ -19,6 +19,7 @@ from src.ingest.common.utils import (
     parse_json_object,
     read_text_with_fallbacks,
     save_manifest,
+    sha256_bytes,
     sha256_path,
 )
 from src.ingest.common.types import (
@@ -43,6 +44,7 @@ __all__ = [
     "ManifestEntry",
     "ProcessedChunk",
     "SourceIdentity",
+    "sha256_bytes",
     "sha256_path",
     "load_manifest",
     "save_manifest",

@@ -166,6 +166,8 @@ def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
                 best_ratio = ratio
                 best_start = idx
                 best_end = idx + len(paragraph)
+            if best_ratio > 0.85:
+                break  # high-confidence match; skip remaining paragraphs
         offset += len(paragraph) + 2
     return best_start, best_end, best_ratio
 

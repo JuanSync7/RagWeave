@@ -1,6 +1,6 @@
 # @summary
 # Shared deterministic ingestion utilities for manifest IO, hashing, text reads, and JSON parsing.
-# Exports: sha256_path, load_manifest, save_manifest, read_text_with_fallbacks, parse_json_object
+# Exports: sha256_path, sha256_bytes, load_manifest, save_manifest, read_text_with_fallbacks, parse_json_object
 # Deps: config.settings, pathlib, json, hashlib, src.common.utils
 # @end-summary
 """Deterministic utility helpers shared across ingestion modules.
@@ -22,6 +22,18 @@ from config.settings import INGESTION_MANIFEST_PATH
 from src.common import parse_json_object
 
 logger = logging.getLogger("rag.ingest.common.utils")
+
+
+def sha256_bytes(data: bytes) -> str:
+    """Compute SHA-256 digest for in-memory bytes.
+
+    Args:
+        data: Raw bytes to hash.
+
+    Returns:
+        Lowercase hex-encoded SHA-256 digest.
+    """
+    return hashlib.sha256(data).hexdigest()
 
 
 def sha256_path(path: Path) -> str:

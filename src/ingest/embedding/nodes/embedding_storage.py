@@ -30,7 +30,7 @@ from src.ingest.embedding.state import EmbeddingPipelineState
 logger = logging.getLogger("rag.ingest.embedding.storage")
 
 _BATCH_MAX_RETRIES = 3
-_BATCH_RETRY_DELAY = 1.0  # seconds
+_BATCH_RETRY_DELAY = 0.3  # seconds; kept short to limit event-loop blocking in async paths
 
 
 def _form_batches(items: list, batch_size: int) -> list[list]:
