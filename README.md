@@ -64,11 +64,12 @@ Some features require extra packages that are not installed by default:
 ```bash
 uv pip install -e ".[pii]"          # PII detection (presidio, spacy)
 uv pip install -e ".[gliner]"       # GLiNER entity extraction
-uv pip install -e ".[chromadb]"     # ChromaDB vector store
-uv pip install -e ".[pinecone]"     # Pinecone vector store
-uv pip install -e ".[qdrant]"       # Qdrant vector store
 uv pip install -e ".[all]"          # All optional dependencies
 ```
+
+> **Vector store:** Weaviate is the default and currently the only fully supported backend.
+> ChromaDB, Pinecone, and Qdrant extras (`.[chromadb]`, `.[pinecone]`, `.[qdrant]`) install
+> the client libraries but the backend adapters are not yet implemented — they are planned.
 
 ### 2. Web console (already built by `make setup`)
 
@@ -228,9 +229,6 @@ To revert to local BGE models: set `RAG_INFERENCE_BACKEND=local` and `make resta
 ### 6. Run
 
 ```bash
-# Activate the virtual environment
-source .venv/bin/activate
-
 # Ingest documents
 python -m src.ingest.cli --dir ./documents
 
@@ -246,15 +244,9 @@ python cli.py
 ### Option A — Local dev (fast iteration, no Docker rebuild)
 
 ```bash
-# Terminal 1: Start infrastructure
-./scripts/compose.sh up -d
-./scripts/compose.sh --profile app up -d rag-redis
-
-# Terminal 2: Start API server
-uv run uvicorn server.api:app --host 0.0.0.0 --port 8000
-
-# Terminal 3: Start Temporal worker (optional — needed for ingestion/query workflows)
-uv run python -m server.worker
+make start    # Terminal 1: infrastructure + containerised workers
+make dev      # Terminal 2: API server with hot-reload
+make worker   # Terminal 3: Temporal worker (needed for ingestion/query workflows)
 ```
 
 > **WSL2 users:** if inter-container networking is broken after a WSL2 restart, run
@@ -264,15 +256,9 @@ uv run python -m server.worker
 ### Option B — Fully containerised stack
 
 ```bash
-# Start infrastructure + API + workers in containers
-./scripts/restart_stack.sh --app --workers
-
-# After code changes, rebuild + restart:
-make restart        # app + workers
-make restart-all    # all profiles (monitoring, gateway, etc.)
-
-# Scale workers horizontally:
-./scripts/compose.sh --profile workers up -d --scale rag-worker=3
+make restart                  # start (or rebuild + restart) app + workers in containers
+make restart-all              # all profiles (monitoring, gateway, etc.)
+make scale-workers N=3        # scale workers horizontally
 ```
 
 Then use the CLI client or web console:
@@ -288,10 +274,10 @@ python -m server.cli_client
 ### Expose publicly via Cloudflare Tunnel (no account needed)
 
 ```bash
-cloudflared tunnel --url http://localhost:8000
-# Prints a public https://*.trycloudflare.com URL — share it with anyone.
-# Kill with Ctrl+C when done.
+make tunnel   # prints a public https://*.trycloudflare.com URL — kill with Ctrl+C
 ```
+
+> Requires `cloudflared` system binary — see [Internet access](#internet-access-cloudflare-tunnel) for install instructions.
 
 ## Running Tests
 
@@ -310,7 +296,6 @@ make dep-check                     # L3: deptry
 make container-dep-check           # L4: requirements-*.txt in sync with pyproject.toml
 
 # Targeted pytest invocations still work directly:
-source .venv/bin/activate
 pytest tests/ingest/ -v            # ingestion tests only
 ```
 
@@ -432,12 +417,12 @@ The `gateway` profile requires the `app` profile. See `certs/README.md` for deta
 For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free, no account needed) to get a public HTTPS URL:
 
 ```bash
-# Install (one-time)
+# Install cloudflared (one-time — system binary, not a Python package)
 sudo apt install cloudflared          # Debian/Ubuntu
 # brew install cloudflared             # macOS
 
 # Point tunnel at the API server (local dev)
-cloudflared tunnel --url http://localhost:8000
+make tunnel
 
 # Or point at nginx gateway (containerised stack with TLS)
 cloudflared tunnel --url https://localhost:443 --no-tls-verify

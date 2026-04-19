@@ -7,7 +7,7 @@
 .PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check import-check-tracked \
         all-check precommit-check setup restart restart-all \
-        start dev tunnel restart-worker restart-vllm vllm-pull-models \
+        start start-inference dev worker tunnel restart-worker scale-workers restart-vllm vllm-pull-models \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
         container-build-podman container-probe container-probe-worker container-probe-vllm \
@@ -65,6 +65,7 @@ help:
 	@echo "  container-build-and-test    Build images then immediately run smoke-test (SKIP_BUILD=1)"
 	@echo ""
 	@echo "Inference backend (vLLM — requires --profile inference)"
+	@echo "  start-inference        Start vLLM embed + rerank containers (first time)"
 	@echo "  restart-vllm           Restart rag-vllm-embed + rag-vllm-rerank (after config change)"
 	@echo "  container-probe-vllm   Health-check both vLLM containers on localhost"
 	@echo "  vllm-pull-models       Pre-warm Qwen3 model caches (first-time inference setup)"
@@ -73,6 +74,8 @@ help:
 	@echo "  restart-worker     Rebuild + restart rag-worker (use after .env or code changes)"
 	@echo "  start              Bring up infra + workers (no rebuild)"
 	@echo "  dev                Start uvicorn with hot-reload (run in its own terminal)"
+	@echo "  worker             Start Temporal worker locally (run in its own terminal)"
+	@echo "  scale-workers      Scale containerised workers: make scale-workers N=3"
 	@echo "  tunnel             Start Cloudflare trycloudflare.com tunnel (run in its own terminal)"
 	@echo ""
 	@echo "Stack restart (uses scripts/restart_stack.sh — auto-detects docker/podman)"
@@ -262,8 +265,12 @@ restart-worker:
 	./scripts/compose.sh --profile workers build rag-worker
 	./scripts/compose.sh --profile workers up -d --force-recreate rag-worker
 
+# Scale rag-worker horizontally. Usage: make scale-workers N=3
+scale-workers:
+	./scripts/compose.sh --profile workers up -d --scale rag-worker=$${N:-2}
+
 start:
-	docker compose up -d
+	./scripts/compose.sh up -d
 	./scripts/compose.sh --profile workers up -d
 	@# Start the Ollama host proxy so containers can reach Ollama on the host.
 	@# Ports come from .env (RAG_OLLAMA_PORT / RAG_OLLAMA_PROXY_PORT), defaulting to 11434/11435.
@@ -281,6 +288,9 @@ start:
 
 dev:
 	uv run uvicorn server.api:app --host 0.0.0.0 --port 8000 --reload
+
+worker:
+	uv run python -m server.worker
 
 tunnel:
 	cloudflared tunnel --url http://localhost:8000
@@ -357,6 +367,11 @@ container-probe-vllm:
 		&& echo "[probe] vLLM embed OK" || echo "[probe] vLLM embed FAIL"
 	@curl -sf http://localhost:$${RAG_VLLM_RERANK_PORT:-8002}/health \
 		&& echo "[probe] vLLM rerank OK" || echo "[probe] vLLM rerank FAIL"
+
+# Start the inference containers for the first time (or after they've been stopped).
+# For subsequent config changes, use restart-vllm instead.
+start-inference:
+	./scripts/compose.sh --profile inference up -d
 
 # Restart the inference containers (force-recreate picks up model/config changes).
 restart-vllm:
