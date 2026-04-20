@@ -197,7 +197,8 @@ def test_mock_dedup_degraded_on_exception():
 def test_mock_dedup_fuzzy_canonical_replaced():
     """_try_fuzzy_dedup when incoming chunk is longer than canonical → calls
     _replace_canonical and sets canonical_replaced=True in merge event."""
-    from src.ingest.embedding.nodes.cross_document_dedup import _try_fuzzy_dedup
+    import sys
+    import types
 
     client = MagicMock()
     cfg = _make_config(enable_fuzzy_dedup=True)
@@ -212,31 +213,25 @@ def test_mock_dedup_fuzzy_canonical_replaced():
         "similarity": 0.97,
     }
 
-    with patch(
-        "src.ingest.embedding.nodes.cross_document_dedup.compute_content_hash",
-        return_value="hash123",
-    ), patch(
-        "src.ingest.embedding.embedding.support.minhash_engine.compute_fuzzy_fingerprint",
-        return_value="fingerprint-hex",
-        create=True,
-    ), patch(
-        "src.ingest.embedding.embedding.support.minhash_engine.find_chunk_by_fuzzy_fingerprint",
-        return_value=fuzzy_match,
-        create=True,
-    ), patch(
-        "src.ingest.embedding.nodes.cross_document_dedup._replace_canonical"
-    ) as mock_replace, patch(
-        "src.ingest.embedding.nodes.cross_document_dedup.append_source_document"
-    ) as mock_append, patch(
-        "src.ingest.embedding.support.minhash_engine.compute_fuzzy_fingerprint",
-        return_value="fingerprint-hex",
-        create=True,
-    ), patch(
-        "src.ingest.embedding.support.minhash_engine.find_chunk_by_fuzzy_fingerprint",
-        return_value=fuzzy_match,
-        create=True,
-    ):
-        result = _try_fuzzy_dedup(client, chunk, "hash123", "test.md", cfg, merge_report)
+    mock_compute_fp = MagicMock(return_value="fingerprint-hex")
+    mock_find_fp = MagicMock(return_value=fuzzy_match)
+
+    minhash_mod = types.ModuleType("src.ingest.embedding.support.minhash_engine")
+    minhash_mod.compute_fuzzy_fingerprint = mock_compute_fp
+    minhash_mod.find_chunk_by_fuzzy_fingerprint = mock_find_fp
+    sys.modules["src.ingest.embedding.support.minhash_engine"] = minhash_mod
+
+    try:
+        from src.ingest.embedding.nodes.cross_document_dedup import _try_fuzzy_dedup
+
+        with patch(
+            "src.ingest.embedding.nodes.cross_document_dedup._replace_canonical"
+        ) as mock_replace, patch(
+            "src.ingest.embedding.nodes.cross_document_dedup.append_source_document"
+        ) as mock_append:
+            result = _try_fuzzy_dedup(client, chunk, "hash123", "test.md", cfg, merge_report)
+    finally:
+        sys.modules.pop("src.ingest.embedding.support.minhash_engine", None)
 
     assert result is True
     mock_replace.assert_called_once()
