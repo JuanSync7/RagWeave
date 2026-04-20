@@ -740,3 +740,217 @@ class TestWalkCalls:
 
         call_rels = [r for r in relationships if r["type"] == "calls"]
         assert len(call_rels) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse() tree-sitter success path (lines 110-111)
+# and _extract_docstring() string path (lines 383-384)
+# ---------------------------------------------------------------------------
+
+
+def _ensure_tree_sitter_real() -> bool:
+    """Ensure tree_sitter in sys.modules is the real C-extension module.
+
+    The lifecycle conftest at tests/ingest/lifecycle/conftest.py installs a
+    plain types.ModuleType stub for tree_sitter when it is not yet imported.
+    This helper detects that state and reloads the real package in its place,
+    so tests that depend on the real tree_sitter C extension can run correctly.
+
+    Returns True when the real tree_sitter is functional, False when not available.
+    """
+    import importlib
+    import sys
+    import types
+
+    ts = sys.modules.get("tree_sitter")
+    if ts is None or (isinstance(ts, types.ModuleType) and not hasattr(ts, "Language")):
+        # The stub is installed — try to load the real package
+        try:
+            # Remove the stub so importlib can find the real package
+            sys.modules.pop("tree_sitter", None)
+            ts = importlib.import_module("tree_sitter")
+            sys.modules["tree_sitter"] = ts
+        except Exception:
+            return False
+
+    return hasattr(ts, "Language") and hasattr(ts, "Parser")
+
+
+class TestParseTreeSitterSuccessPath:
+    """Force the tree-sitter successful-parse path (lines 110-111).
+
+    These tests parse real Python source using tree_sitter + tree_sitter_python,
+    ensuring that lines 110-111 (Parser creation and tree assignment) execute.
+    Lines 383-384 (_extract_docstring returning a string) are covered by
+    any chunk that has a docstring.
+
+    NOTE: Some earlier tests in this file temporarily replace tree_sitter in
+    sys.modules (to simulate ImportError paths). Those tests restore the module,
+    but if run in certain orderings the C extensions may not re-bind correctly.
+    These tests use _tree_sitter_functional() to detect that state and skip.
+    """
+
+    _PYTHON_WITH_DOCSTRINGS = """\
+import os
+import sys
+
+X = 42
+
+
+def hello(name):
+    \"\"\"Say hello to name.\"\"\"
+    return f"Hello, {name}"
+
+
+class Greeter:
+    \"\"\"A greeter class.\"\"\"
+
+    def greet(self):
+        \"\"\"Return a greeting string.\"\"\"
+        return "hi"
+"""
+
+    @pytest.fixture(autouse=True)
+    def require_tree_sitter(self):
+        """Restore real tree_sitter if a stub is installed, skip if not available."""
+        if not _ensure_tree_sitter_real():
+            pytest.skip("tree_sitter C-extension not available in this environment")
+
+    def test_mock_parse_creates_tree_sitter_tree(self, tmp_path: Path):
+        """parse() on a real Python file should set self._tree (lines 110-111)."""
+        py_file = tmp_path / "hello.py"
+        py_file.write_text(self._PYTHON_WITH_DOCSTRINGS, encoding="utf-8")
+
+        parser = CodeParser()
+        config = type("Config", (), {"chunk_size": 1000, "chunk_overlap": 200, "parser_strategy": "auto"})()
+
+        result = parser.parse(py_file, config)
+
+        # If tree-sitter-python is installed (it is), self._tree must be non-None
+        assert parser._tree is not None, (
+            "Expected tree-sitter to parse successfully, but _tree is None. "
+            "Ensure tree-sitter-python is installed."
+        )
+        assert result.markdown.startswith("```python")
+
+    def test_mock_chunk_with_real_ast_function_docstring(self, tmp_path: Path):
+        """chunk() with a real AST should extract docstrings via _extract_docstring (lines 383-384)."""
+        py_file = tmp_path / "docstr.py"
+        py_file.write_text(self._PYTHON_WITH_DOCSTRINGS, encoding="utf-8")
+
+        parser = CodeParser()
+        config = type("Config", (), {"chunk_size": 1000, "chunk_overlap": 200, "parser_strategy": "auto"})()
+
+        result = parser.parse(py_file, config)
+
+        # Must have successfully parsed
+        if parser._tree is None:
+            pytest.skip("tree-sitter-python not available; skipping AST docstring test")
+
+        chunks = parser.chunk(result)
+
+        # Find the 'hello' function chunk and verify docstring extraction
+        hello_chunks = [c for c in chunks if c.extra_metadata.get("function_name") == "hello"]
+        assert hello_chunks, "Expected a chunk for function 'hello'"
+        docstring = hello_chunks[0].extra_metadata.get("docstring", "")
+        assert isinstance(docstring, str)
+        # The docstring content should be non-empty (lines 383-384 executed)
+        assert "hello" in docstring.lower() or len(docstring) > 0
+
+    def test_mock_chunk_with_real_ast_class_docstring(self, tmp_path: Path):
+        """chunk() with a real AST should extract class docstrings (lines 383-384)."""
+        py_file = tmp_path / "greeter.py"
+        py_file.write_text(self._PYTHON_WITH_DOCSTRINGS, encoding="utf-8")
+
+        parser = CodeParser()
+        config = type("Config", (), {"chunk_size": 1000, "chunk_overlap": 200, "parser_strategy": "auto"})()
+
+        result = parser.parse(py_file, config)
+
+        if parser._tree is None:
+            pytest.skip("tree-sitter-python not available")
+
+        chunks = parser.chunk(result)
+
+        class_chunks = [c for c in chunks if c.extra_metadata.get("class_name") == "Greeter"]
+        assert class_chunks, "Expected a chunk for class 'Greeter'"
+        docstring = class_chunks[0].extra_metadata.get("docstring", "")
+        assert isinstance(docstring, str)
+        assert len(docstring) > 0  # confirms lines 383-384 executed and returned text
+
+    def test_mock_chunk_real_ast_module_level_chunk(self, tmp_path: Path):
+        """chunk() with a real AST should produce a module-level chunk for imports/constants."""
+        py_file = tmp_path / "modchunk.py"
+        py_file.write_text(self._PYTHON_WITH_DOCSTRINGS, encoding="utf-8")
+
+        parser = CodeParser()
+        config = type("Config", (), {"chunk_size": 1000, "chunk_overlap": 200, "parser_strategy": "auto"})()
+
+        result = parser.parse(py_file, config)
+
+        if parser._tree is None:
+            pytest.skip("tree-sitter-python not available")
+
+        chunks = parser.chunk(result)
+
+        # There should be at least a module-level chunk containing "import" or "X = 42"
+        module_chunks = [c for c in chunks if c.extra_metadata.get("function_name") == "" and c.extra_metadata.get("class_name") == ""]
+        assert len(module_chunks) >= 1
+        combined_text = "\n".join(c.text for c in module_chunks)
+        assert "import" in combined_text or "42" in combined_text
+
+    def test_mock_chunk_real_ast_all_metadata_keys_present(self, tmp_path: Path):
+        """chunk() with a real AST should have all required extra_metadata keys on every chunk."""
+        required_keys = {"language", "file_path", "function_name", "class_name", "docstring", "imports", "decorators"}
+
+        py_file = tmp_path / "fullmeta.py"
+        py_file.write_text(self._PYTHON_WITH_DOCSTRINGS, encoding="utf-8")
+
+        parser = CodeParser()
+        config = type("Config", (), {"chunk_size": 1000, "chunk_overlap": 200, "parser_strategy": "auto"})()
+        result = parser.parse(py_file, config)
+
+        if parser._tree is None:
+            pytest.skip("tree-sitter-python not available")
+
+        chunks = parser.chunk(result)
+        assert len(chunks) >= 3  # module-level + function + class at minimum
+
+        for chunk in chunks:
+            missing = required_keys - set(chunk.extra_metadata.keys())
+            assert not missing, f"Chunk missing keys: {missing}"
+            assert chunk.extra_metadata["language"] == "python"
+            assert isinstance(chunk.extra_metadata["imports"], list)
+            assert isinstance(chunk.extra_metadata["decorators"], list)
+
+    def test_mock_extract_docstring_with_real_python_ast_node(self):
+        """_extract_docstring() should reach lines 383-384 via real AST function node."""
+        import importlib
+        ts = importlib.import_module("tree_sitter")
+        ts_py = importlib.import_module("tree_sitter_python")
+
+        source = 'def greet():\n    """Hello there."""\n    return "hi"\n'
+        source_bytes = source.encode("utf-8")
+
+        lang = ts.Language(ts_py.language())
+        parser_ts = ts.Parser(lang)
+        tree = parser_ts.parse(source_bytes)
+
+        code_parser = CodeParser()
+        code_parser._source_bytes = source_bytes
+        code_parser._language = "python"
+
+        # Find the function_definition node
+        func_node = None
+        for child in tree.root_node.children:
+            if child.type == "function_definition":
+                func_node = child
+                break
+
+        assert func_node is not None, "Expected to find function_definition node"
+
+        docstring = code_parser._extract_docstring(func_node)
+        # Lines 383-384: raw = self._node_text(grandchild) and return raw.strip("\"'").strip()
+        assert isinstance(docstring, str)
+        assert len(docstring) > 0
+        assert "Hello there" in docstring
