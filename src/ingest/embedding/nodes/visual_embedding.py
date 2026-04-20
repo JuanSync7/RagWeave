@@ -81,7 +81,7 @@ def visual_embedding_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     On short-circuit: returns visual_stored_count=0, logs descriptive entry.
     On completion: clears page_images from state (FR-606).
 
-    MUST NOT modify: stored_count, chunks, enriched_chunks, or any
+    MUST NOT modify: stored_count, chunks, or any
     text-track state fields (FR-803).
 
     Args:

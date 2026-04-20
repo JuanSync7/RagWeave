@@ -84,7 +84,6 @@ def run_embedding_pipeline(
         # parse_result and parser_instance are populated by structure_detection_node
         # at runtime via the ParserRegistry — not set here.
         "chunks": [],
-        "enriched_chunks": [],
         "metadata_summary": "",
         "metadata_keywords": [],
         "cross_references": [],
