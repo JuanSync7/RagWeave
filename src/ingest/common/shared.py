@@ -16,7 +16,7 @@ import logging
 import re
 import difflib
 
-from src.ingest.common.types import IngestState
+from typing import Any
 
 logger = logging.getLogger("rag.ingest.common.shared")
 
@@ -91,7 +91,7 @@ def quality_score(text: str) -> float:
     return min(_QUALITY_MAX, score)
 
 
-def append_processing_log(state: IngestState, message: str) -> list[str]:
+def append_processing_log(state: dict[str, Any], message: str) -> list[str]:
     """Append a stage status message to the processing log.
 
     When verbose stage logging is enabled, the message is also emitted to the
