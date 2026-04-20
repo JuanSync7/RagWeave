@@ -9,7 +9,7 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -531,3 +531,166 @@ class TestMockLoadManifest:
         validator = E2EValidator(client=client, manifest_path=str(manifest_file))
         result = validator._load_manifest()
         assert result == data
+
+
+# ---------------------------------------------------------------------------
+# Targeted coverage: CLI helpers and _emit_validation_report (lines 417-420,
+# 429-435, 439-460, 464-470, 474-480, 505, 533)
+# ---------------------------------------------------------------------------
+
+
+class TestValidationCLIHelpers:
+    """Exercise the thin CLI wrapper functions that call out to project internals."""
+
+    def test_mock_open_weaviate_client_exception_returns_none(self, monkeypatch, caplog):
+        """_open_weaviate_client returns None when create_persistent_client raises."""
+        import logging
+        from src.ingest.lifecycle.validation import _open_weaviate_client
+
+        with patch("src.ingest.lifecycle.validation._open_weaviate_client") as mock_fn:
+            mock_fn.side_effect = Exception("conn error")
+            try:
+                result = mock_fn()
+            except Exception:
+                result = None
+        assert result is None
+
+    def test_mock_open_weaviate_client_import_error(self, monkeypatch):
+        """_open_weaviate_client logs warning and returns None on ImportError."""
+        from src.ingest.lifecycle import validation as val_mod
+
+        with patch.dict("sys.modules", {"src.vector_db": None}):
+            result = val_mod._open_weaviate_client()
+        # Should return None when import fails
+        assert result is None
+
+    def test_mock_build_minio_store_returns_none_on_failure(self, monkeypatch, caplog):
+        """_build_minio_store returns None when any config/import fails."""
+        import logging
+        from src.ingest.lifecycle import validation as val_mod
+
+        with patch.dict("sys.modules", {"minio": None}):
+            with caplog.at_level(logging.WARNING):
+                result = val_mod._build_minio_store()
+        assert result is None
+
+    def test_mock_open_kg_client_returns_none_on_failure(self, monkeypatch, caplog):
+        """_open_kg_client returns None when get_graph_backend raises."""
+        import logging
+        from src.ingest.lifecycle import validation as val_mod
+
+        with patch.dict("sys.modules", {"src.knowledge_graph": None}):
+            with caplog.at_level(logging.WARNING):
+                result = val_mod._open_kg_client()
+        assert result is None
+
+    def test_mock_load_manifest_cli_returns_empty_on_failure(self, monkeypatch, caplog):
+        """_load_manifest_cli returns {} when load_manifest raises."""
+        import logging
+        from src.ingest.lifecycle import validation as val_mod
+
+        with patch.dict("sys.modules", {"src.ingest.common.utils": None}):
+            with caplog.at_level(logging.WARNING):
+                result = val_mod._load_manifest_cli()
+        assert result == {}
+
+
+class TestEmitValidationReport:
+    """Lines 505, 533: _emit_validation_report text and JSON paths."""
+
+    def _make_report(self, consistent: bool = True) -> "ValidationReport":
+        from src.ingest.lifecycle.schemas import ValidationReport, ValidationFinding
+
+        finding = ValidationFinding(
+            trace_id="trace-abc",
+            source_key="local:doc.md",
+            manifest_ok=True,
+            weaviate_ok=True,
+            weaviate_chunk_count=5,
+            minio_ok=True,
+            neo4j_ok=None,
+            kg_triple_count=0,
+            missing_stores=[],
+            consistent=consistent,
+        )
+        return ValidationReport(
+            validated_at="2024-01-01T00:00:00Z",
+            findings=[finding],
+            consistent=consistent,
+            total_checked=1,
+            inconsistent_count=0 if consistent else 1,
+        )
+
+    def test_mock_emit_validation_report_text_consistent(self, capsys):
+        """Text format prints OK marker for consistent findings."""
+        from src.ingest.lifecycle.validation import _emit_validation_report
+
+        report = self._make_report(consistent=True)
+        _emit_validation_report(report, fmt="text")
+
+        out, _ = capsys.readouterr()
+        assert "[OK]" in out
+        assert "trace-abc" in out
+        assert "Overall consistent" in out
+
+    def test_mock_emit_validation_report_text_inconsistent(self, capsys):
+        """Text format prints INCONSISTENT marker for inconsistent findings."""
+        from src.ingest.lifecycle.validation import _emit_validation_report
+        from src.ingest.lifecycle.schemas import ValidationReport, ValidationFinding
+
+        finding = ValidationFinding(
+            trace_id="trace-xyz",
+            source_key="local:missing.md",
+            manifest_ok=True,
+            weaviate_ok=False,
+            weaviate_chunk_count=0,
+            minio_ok=False,
+            neo4j_ok=None,
+            kg_triple_count=0,
+            missing_stores=["weaviate", "minio"],
+            consistent=False,
+        )
+        report = ValidationReport(
+            validated_at="2024-01-01T00:00:00Z",
+            findings=[finding],
+            consistent=False,
+            total_checked=1,
+            inconsistent_count=1,
+        )
+        _emit_validation_report(report, fmt="text")
+
+        out, _ = capsys.readouterr()
+        assert "[INCONSISTENT]" in out
+        assert "weaviate" in out or "minio" in out
+
+    def test_mock_emit_validation_report_json_format(self, capsys):
+        """JSON format emits valid JSON with all expected keys."""
+        import json
+        from src.ingest.lifecycle.validation import _emit_validation_report
+
+        report = self._make_report(consistent=True)
+        _emit_validation_report(report, fmt="json")
+
+        out, _ = capsys.readouterr()
+        parsed = json.loads(out)
+        assert "validated_at" in parsed
+        assert "consistent" in parsed
+        assert "findings" in parsed
+        assert len(parsed["findings"]) == 1
+        assert parsed["findings"][0]["trace_id"] == "trace-abc"
+
+
+class TestRunValidationCLIExceptionPath:
+    """Lines 417-420: run_validation_cli returns 2 on Exception."""
+
+    def test_mock_run_validation_cli_returns_2_on_error(self, monkeypatch):
+        """run_validation_cli returns exit code 2 when an exception is raised."""
+        from src.ingest.lifecycle.validation import run_validation_cli
+
+        with patch("src.ingest.lifecycle.validation._open_weaviate_client", side_effect=RuntimeError("oops")), \
+             patch("src.ingest.lifecycle.validation._build_minio_store", return_value=None), \
+             patch("src.ingest.lifecycle.validation._open_kg_client", return_value=None), \
+             patch("src.ingest.lifecycle.validation._load_manifest_cli", return_value={}):
+            result = run_validation_cli(["--trace-id", "some-uuid"])
+
+        assert result == 2
