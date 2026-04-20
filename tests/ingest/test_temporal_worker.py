@@ -326,3 +326,195 @@ class TestRunWorker:
         # 0 user slots should raise
         with pytest.raises(ValueError):
             _validate_slots(0, 1)
+
+
+# ---------------------------------------------------------------------------
+# run_worker() integration — mock Temporal Client.connect and Worker
+# ---------------------------------------------------------------------------
+
+
+class TestRunWorkerIntegration:
+    """Test the actual run_worker() coroutine with fully mocked Temporal deps."""
+
+    def test_mock_run_worker_dual_queue_actual_coroutine(self, monkeypatch):
+        """run_worker() creates two Workers and gathers them in dual-queue mode."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        monkeypatch.setenv("RAG_INGEST_USER_TASK_QUEUE", "u-queue")
+        monkeypatch.setenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", "b-queue")
+        monkeypatch.setenv("RAG_INGEST_USER_SLOTS", "2")
+        monkeypatch.setenv("RAG_INGEST_BACKGROUND_SLOTS", "1")
+
+        fake_client = MagicMock()
+        workers_created = []
+
+        class FakeWorker:
+            def __init__(self, client, *, task_queue, max_concurrent_activities,
+                         workflows, activities):
+                workers_created.append({
+                    "queue": task_queue,
+                    "slots": max_concurrent_activities,
+                })
+
+            async def run(self):
+                pass  # no-op
+
+        monkeypatch.setattr(
+            "src.ingest.temporal.worker.Client",
+            MagicMock(connect=MagicMock(return_value=asyncio.coroutine(lambda: fake_client)()
+                                        if False else None)),
+        )
+
+        async def fake_connect(host):
+            return fake_client
+
+        monkeypatch.setattr("src.ingest.temporal.worker.Client.connect", fake_connect)
+        monkeypatch.setattr("src.ingest.temporal.worker.Worker", FakeWorker)
+        monkeypatch.setattr("src.ingest.temporal.worker.prewarm_worker_resources", lambda: None)
+
+        asyncio.run(worker_mod.run_worker())
+
+        assert len(workers_created) == 2
+        queues = {w["queue"] for w in workers_created}
+        assert "u-queue" in queues
+        assert "b-queue" in queues
+        slots = {w["queue"]: w["slots"] for w in workers_created}
+        assert slots["u-queue"] == 2
+        assert slots["b-queue"] == 1
+
+    def test_mock_run_worker_legacy_mode_actual_coroutine(self, monkeypatch):
+        """run_worker() creates a single Worker in legacy mode and logs warning."""
+        import asyncio
+        import logging
+        from src.ingest.temporal import worker as worker_mod
+
+        monkeypatch.delenv("RAG_INGEST_USER_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_USER_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_WORKER_CONCURRENCY", raising=False)
+
+        fake_client = MagicMock()
+        workers_created = []
+
+        class FakeWorker:
+            def __init__(self, client, *, task_queue, max_concurrent_activities,
+                         workflows, activities):
+                workers_created.append({
+                    "queue": task_queue,
+                    "slots": max_concurrent_activities,
+                })
+
+            async def run(self):
+                pass
+
+        async def fake_connect(host):
+            return fake_client
+
+        monkeypatch.setattr("src.ingest.temporal.worker.Client.connect", fake_connect)
+        monkeypatch.setattr("src.ingest.temporal.worker.Worker", FakeWorker)
+        monkeypatch.setattr("src.ingest.temporal.worker.prewarm_worker_resources", lambda: None)
+
+        asyncio.run(worker_mod.run_worker())
+
+        assert len(workers_created) == 1
+        # Total slots = 3 + 1 = 4 (defaults)
+        assert workers_created[0]["slots"] == 4
+
+    def test_mock_run_worker_validates_slots_before_connect(self, monkeypatch):
+        """run_worker() validates slots BEFORE connecting to Temporal."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        monkeypatch.setenv("RAG_INGEST_USER_SLOTS", "0")  # invalid
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_USER_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_WORKER_CONCURRENCY", raising=False)
+
+        connect_called = []
+
+        async def fake_connect(host):
+            connect_called.append(True)
+            return MagicMock()
+
+        monkeypatch.setattr("src.ingest.temporal.worker.Client.connect", fake_connect)
+        monkeypatch.setattr("src.ingest.temporal.worker.prewarm_worker_resources", lambda: None)
+
+        with pytest.raises(ValueError, match="RAG_INGEST_USER_SLOTS"):
+            asyncio.run(worker_mod.run_worker())
+
+        # Connect should NOT have been called since validation failed first
+        assert connect_called == []
+
+    def test_mock_run_worker_prewarm_called(self, monkeypatch):
+        """run_worker() calls prewarm_worker_resources before connecting."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        monkeypatch.delenv("RAG_INGEST_USER_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_USER_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_WORKER_CONCURRENCY", raising=False)
+
+        prewarm_calls = []
+
+        def fake_prewarm():
+            prewarm_calls.append(True)
+
+        async def fake_connect(host):
+            return MagicMock()
+
+        class FakeWorker:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def run(self):
+                pass
+
+        monkeypatch.setattr("src.ingest.temporal.worker.Client.connect", fake_connect)
+        monkeypatch.setattr("src.ingest.temporal.worker.Worker", FakeWorker)
+        monkeypatch.setattr("src.ingest.temporal.worker.prewarm_worker_resources", fake_prewarm)
+
+        asyncio.run(worker_mod.run_worker())
+
+        assert len(prewarm_calls) == 1
+
+    def test_mock_run_worker_dual_validates_queue_names(self, monkeypatch):
+        """run_worker() validates queue names when dual-queue mode is active."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        # Set queues but make user queue invalid (whitespace)
+        monkeypatch.setenv("RAG_INGEST_USER_TASK_QUEUE", "bad queue name")
+        monkeypatch.setenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", "bg-queue")
+        monkeypatch.delenv("RAG_INGEST_USER_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_WORKER_CONCURRENCY", raising=False)
+
+        monkeypatch.setattr("src.ingest.temporal.worker.prewarm_worker_resources", lambda: None)
+
+        with pytest.raises(ValueError, match="whitespace"):
+            asyncio.run(worker_mod.run_worker())
+
+    def test_mock_main_entry_point_calls_run_worker(self, monkeypatch):
+        """main() should invoke asyncio.run(run_worker()) without error."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        run_called = []
+
+        async def fake_run_worker():
+            run_called.append(True)
+
+        monkeypatch.setattr("src.ingest.temporal.worker.run_worker", fake_run_worker)
+
+        # Patch asyncio.run to call the coroutine synchronously
+        real_asyncio_run = asyncio.run
+        monkeypatch.setattr("asyncio.run", lambda coro: real_asyncio_run(coro))
+
+        worker_mod.main()
+
+        assert len(run_called) == 1

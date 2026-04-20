@@ -1,2 +1,6 @@
 iteration	commit	hypothesis	score	status	change_summary
 001	bc4dbe3	—	75%	keep	baseline — no changes, initial score 75% coverage (1548 tests, 4864 stmts, 1240 missed)
+002	7fa2534	Mock tests for cli.py, embedding/impl.py, cross_document_dedup.py should push to 83-85%	76%	keep	+1% — 24 tests; hypothesis overestimated (modules are small fraction of total stmts)
+003	dd65a2c	Broad mock tests across gc CLI, migration executors, temporal, dedup_utils, common utils	79%	keep	+3% — 102 tests across 7 files; covered CLI helpers, strategy executors, temporal paths
+004	cb62364	Edge-case tests for parser_code, docling, temporal workflows — biggest remaining gaps	82%	keep	+3% — 78 tests across 3 files; parser_code tree-sitter, docling mock, workflow Phase 1/2
+005	5431205	Mock+edge-case tests for impl.py, gc.py, validation.py, visual_embedding.py	84%	keep	+2% — 57 tests across 4 files; impl orchestrator paths, gc report, validation CLI, visual embedding
