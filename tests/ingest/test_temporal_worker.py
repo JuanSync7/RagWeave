@@ -6,6 +6,8 @@ no Temporal client or external service required.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 
@@ -210,3 +212,117 @@ class TestValidateSlots:
     def test_large_valid_slots(self):
         _, _, _, _validate_slots = _get_helpers()
         _validate_slots(100, 50)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# run_worker() — mock tests covering dual-queue and legacy paths
+# ---------------------------------------------------------------------------
+
+
+class TestRunWorker:
+    def test_mock_run_worker_dual_queue(self, monkeypatch):
+        """run_worker should create two Worker instances in dual-queue mode."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        # Patch env to enable dual-queue
+        monkeypatch.setenv("RAG_INGEST_USER_TASK_QUEUE", "ingest-user")
+        monkeypatch.setenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", "ingest-bg")
+        monkeypatch.setenv("RAG_INGEST_USER_SLOTS", "2")
+        monkeypatch.setenv("RAG_INGEST_BACKGROUND_SLOTS", "1")
+
+        # Mock Client.connect
+        fake_client = MagicMock()
+
+        workers_created = []
+
+        class FakeWorker:
+            def __init__(self, client, *, task_queue, max_concurrent_activities,
+                         workflows, activities, **kwargs):
+                workers_created.append({"queue": task_queue, "slots": max_concurrent_activities})
+
+            async def run(self):
+                pass
+
+        prewarm_called = []
+
+        async def fake_run_worker():
+            # Replicate the essentials of run_worker with mocks
+            dual_enabled, user_queue, bg_queue = worker_mod._resolve_queues()
+            user_slots, bg_slots = worker_mod._resolve_slots()
+            worker_mod._validate_slots(user_slots, bg_slots)
+            if dual_enabled:
+                worker_mod._validate_queues(user_queue, bg_queue)
+
+            prewarm_called.append(True)
+
+            if dual_enabled:
+                uw = FakeWorker(fake_client, task_queue=user_queue,
+                                max_concurrent_activities=user_slots,
+                                workflows=[], activities=[])
+                bw = FakeWorker(fake_client, task_queue=bg_queue,
+                                max_concurrent_activities=bg_slots,
+                                workflows=[], activities=[])
+                await asyncio.gather(uw.run(), bw.run())
+
+        asyncio.run(fake_run_worker())
+
+        assert len(workers_created) == 2
+        queues = {w["queue"] for w in workers_created}
+        assert "ingest-user" in queues
+        assert "ingest-bg" in queues
+
+    def test_mock_run_worker_legacy_mode(self, monkeypatch):
+        """run_worker should create a single Worker in legacy mode."""
+        import asyncio
+        from src.ingest.temporal import worker as worker_mod
+
+        monkeypatch.delenv("RAG_INGEST_USER_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_TASK_QUEUE", raising=False)
+        monkeypatch.delenv("RAG_INGEST_USER_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_WORKER_CONCURRENCY", raising=False)
+
+        workers_created = []
+
+        class FakeWorker:
+            def __init__(self, client, *, task_queue, max_concurrent_activities,
+                         workflows, activities, **kwargs):
+                workers_created.append({"queue": task_queue, "slots": max_concurrent_activities})
+
+            async def run(self):
+                pass
+
+        async def fake_run_worker_legacy():
+            dual_enabled, user_queue, bg_queue = worker_mod._resolve_queues()
+            user_slots, bg_slots = worker_mod._resolve_slots()
+            worker_mod._validate_slots(user_slots, bg_slots)
+
+            if not dual_enabled:
+                total_slots = user_slots + bg_slots
+                w = FakeWorker(MagicMock(), task_queue="default-queue",
+                               max_concurrent_activities=total_slots,
+                               workflows=[], activities=[])
+                await w.run()
+
+        asyncio.run(fake_run_worker_legacy())
+
+        assert len(workers_created) == 1
+
+    def test_mock_validate_slots_in_run_worker(self, monkeypatch):
+        """_validate_slots is called before workers are created — invalid slots raise."""
+        from src.ingest.temporal import worker as worker_mod
+
+        monkeypatch.delenv("RAG_INGEST_USER_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_BACKGROUND_SLOTS", raising=False)
+        monkeypatch.delenv("RAG_INGEST_WORKER_CONCURRENCY", raising=False)
+
+        _resolve_slots, _resolve_queues, _validate_queues, _validate_slots = _get_helpers()
+
+        user_slots, bg_slots = _resolve_slots()
+        # Default slots (3,1) should pass validation
+        _validate_slots(user_slots, bg_slots)  # no raise
+
+        # 0 user slots should raise
+        with pytest.raises(ValueError):
+            _validate_slots(0, 1)

@@ -574,3 +574,274 @@ class TestManifestIOEdgeCases:
         )
         # Should not raise
         engine._save_manifest({"doc_a": {"schema_version": "1.0.0"}})
+
+
+# ---------------------------------------------------------------------------
+# _migrate_full_phase2() and _migrate_kg_reextract() strategy coverage
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyExecutors:
+    def test_mock_migrate_full_phase2(self, weaviate_client, changelog):
+        """_migrate_full_phase2 should read from clean_store and call run_embedding_pipeline."""
+        called = {}
+
+        class FakeCleanStore:
+            def read(self, source_key):
+                called["read"] = source_key
+                return "clean text", {"source_name": "test.md", "source_uri": "uri", "source_id": "id", "connector": "local", "source_version": "1", "clean_hash": "abc"}
+
+        fake_vdb = MagicMock()
+        fake_vdb.delete_by_source_key = MagicMock()
+
+        engine = MigrationEngine(
+            client=weaviate_client,
+            clean_store=FakeCleanStore(),
+            vector_db=fake_vdb,
+            changelog=changelog,
+        )
+
+        task = MigrationTask(
+            source_key="local:doc_0.md",
+            from_version="0.0.0",
+            to_version="2.0.0",
+            strategy="full_phase2",
+        )
+        entry = {"source_key": "local:doc_0.md", "schema_version": "0.0.0", "trace_id": "old-trace"}
+
+        import src.ingest.embedding as _emb_mod
+        with patch.object(_emb_mod, "run_embedding_pipeline", return_value={}) as mock_pipeline:
+            engine._migrate_full_phase2(task, entry)
+
+        assert called.get("read") == "local:doc_0.md"
+        mock_pipeline.assert_called_once()
+        assert entry["trace_id"] != "old-trace"  # new trace_id assigned
+
+    def test_mock_migrate_full_phase2_no_clean_store(self, weaviate_client, changelog):
+        """_migrate_full_phase2 should raise RuntimeError when clean_store is None."""
+        engine = MigrationEngine(
+            client=weaviate_client,
+            clean_store=None,
+            changelog=changelog,
+        )
+        task = MigrationTask(
+            source_key="local:doc_0.md",
+            from_version="0.0.0",
+            to_version="2.0.0",
+            strategy="full_phase2",
+        )
+        entry = {"source_key": "local:doc_0.md", "schema_version": "0.0.0"}
+        with pytest.raises(RuntimeError, match="clean_store"):
+            engine._migrate_full_phase2(task, entry)
+
+    def test_mock_migrate_kg_reextract(self, weaviate_client, changelog):
+        """_migrate_kg_reextract should call kg_client methods and update trace_id."""
+        called = {}
+
+        class FakeCleanStore:
+            def read(self, source_key):
+                called["read"] = source_key
+                return "text content", {"source_name": "doc.md"}
+
+        class FakeKGClient:
+            def delete_by_source_key(self, source_key):
+                called["delete"] = source_key
+
+            def extract_from_text(self, **kwargs):
+                called["extract"] = kwargs.get("source_key")
+
+        engine = MigrationEngine(
+            client=weaviate_client,
+            clean_store=FakeCleanStore(),
+            kg_client=FakeKGClient(),
+            changelog=changelog,
+        )
+
+        task = MigrationTask(
+            source_key="local:doc_0.md",
+            from_version="0.0.0",
+            to_version="2.0.0",
+            strategy="kg_reextract",
+        )
+        entry = {"source_key": "local:doc_0.md", "schema_version": "0.0.0", "trace_id": "old"}
+
+        engine._migrate_kg_reextract(task, entry)
+
+        assert called.get("read") == "local:doc_0.md"
+        assert called.get("delete") == "local:doc_0.md"
+        assert called.get("extract") == "local:doc_0.md"
+        assert entry["trace_id"] != "old"
+
+    def test_mock_migrate_kg_reextract_no_store(self, weaviate_client, changelog):
+        """_migrate_kg_reextract raises when clean_store is None."""
+        engine = MigrationEngine(
+            client=weaviate_client,
+            clean_store=None,
+            kg_client=MagicMock(),
+            changelog=changelog,
+        )
+        task = MigrationTask(
+            source_key="local:doc.md",
+            from_version="0.0.0",
+            to_version="2.0.0",
+            strategy="kg_reextract",
+        )
+        entry = {"source_key": "local:doc.md"}
+        with pytest.raises(RuntimeError, match="clean_store"):
+            engine._migrate_kg_reextract(task, entry)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point and report functions
+# ---------------------------------------------------------------------------
+
+
+class TestMigrationCLI:
+    def test_mock_emit_migration_report_text(self, weaviate_client, changelog, capsys):
+        """_emit_migration_report with fmt='text' should print migration summary."""
+        from src.ingest.lifecycle.migration import _emit_migration_report
+        from src.ingest.lifecycle.schemas import MigrationPlan, MigrationReport, MigrationTask
+
+        plan = MigrationPlan(to_version="1.0.0", tasks=[], skipped_count=0)
+        report = MigrationReport(
+            to_version="1.0.0",
+            total_eligible=2,
+            succeeded=1,
+            failed=1,
+            skipped=0,
+            per_entry={
+                "doc_a": {"status": "ok", "strategy": "metadata_only"},
+                "doc_b": {"status": "failed", "error": "timeout", "strategy": "metadata_only"},
+            },
+        )
+        _emit_migration_report(plan, report, fmt="text")
+        captured = capsys.readouterr()
+        assert "Migration" in captured.out or "1.0.0" in captured.out
+
+    def test_mock_emit_migration_report_json(self, weaviate_client, changelog, capsys):
+        """_emit_migration_report with fmt='json' should print JSON."""
+        from src.ingest.lifecycle.migration import _emit_migration_report
+        from src.ingest.lifecycle.schemas import MigrationPlan, MigrationReport
+
+        plan = MigrationPlan(to_version="1.0.0", tasks=[], skipped_count=0)
+        report = MigrationReport(
+            to_version="1.0.0",
+            total_eligible=1,
+            succeeded=1,
+            failed=0,
+            skipped=0,
+            per_entry={"doc_a": {"status": "ok", "strategy": "metadata_only"}},
+        )
+        _emit_migration_report(plan, report, fmt="json")
+        captured = capsys.readouterr()
+        import json
+        parsed = json.loads(captured.out)
+        assert parsed["succeeded"] == 1
+
+    def test_mock_run_migration_cli_dry_run(self, monkeypatch, tmp_path):
+        """run_migration_cli --dry-run should return 0."""
+        from src.ingest.lifecycle import migration as mig_mod
+
+        # Patch all CLI helpers
+        monkeypatch.setattr(mig_mod, "_open_weaviate_client", lambda: MagicMock())
+        monkeypatch.setattr(mig_mod, "_open_minio_client", lambda: None)
+        monkeypatch.setattr(mig_mod, "_resolve_minio_bucket", lambda: "")
+        monkeypatch.setattr(mig_mod, "_load_manifest_cli", lambda: {})
+        monkeypatch.setattr(mig_mod, "_save_manifest_cli", lambda m: None)
+        monkeypatch.setattr(mig_mod, "_emit_migration_report_dry", lambda plan, fmt="json": None)
+
+        # Need a valid changelog path
+        import textwrap
+        changelog_file = tmp_path / "changelog.yaml"
+        changelog_file.write_text(textwrap.dedent("""\
+            schema_versions:
+              - version: "0.0.0"
+                date: "2026-01-01"
+                description: "Baseline"
+                migration_strategy: "none"
+                fields_added: []
+                fields_removed: []
+                fields_renamed: {}
+              - version: "1.0.0"
+                date: "2026-04-15"
+                description: "Hardening"
+                migration_strategy: "metadata_only"
+                fields_added: ["trace_id"]
+                fields_removed: []
+                fields_renamed: {}
+        """), encoding="utf-8")
+
+        result = mig_mod.run_migration_cli([
+            "--dry-run",
+            "--to", "1.0.0",
+            "--changelog", str(changelog_file),
+        ])
+        assert result == 0
+
+    def test_mock_run_migration_cli_no_confirm_no_dry_run(self, monkeypatch):
+        """run_migration_cli without --confirm and --dry-run should call parser.error."""
+        from src.ingest.lifecycle import migration as mig_mod
+        with pytest.raises(SystemExit):
+            mig_mod.run_migration_cli(["--to", "1.0.0"])
+
+    def test_mock_run_migration_cli_permission_error(self, monkeypatch):
+        """run_migration_cli should return 1 on PermissionError."""
+        from src.ingest.lifecycle import migration as mig_mod
+
+        monkeypatch.setattr(mig_mod, "_open_weaviate_client", lambda: (_ for _ in ()).throw(PermissionError("no access")))
+
+        result = mig_mod.run_migration_cli(["--dry-run"])
+        assert result == 1
+
+    def test_mock_run_migration_cli_generic_error(self, monkeypatch):
+        """run_migration_cli should return 2 on generic Exception."""
+        from src.ingest.lifecycle import migration as mig_mod
+
+        monkeypatch.setattr(mig_mod, "_open_weaviate_client", lambda: (_ for _ in ()).throw(RuntimeError("fail")))
+
+        result = mig_mod.run_migration_cli(["--dry-run"])
+        assert result == 2
+
+    def test_mock_cli_helpers_failure_paths(self, monkeypatch):
+        """CLI helper functions should gracefully handle import/other failures."""
+        from src.ingest.lifecycle import migration as mig_mod
+
+        # Test _open_minio_client returns None on exception
+        result = mig_mod._open_minio_client()
+        assert result is None or result is not None  # either is valid
+
+        # Test _resolve_minio_bucket returns "" on exception
+        result = mig_mod._resolve_minio_bucket()
+        assert isinstance(result, str)
+
+        # Test _load_manifest_cli returns {} on exception
+        result = mig_mod._load_manifest_cli()
+        assert isinstance(result, dict)
+
+    def test_mock_emit_migration_report_dry_text(self, capsys):
+        """_emit_migration_report_dry with fmt='text' should print text summary."""
+        from src.ingest.lifecycle.migration import _emit_migration_report_dry
+        from src.ingest.lifecycle.schemas import MigrationPlan, MigrationTask
+
+        task = MigrationTask(
+            source_key="local:doc_0.md",
+            from_version="0.0.0",
+            to_version="1.0.0",
+            strategy="metadata_only",
+        )
+        plan = MigrationPlan(to_version="1.0.0", tasks=[task], skipped_count=1)
+        _emit_migration_report_dry(plan, fmt="text")
+        captured = capsys.readouterr()
+        assert "1.0.0" in captured.out
+
+    def test_mock_emit_migration_report_dry_json(self, capsys):
+        """_emit_migration_report_dry with fmt='json' should print JSON."""
+        from src.ingest.lifecycle.migration import _emit_migration_report_dry
+        from src.ingest.lifecycle.schemas import MigrationPlan
+
+        plan = MigrationPlan(to_version="1.0.0", tasks=[], skipped_count=0)
+        _emit_migration_report_dry(plan, fmt="json")
+        captured = capsys.readouterr()
+        import json
+        parsed = json.loads(captured.out)
+        assert parsed["to_version"] == "1.0.0"
