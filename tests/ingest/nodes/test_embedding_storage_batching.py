@@ -32,7 +32,6 @@ from src.ingest.impl import verify_core_design
 # Patch targets
 _ADD_DOCS = "src.ingest.embedding.nodes.embedding_storage.add_documents"
 _DELETE = "src.ingest.embedding.nodes.embedding_storage.delete_by_source_key"
-_ENSURE = "src.ingest.embedding.nodes.embedding_storage.ensure_collection"
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +281,9 @@ class TestEmbedBatches:
             _embed_batches(embedder, batches)
 
         assert mock_sleep.call_count == 2
-        # Delays: 1.0 * 1 = 1.0, then 1.0 * 2 = 2.0
-        assert mock_sleep.call_args_list[0] == call(1.0)
-        assert mock_sleep.call_args_list[1] == call(2.0)
+        # Delays: _BATCH_RETRY_DELAY * 1 = 0.3, then _BATCH_RETRY_DELAY * 2 = 0.6
+        assert mock_sleep.call_args_list[0] == call(0.3)
+        assert mock_sleep.call_args_list[1] == call(0.6)
 
     def test_empty_batches_list(self):
         embedder = MagicMock()
@@ -358,7 +357,7 @@ class TestEmbeddingStorageNodeBatching:
         """5 chunks + batch_size=2 → 3 batches → all 5 records stored."""
         chunks = [_make_chunk(f"chunk {i}") for i in range(5)]
         state = _make_state(chunks=chunks, batch_size=2)
-        with patch(_ADD_DOCS, return_value=5) as mock_add, patch(_ENSURE), patch(_DELETE):
+        with patch(_ADD_DOCS, return_value=5) as mock_add, patch(_DELETE):
             result = embedding_storage_node(state)
         assert result["stored_count"] == 5
         mock_add.assert_called_once()
@@ -382,7 +381,7 @@ class TestEmbeddingStorageNodeBatching:
 
         state["runtime"].embedder.embed_documents.side_effect = embed_side_effect
 
-        with patch(_ADD_DOCS, return_value=3) as mock_add, patch(_ENSURE), patch(_DELETE), \
+        with patch(_ADD_DOCS, return_value=3) as mock_add, patch(_DELETE), \
              patch("src.ingest.embedding.nodes.embedding_storage.time.sleep"):
             result = embedding_storage_node(state)
 
@@ -399,7 +398,7 @@ class TestEmbeddingStorageNodeBatching:
     def test_all_batches_succeed_no_errors(self):
         chunks = [_make_chunk(f"text {i}") for i in range(4)]
         state = _make_state(chunks=chunks, batch_size=2)
-        with patch(_ADD_DOCS, return_value=4), patch(_ENSURE), patch(_DELETE):
+        with patch(_ADD_DOCS, return_value=4), patch(_DELETE):
             result = embedding_storage_node(state)
         assert result["stored_count"] == 4
         assert result.get("errors", []) == []
@@ -417,7 +416,7 @@ class TestEmbeddingStorageNodeBatching:
             captured_records.extend(records)
             return len(records)
 
-        with patch(_ADD_DOCS, side_effect=capture_add), patch(_ENSURE), patch(_DELETE):
+        with patch(_ADD_DOCS, side_effect=capture_add), patch(_DELETE):
             embedding_storage_node(state)
 
         assert len(captured_records) == 2
@@ -430,7 +429,7 @@ class TestEmbeddingStorageNodeBatching:
         chunks = [_make_chunk()]
         state = _make_state(chunks=chunks)
         state["should_skip"] = True
-        with patch(_ADD_DOCS) as mock_add, patch(_ENSURE):
+        with patch(_ADD_DOCS) as mock_add:
             result = embedding_storage_node(state)
         assert result["stored_count"] == 0
         mock_add.assert_not_called()
@@ -441,8 +440,7 @@ class TestEmbeddingStorageNodeBatching:
         state = _make_state(chunks=chunks)
         state["runtime"].embedder.embed_documents.side_effect = RuntimeError("crash")
 
-        with patch(_ENSURE), \
-             patch("src.ingest.embedding.nodes.embedding_storage.time.sleep"):
+        with patch("src.ingest.embedding.nodes.embedding_storage.time.sleep"):
             result = embedding_storage_node(state)
 
         # All retries exhausted → error recorded as batch_embedding_failure dict

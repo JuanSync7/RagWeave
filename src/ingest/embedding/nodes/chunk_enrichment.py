@@ -8,7 +8,11 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
+
+logger = logging.getLogger("rag.ingest.embedding.chunk_enrichment")
 
 from src.vector_db import build_chunk_id
 from src.ingest.common import (
@@ -31,6 +35,7 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         Partial state update containing the enriched ``chunks`` list and an
         updated ``processing_log``.
     """
+    t0 = time.monotonic()
     config = state["runtime"].config
     original_text = state.get("raw_text", "")
     refactored_text = state.get("refactored_text") or state.get("cleaned_text") or state.get("raw_text", "")
@@ -54,6 +59,8 @@ def chunk_enrichment_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         chunk.metadata["citation_source_uri"] = state["source_uri"]
         chunk.metadata["document_id"] = state.get("document_id", "")
         chunk.metadata.update(provenance)
+    logger.info("chunk_enrichment complete: source=%s chunks=%d", state["source_name"], len(state["chunks"]))
+    logger.debug("chunk_enrichment_node completed in %.3fs", time.monotonic() - t0)
     return {
         "chunks": state["chunks"],
         "processing_log": append_processing_log(state, "chunk_enrichment:ok"),

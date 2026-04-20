@@ -1,6 +1,6 @@
 # @summary
 # Shared ingestion pipeline dataclasses, typed state schema, runtime container, and node-name registry.
-# Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, IngestState, PIPELINE_NODE_NAMES
+# Exports: IngestionConfig, IngestionDesignCheck, IngestFileResult, IngestionRunSummary, Runtime, PIPELINE_NODE_NAMES
 # Deps: config.settings, src.core.embeddings, src.core.knowledge_graph, src.ingest.common.schemas
 # IngestionConfig new fields (Task 1.1): vlm_mode (str), hybrid_chunker_max_tokens (int), persist_docling_document (bool),
 #   enable_visual_embedding (bool), visual_target_collection (str), colqwen_model_name (str),
@@ -215,7 +215,7 @@ class IngestionConfig:
     """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""
     fuzzy_num_hashes: int = 128
     """Number of MinHash permutations. Must be >= 16. Default: 128. FR-3421."""
-    dedup_override_sources: list = field(default_factory=list)
+    dedup_override_sources: list[str] = field(default_factory=list)
     """List of source_keys exempt from dedup lookup (per-run). Default: []. FR-3450."""
 
     # -- Parser Abstraction (Phase 2.2, FR-3301, FR-3320) --
@@ -324,34 +324,3 @@ class Runtime:
     parser_registry: Optional[Any] = None  # ParserRegistry; typed Any to avoid circular import
 
 
-class IngestState(TypedDict):
-    """LangGraph state schema shared across ingestion pipeline nodes.
-
-    The ingestion pipeline uses a shared mutable state object that is passed
-    between nodes. Keys are populated progressively as stages complete.
-    """
-    source_path: str
-    source_name: str
-    source_uri: str
-    source_key: str
-    source_id: str
-    connector: str
-    source_version: str
-    content_hash: str
-    existing_hash: str
-    existing_source_uri: str
-    should_skip: bool
-    errors: list[str]
-    processing_log: list[str]
-    raw_text: str
-    structure: dict[str, Any]
-    multimodal_notes: list[str]
-    cleaned_text: str
-    refactored_text: str
-    chunks: list[ProcessedChunk]
-    metadata_summary: str
-    metadata_keywords: list[str]
-    cross_references: list[dict[str, str]]
-    kg_triples: list[dict[str, Any]]
-    stored_count: int
-    runtime: Runtime

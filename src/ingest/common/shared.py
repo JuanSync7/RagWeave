@@ -16,9 +16,9 @@ import logging
 import re
 import difflib
 
-from src.ingest.common.types import IngestState
+from typing import Any
 
-logger = logging.getLogger("rag.ingest.pipeline.stage")
+logger = logging.getLogger("rag.ingest.common.shared")
 
 # -- Pre-compiled regex patterns -----------------------------------------------
 
@@ -91,7 +91,7 @@ def quality_score(text: str) -> float:
     return min(_QUALITY_MAX, score)
 
 
-def append_processing_log(state: IngestState, message: str) -> list[str]:
+def append_processing_log(state: dict[str, Any], message: str) -> list[str]:
     """Append a stage status message to the processing log.
 
     When verbose stage logging is enabled, the message is also emitted to the
@@ -166,6 +166,8 @@ def _best_paragraph_span(text: str, anchor: str) -> tuple[int, int, float]:
                 best_ratio = ratio
                 best_start = idx
                 best_end = idx + len(paragraph)
+            if best_ratio > 0.85:
+                break  # high-confidence match; skip remaining paragraphs
         offset += len(paragraph) + 2
     return best_start, best_end, best_ratio
 

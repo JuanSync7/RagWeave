@@ -3,7 +3,7 @@
 # Exports: EmbeddingPipelineState
 # Deps: src.ingest.common.types, src.ingest.common.schemas
 # Fields: runtime, source_*, raw_text, cleaned_text, refactored_text, clean_hash,
-#   document_id, chunks, enriched_chunks, metadata_*, cross_references, kg_triples,
+#   document_id, chunks, metadata_*, cross_references, kg_triples,
 #   stored_count, errors, processing_log,
 #   parse_result (Any, ParseResult from parser abstraction — replaces docling_document),
 #   parser_instance (Any, transient parser instance for chunk() call — never serialised),
@@ -58,8 +58,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
         Stable document UUID set by document_storage_node (node X), links to MinIO.
     chunks : list[ProcessedChunk]
         Chunks produced by chunking_node (node 6).
-    enriched_chunks : list[ProcessedChunk]
-        Chunks with IDs and provenance from chunk_enrichment_node (node 7).
     metadata_summary : str
         LLM-generated document summary from metadata_generation_node (node 8).
     metadata_keywords : list[str]
@@ -94,7 +92,6 @@ class EmbeddingPipelineState(TypedDict, total=False):
     clean_hash: str
     document_id: str
     chunks: list[ProcessedChunk]
-    enriched_chunks: list[ProcessedChunk]
     metadata_summary: str
     metadata_keywords: list[str]
     cross_references: list[dict[str, str]]
