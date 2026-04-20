@@ -272,7 +272,7 @@ def test_chunk_markdown_no_headers():
     assert chunks[0]["text"].strip() != ""
 
 
-def test_chunk_markdown_with_mock_embedder():
+def test_mock_chunk_markdown_with_embedder():
     """Test semantic branch: embedder provided, SEMANTIC_CHUNKING_ENABLED respected."""
     # Generate a section larger than chunk_size to trigger the semantic branch
     long_content = "Sentence number here. " * 300
