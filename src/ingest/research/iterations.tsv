@@ -4,3 +4,4 @@ iteration	commit	hypothesis	score	status	change_summary
 003	dd65a2c	Broad mock tests across gc CLI, migration executors, temporal, dedup_utils, common utils	79%	keep	+3% — 102 tests across 7 files; covered CLI helpers, strategy executors, temporal paths
 004	cb62364	Edge-case tests for parser_code, docling, temporal workflows — biggest remaining gaps	82%	keep	+3% — 78 tests across 3 files; parser_code tree-sitter, docling mock, workflow Phase 1/2
 005	5431205	Mock+edge-case tests for impl.py, gc.py, validation.py, visual_embedding.py	84%	keep	+2% — 57 tests across 4 files; impl orchestrator paths, gc report, validation CLI, visual embedding
+006	ebcef2a	Parser_code KG extraction, colqwen embed, worker async, activities — final push to 85%	85%	keep	+1% — 46 tests; target reached, auto-research v4 complete
