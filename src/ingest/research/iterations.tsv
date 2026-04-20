@@ -1,0 +1,2 @@
+iteration	commit	hypothesis	score	status	change_summary
+001	8359322	—	60%	keep	baseline — no changes, initial score 60% coverage (1121 tests, 4785 stmts, 1855 missed)
