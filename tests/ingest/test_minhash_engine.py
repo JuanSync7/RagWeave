@@ -80,15 +80,24 @@ class TestRequireDatesketch:
 
     def test_raises_import_error_when_unavailable(self, monkeypatch):
         import sys
+        import builtins
         mod = _import_module()
-        # Temporarily hide datasketch
-        real = sys.modules.pop("datasketch", None)
+        real_import = builtins.__import__
+
+        def _blocking_import(name, *args, **kwargs):
+            if name == "datasketch":
+                raise ImportError("datasketch not available (mocked)")
+            return real_import(name, *args, **kwargs)
+
+        # Remove cached module so the import inside _require_datasketch re-runs
+        real_mod = sys.modules.pop("datasketch", None)
+        monkeypatch.setattr(builtins, "__import__", _blocking_import)
         try:
             with pytest.raises(ImportError, match="datasketch"):
                 mod._require_datasketch()
         finally:
-            if real is not None:
-                sys.modules["datasketch"] = real
+            if real_mod is not None:
+                sys.modules["datasketch"] = real_mod
 
 
 class TestComputeFuzzyFingerprint:
@@ -254,7 +263,26 @@ class TestFindChunkByFuzzyFingerprint:
     """find_chunk_by_fuzzy_fingerprint() — mock-based Weaviate path tests."""
 
     def _make_client_with_objects(self, objects):
-        """Build a minimal mock Weaviate client."""
+        """Build a minimal mock Weaviate client with Filter stub."""
+        import sys
+        import types
+
+        # Stub weaviate.classes.query.Filter so the lazy import inside the
+        # function resolves correctly and the Filter chain returns a MagicMock.
+        filter_stub = MagicMock()
+        filter_stub.by_property.return_value.is_not_none.return_value = MagicMock()
+
+        weaviate_mod = types.ModuleType("weaviate")
+        weaviate_classes = types.ModuleType("weaviate.classes")
+        weaviate_query = types.ModuleType("weaviate.classes.query")
+        weaviate_query.Filter = filter_stub
+        weaviate_mod.classes = weaviate_classes
+        weaviate_classes.query = weaviate_query
+
+        sys.modules.setdefault("weaviate", weaviate_mod)
+        sys.modules.setdefault("weaviate.classes", weaviate_classes)
+        sys.modules["weaviate.classes.query"] = weaviate_query
+
         client = MagicMock()
         collection = MagicMock()
         client.collections.get.return_value = collection
