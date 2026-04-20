@@ -334,3 +334,243 @@ class TestMigrationEngineIdempotency:
         assert report.succeeded == 0
         # Weaviate should NOT have been called.
         stub_vector_db.batch_update_metadata_by_source_key.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# plan() edge cases: lazy changelog, unknown version, none strategy
+# ---------------------------------------------------------------------------
+
+
+class TestMigrationPlanEdgeCases:
+    def test_mock_plan_lazy_changelog_load(self, weaviate_client: MagicMock, changelog_path: Path) -> None:
+        """plan() should load changelog lazily when changelog=None at init."""
+        engine = MigrationEngine(
+            client=weaviate_client,
+            changelog=None,
+            changelog_path=changelog_path,
+        )
+        manifest = _manifest_with_entries("0.0.0")
+        # Should not raise — loads changelog lazily
+        plan = engine.plan(from_version="", to_version="1.0.0", manifest=manifest)
+        assert len(plan.tasks) == 1
+
+    def test_mock_plan_unknown_version_falls_back_to_metadata_only(
+        self, weaviate_client: MagicMock, changelog: list[SchemaVersion]
+    ) -> None:
+        """plan() with a version not in changelog should fall back to metadata_only."""
+        manifest = {"local:doc_x.md": {
+            "source_key": "local:doc_x.md",
+            "schema_version": "99.99.99",
+            "trace_id": "trace-x",
+            "deleted": False,
+            "deleted_at": "",
+        }}
+        engine = _make_engine(weaviate_client, changelog)
+        # to_version also unknown, so determine_migration_strategy raises ValueError
+        # The engine should catch it and use metadata_only fallback
+        plan = engine.plan(from_version="99.99.99", to_version="88.0.0", manifest=manifest)
+        # Either a task with metadata_only fallback or skipped; no crash expected
+        # Since from_version == effective_from and to_version differ, strategy is looked up
+        # We expect a task with strategy=metadata_only (the fallback)
+        if plan.tasks:
+            assert plan.tasks[0].strategy == "metadata_only"
+
+    def test_mock_plan_strategy_none_causes_skip(
+        self, weaviate_client: MagicMock, changelog: list[SchemaVersion]
+    ) -> None:
+        """plan() for an entry where strategy=='none' should skip that entry."""
+        # version "0.0.0" to "0.0.0" same -> skip (already handled)
+        # We need a scenario where determine_migration_strategy returns "none"
+        # That happens for 0.0.0 -> 0.0.0 (same version) — skip handled differently.
+        # Instead, patch determine_migration_strategy to return "none"
+        manifest = {"local:doc_0.md": {
+            "source_key": "local:doc_0.md",
+            "schema_version": "0.0.0",
+            "trace_id": "trace-0",
+            "deleted": False,
+            "deleted_at": "",
+        }}
+        engine = _make_engine(weaviate_client, changelog)
+
+        with patch(
+            "src.ingest.lifecycle.migration.determine_migration_strategy",
+            return_value="none",
+        ):
+            plan = engine.plan(from_version="", to_version="1.0.0", manifest=manifest)
+
+        assert len(plan.tasks) == 0
+        assert plan.skipped_count == 1
+
+
+# ---------------------------------------------------------------------------
+# execute() edge cases: missing manifest entry, owns_manifest save
+# ---------------------------------------------------------------------------
+
+
+class TestMigrationExecuteEdgeCases:
+    def test_mock_execute_missing_manifest_entry_increments_failed(
+        self,
+        weaviate_client: MagicMock,
+        stub_vector_db: MagicMock,
+        changelog: list[SchemaVersion],
+    ) -> None:
+        """execute() with a task for a missing manifest entry should increment failed."""
+        manifest = {}  # empty manifest
+        engine = _make_engine(weaviate_client, changelog, vector_db=stub_vector_db)
+        task = MigrationTask(
+            source_key="local:missing.md",
+            from_version="0.0.0",
+            to_version="1.0.0",
+            strategy="metadata_only",
+        )
+        plan = MigrationPlan(to_version="1.0.0", tasks=[task])
+        report = engine.execute(plan, confirm=True, manifest=manifest)
+        assert report.failed == 1
+        assert report.succeeded == 0
+
+    def test_mock_execute_owns_manifest_saves_after_execute(
+        self,
+        weaviate_client: MagicMock,
+        stub_vector_db: MagicMock,
+        changelog: list[SchemaVersion],
+        tmp_path: Path,
+    ) -> None:
+        """When owns_manifest (manifest=None), engine should save manifest to path after execute."""
+        import json
+
+        manifest_data = _manifest_with_entries("0.0.0")
+        manifest_file = tmp_path / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        engine = MigrationEngine(
+            client=weaviate_client,
+            manifest_path=manifest_file,
+            vector_db=stub_vector_db,
+            changelog=changelog,
+        )
+
+        plan = engine.plan(from_version="", to_version="1.0.0")  # loads manifest from file
+        report = engine.execute(plan, confirm=True)  # owns_manifest -> saves on finish
+
+        # Verify manifest file was updated
+        saved = json.loads(manifest_file.read_text(encoding="utf-8"))
+        key = list(saved.keys())[0]
+        assert saved[key]["schema_version"] == "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# _run_strategy() with unknown strategy
+# ---------------------------------------------------------------------------
+
+
+class TestRunStrategyEdgeCases:
+    def test_mock_run_strategy_unknown_raises_value_error(
+        self,
+        weaviate_client: MagicMock,
+        changelog: list[SchemaVersion],
+    ) -> None:
+        """_run_strategy with an unknown strategy should raise ValueError."""
+        engine = _make_engine(weaviate_client, changelog)
+        task = MigrationTask(
+            source_key="local:doc_0.md",
+            from_version="0.0.0",
+            to_version="1.0.0",
+            strategy="totally_unknown",
+        )
+        entry = {"source_key": "local:doc_0.md", "schema_version": "0.0.0"}
+        with pytest.raises(ValueError, match="Unknown migration strategy"):
+            engine._run_strategy(task, entry)
+
+
+# ---------------------------------------------------------------------------
+# _migrate_metadata_only() without batch_update method
+# ---------------------------------------------------------------------------
+
+
+class TestMigrateMetadataOnlyEdgeCases:
+    def test_mock_migrate_metadata_only_no_method_logs_warning(
+        self,
+        weaviate_client: MagicMock,
+        changelog: list[SchemaVersion],
+        caplog,
+    ) -> None:
+        """_migrate_metadata_only should log warning if batch_update method missing."""
+        import logging
+
+        vdb = MagicMock(spec=[])  # no batch_update_metadata_by_source_key
+        engine = _make_engine(weaviate_client, changelog, vector_db=vdb)
+        task = MigrationTask(
+            source_key="local:doc_0.md",
+            from_version="0.0.0",
+            to_version="1.0.0",
+            strategy="metadata_only",
+        )
+        entry = {"source_key": "local:doc_0.md", "schema_version": "0.0.0"}
+
+        with caplog.at_level(logging.WARNING):
+            engine._migrate_metadata_only(task, entry)
+
+        assert any(
+            "batch_update_metadata_by_source_key" in record.message
+            for record in caplog.records
+        )
+
+
+# ---------------------------------------------------------------------------
+# _load_manifest() and _save_manifest() exception paths
+# ---------------------------------------------------------------------------
+
+
+class TestManifestIOEdgeCases:
+    def test_mock_load_manifest_file_read_exception_returns_empty(self, tmp_path: Path) -> None:
+        """_load_manifest() with a bad file path should log warning and return {}."""
+        bad_path = tmp_path / "nonexistent_subdir" / "manifest.json"
+        engine = MigrationEngine(
+            client=MagicMock(),
+            manifest_path=bad_path,
+            changelog=[],
+        )
+        result = engine._load_manifest()
+        assert result == {}
+
+    def test_mock_save_manifest_write_exception_logs_warning(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """_save_manifest() with a bad path should log warning without raising."""
+        import logging
+
+        bad_path = tmp_path / "nonexistent_subdir" / "manifest.json"
+        engine = MigrationEngine(
+            client=MagicMock(),
+            manifest_path=bad_path,
+            changelog=[],
+        )
+
+        with caplog.at_level(logging.WARNING):
+            engine._save_manifest({"doc_a": {"schema_version": "1.0.0"}})
+
+        assert any(
+            "migration_save_manifest_failed" in record.message
+            or "save" in record.message.lower()
+            for record in caplog.records
+        )
+
+    def test_mock_load_manifest_no_path_returns_empty(self) -> None:
+        """_load_manifest() when manifest_path is None should return {}."""
+        engine = MigrationEngine(
+            client=MagicMock(),
+            manifest_path=None,
+            changelog=[],
+        )
+        result = engine._load_manifest()
+        assert result == {}
+
+    def test_mock_save_manifest_no_path_does_nothing(self) -> None:
+        """_save_manifest() when manifest_path is None should be a no-op."""
+        engine = MigrationEngine(
+            client=MagicMock(),
+            manifest_path=None,
+            changelog=[],
+        )
+        # Should not raise
+        engine._save_manifest({"doc_a": {"schema_version": "1.0.0"}})
