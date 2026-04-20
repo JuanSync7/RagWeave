@@ -215,7 +215,7 @@ class IngestionConfig:
     """Word-level n-gram size for MinHash shingles. Must be >= 1. Default: 3. FR-3421."""
     fuzzy_num_hashes: int = 128
     """Number of MinHash permutations. Must be >= 16. Default: 128. FR-3421."""
-    dedup_override_sources: list = field(default_factory=list)
+    dedup_override_sources: list[str] = field(default_factory=list)
     """List of source_keys exempt from dedup lookup (per-run). Default: []. FR-3450."""
 
     # -- Parser Abstraction (Phase 2.2, FR-3301, FR-3320) --

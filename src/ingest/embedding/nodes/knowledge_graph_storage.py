@@ -45,7 +45,6 @@ def knowledge_graph_storage_node(state: EmbeddingPipelineState) -> dict[str, Any
     except Exception as exc:
         logger.error("kg_storage failed source=%s: %s", state.get("source_name", ""), exc, exc_info=True)
         return {
-            **state,
             "errors": state.get("errors", []) + [f"kg_storage:{exc}"],
             "processing_log": append_processing_log(state, "knowledge_graph_storage:error"),
         }

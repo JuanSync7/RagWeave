@@ -61,7 +61,6 @@ def document_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
     except Exception as exc:
         logger.error("document_storage failed source=%s: %s", state.get("source_key", ""), exc, exc_info=True)
         return {
-            **state,
             "errors": state.get("errors", []) + [f"document_storage:{exc}"],
             "processing_log": append_processing_log(state, "document_storage:error"),
         }

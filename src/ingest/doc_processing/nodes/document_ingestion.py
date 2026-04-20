@@ -1,7 +1,7 @@
 # @summary
 # LangGraph node for source file read and SHA-256 hash computation (Phase 1).
 # Exports: document_ingestion_node
-# Deps: src.ingest.common.utils.sha256_bytes, src.ingest.common.shared, src.ingest.doc_processing.state
+# Deps: src.ingest.common.utils.sha256_bytes, src.ingest.common.utils.decode_with_fallbacks, src.ingest.common.shared, src.ingest.doc_processing.state
 # @end-summary
 
 """Document ingestion node — Phase 1."""
@@ -16,7 +16,7 @@ from typing import Any
 logger = logging.getLogger("rag.ingest.docproc.document_ingestion")
 
 from src.ingest.common import append_processing_log
-from src.ingest.common.utils import sha256_bytes
+from src.ingest.common.utils import decode_with_fallbacks, sha256_bytes
 from src.ingest.doc_processing.state import DocumentProcessingState
 
 
@@ -51,16 +51,8 @@ def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
 
     source_hash = sha256_bytes(raw_bytes)
 
-    # Decode with fallbacks (matching read_text_with_fallbacks behavior)
-    raw_text = None
-    for encoding in ("utf-8", "latin-1", "cp1252"):
-        try:
-            raw_text = raw_bytes.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    if raw_text is None:
-        raw_text = raw_bytes.decode("utf-8", errors="replace")
+    # Decode with fallbacks (delegates to decode_with_fallbacks for consistency)
+    raw_text = decode_with_fallbacks(raw_bytes)
 
     logger.info("document_ingestion complete: source=%s hash=%s len=%d", source_path.name, source_hash, len(raw_text))
     logger.debug("document_ingestion completed in %.3fs", time.monotonic() - t0)
