@@ -40,14 +40,17 @@ def document_ingestion_node(state: DocumentProcessingState) -> dict[str, Any]:
     t0 = time.monotonic()
     source_path = Path(state["source_path"])
 
-    # Read file bytes once, compute hash and decode text in a single pass
-    try:
-        raw_bytes = source_path.read_bytes()
-    except Exception as exc:
-        return {
-            "errors": [f"read_failed:{source_path.name}:{exc}"],
-            "processing_log": append_processing_log(state, "document_ingestion:failed"),
-        }
+    # Use pre-read bytes when available (supplied by ingest_directory to avoid
+    # a double disk read). Fall back to reading from disk for direct callers.
+    raw_bytes = state.get("raw_bytes")
+    if raw_bytes is None:
+        try:
+            raw_bytes = source_path.read_bytes()
+        except Exception as exc:
+            return {
+                "errors": [f"read_failed:{source_path.name}:{exc}"],
+                "processing_log": append_processing_log(state, "document_ingestion:failed"),
+            }
 
     source_hash = sha256_bytes(raw_bytes)
 
