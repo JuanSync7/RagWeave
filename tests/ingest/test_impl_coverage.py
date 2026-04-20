@@ -609,3 +609,565 @@ class TestIngestDirectoryPaths:
         # The final manifest passed to save_manifest should not contain the old key
         last_call_manifest = mock_save.call_args_list[-1][0][0]
         assert "local_fs:0:9999" not in last_call_manifest
+
+
+# ---------------------------------------------------------------------------
+# Iter-003: target specific missed lines in impl.py
+# ---------------------------------------------------------------------------
+
+
+class TestFindManifestEntryFallbacks:
+    """Lines 258, 261, 266: _find_manifest_entry fallback match paths."""
+
+    def test_mock_find_manifest_entry_by_source_id(self):
+        """_find_manifest_entry should match by source_id when direct key lookup fails."""
+        from src.ingest.impl import _find_manifest_entry
+
+        manifest = {
+            "local_fs:1:100": {
+                "source_id": "999:888",
+                "source_uri": "file:///other.md",
+                "source_key": "local_fs:1:100",
+                "source_name": "other.md",
+            }
+        }
+        source = {
+            "source_key": "local_fs:2:200",  # different key — no direct match
+            "source_id": "999:888",           # but same source_id
+            "source_uri": "file:///new.md",
+            "source_path": "/new.md",
+        }
+
+        key, entry = _find_manifest_entry(manifest, source)
+        assert key == "local_fs:1:100"
+        assert entry["source_id"] == "999:888"
+
+    def test_mock_find_manifest_entry_by_source_uri(self):
+        """_find_manifest_entry should match by source_uri when source_id doesn't match."""
+        from src.ingest.impl import _find_manifest_entry
+
+        manifest = {
+            "local_fs:1:100": {
+                "source_id": "000:000",  # won't match
+                "source_uri": "file:///shared.md",
+                "source_key": "local_fs:1:100",
+                "source_name": "shared.md",
+            }
+        }
+        source = {
+            "source_key": "local_fs:2:200",
+            "source_id": "different:id",
+            "source_uri": "file:///shared.md",  # same URI
+            "source_path": "/shared.md",
+        }
+
+        key, entry = _find_manifest_entry(manifest, source)
+        assert key == "local_fs:1:100"
+        assert entry["source_uri"] == "file:///shared.md"
+
+    def test_mock_find_manifest_entry_by_legacy_name(self):
+        """_find_manifest_entry should match by legacy_name when URI and ID don't match."""
+        from src.ingest.impl import _find_manifest_entry
+
+        manifest = {
+            "legacy_name:myfile.md": {
+                "source_id": "old:id",
+                "source_uri": "file:///old_path/myfile.md",
+                "source_key": "legacy_name:myfile.md",
+                "legacy_name": "myfile.md",
+            }
+        }
+        source = {
+            "source_key": "local_fs:3:300",
+            "source_id": "new:id",
+            "source_uri": "file:///new_path/myfile.md",  # different URI
+            "source_path": "/some/path/myfile.md",       # same leaf name
+        }
+
+        key, entry = _find_manifest_entry(manifest, source)
+        assert key == "legacy_name:myfile.md"
+        assert entry["legacy_name"] == "myfile.md"
+
+
+class TestVerifyCoreDesignWarnings:
+    """Lines 492, 498: verify_core_design warnings paths."""
+
+    def test_mock_verify_core_design_warns_on_refactoring_without_llm(self):
+        """verify_core_design should add warning when refactoring enabled but LLM disabled."""
+        from src.ingest.impl import verify_core_design
+        from src.ingest.common.types import IngestionConfig
+
+        config = IngestionConfig(
+            enable_document_refactoring=True,
+            enable_llm_metadata=False,
+            chunk_overlap=64,
+            chunk_size=512,
+        )
+        result = verify_core_design(config)
+        assert any("refactoring" in w for w in result.warnings)
+
+    def test_mock_verify_core_design_error_on_chunk_overlap(self):
+        """verify_core_design should return error when chunk_overlap >= chunk_size."""
+        from src.ingest.impl import verify_core_design
+        from src.ingest.common.types import IngestionConfig
+
+        config = IngestionConfig(chunk_size=100, chunk_overlap=100)
+        result = verify_core_design(config)
+        assert any("chunk_overlap" in e for e in result.errors)
+
+
+class TestIngestDirectoryDoclingVisionPaths:
+    """Lines 712, 718: ensure_docling_ready and ensure_vision_ready called when enabled."""
+
+    def _make_minimal_config(self, **kwargs):
+        from src.ingest.common.types import IngestionConfig
+        base = dict(
+            chunk_size=512,
+            chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
+            store_documents=False,
+            export_processed=False,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+        base.update(kwargs)
+        return IngestionConfig(**base)
+
+    def test_mock_ensure_docling_ready_called_when_enabled(self, tmp_path):
+        """When enable_docling_parser=True, ensure_docling_ready is called."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config(
+            enable_docling_parser=True,
+            docling_model="docling_base",
+        )
+
+        docling_calls = []
+
+        with patch.object(impl_mod, "ensure_docling_ready", side_effect=lambda **kw: docling_calls.append(True)), \
+             patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"):
+            from src.ingest.impl import ingest_directory
+            # No files — will return early with empty summary
+            summary = ingest_directory(tmp_path, config=config)
+
+        assert len(docling_calls) == 1
+
+    def test_mock_ensure_vision_ready_called_when_enabled(self, tmp_path):
+        """When enable_vision_processing=True, ensure_vision_ready is called."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config(
+            enable_vision_processing=True,
+            enable_multimodal_processing=True,
+        )
+
+        vision_calls = []
+
+        with patch.object(impl_mod, "ensure_vision_ready", side_effect=lambda cfg: vision_calls.append(True)), \
+             patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"):
+            from src.ingest.impl import ingest_directory
+            summary = ingest_directory(tmp_path, config=config)
+
+        assert len(vision_calls) == 1
+
+
+class TestIngestDirectorySelectedSources:
+    """Line 735: ingest_directory with selected_sources filters by suffix."""
+
+    def _make_minimal_config(self, **kwargs):
+        from src.ingest.common.types import IngestionConfig
+        base = dict(
+            chunk_size=512,
+            chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
+            store_documents=False,
+            export_processed=False,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+        base.update(kwargs)
+        return IngestionConfig(**base)
+
+    def test_mock_selected_sources_filters_non_matching_extensions(self, tmp_path):
+        """selected_sources with wrong suffix should result in no files (empty summary)."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config()
+
+        # Create a file with an unsupported extension
+        unsupported = tmp_path / "file.xyz"
+        unsupported.write_text("content")
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"):
+            from src.ingest.impl import ingest_directory
+            summary = ingest_directory(
+                tmp_path,
+                config=config,
+                selected_sources=[unsupported],
+            )
+
+        assert summary.processed == 0
+        assert summary.skipped == 0
+
+    def test_mock_selected_sources_valid_file_ingested(self, tmp_path):
+        """selected_sources with valid .md file passes through the filter."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config()
+        doc = tmp_path / "file.md"
+        doc.write_text("# Hello")
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            ok_result = MagicMock()
+            ok_result.errors = []
+            ok_result.stored_count = 1
+            ok_result.metadata_summary = ""
+            ok_result.metadata_keywords = []
+            ok_result.processing_log = []
+            ok_result.source_hash = "h"
+            ok_result.clean_hash = "ch"
+            ok_result.trace_id = "t1"
+            ok_result.validation = {}
+            mock_ingest_file.return_value = ok_result
+
+            from src.ingest.impl import ingest_directory
+            summary = ingest_directory(
+                tmp_path,
+                config=config,
+                selected_sources=[doc],
+            )
+
+        assert summary.processed == 1
+
+
+class TestIngestDirectoryParserRegistryFailure:
+    """Lines 781-787: ParserRegistry init failure falls back to None."""
+
+    def _make_minimal_config(self, **kwargs):
+        from src.ingest.common.types import IngestionConfig
+        base = dict(
+            chunk_size=512,
+            chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
+            store_documents=False,
+            export_processed=False,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+        base.update(kwargs)
+        return IngestionConfig(**base)
+
+    def test_mock_parser_registry_failure_uses_none(self, tmp_path):
+        """When ParserRegistry raises, _parser_registry falls back to None."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config()
+        doc = tmp_path / "doc.md"
+        doc.write_text("content")
+
+        runtime_kwargs = []
+
+        def fake_runtime(**kwargs):
+            runtime_kwargs.append(kwargs.get("parser_registry"))
+            return MagicMock()
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "ParserRegistry", side_effect=RuntimeError("registry init failed")), \
+             patch.object(impl_mod, "Runtime", side_effect=fake_runtime), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            ok_result = MagicMock()
+            ok_result.errors = []
+            ok_result.stored_count = 1
+            ok_result.metadata_summary = ""
+            ok_result.metadata_keywords = []
+            ok_result.processing_log = []
+            ok_result.source_hash = "h"
+            ok_result.clean_hash = "ch"
+            ok_result.trace_id = "t1"
+            ok_result.validation = {}
+            mock_ingest_file.return_value = ok_result
+
+            from src.ingest.impl import ingest_directory
+            summary = ingest_directory(tmp_path, config=config)
+
+        # parser_registry should be None (fallback) when ParserRegistry init fails
+        assert None in runtime_kwargs, "Runtime should be called with parser_registry=None on failure"
+
+
+class TestIngestDirectoryExportProcessed:
+    """Line 801: PROCESSED_DIR.mkdir called when export_processed=True."""
+
+    def _make_minimal_config(self, **kwargs):
+        from src.ingest.common.types import IngestionConfig
+        base = dict(
+            chunk_size=512,
+            chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
+            store_documents=False,
+            export_processed=True,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+        base.update(kwargs)
+        return IngestionConfig(**base)
+
+    def test_mock_export_processed_creates_processed_dir(self, tmp_path):
+        """When export_processed=True, PROCESSED_DIR.mkdir is called."""
+        import src.ingest.impl as impl_mod
+
+        config = self._make_minimal_config()
+        doc = tmp_path / "doc.md"
+        doc.write_text("content")
+
+        mkdir_calls = []
+        fake_processed_dir = MagicMock()
+        fake_processed_dir.mkdir = lambda exist_ok=False: mkdir_calls.append(True)
+
+        with patch.object(impl_mod, "load_manifest", return_value={}), \
+             patch.object(impl_mod, "save_manifest"), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "PROCESSED_DIR", fake_processed_dir), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            ok_result = MagicMock()
+            ok_result.errors = []
+            ok_result.stored_count = 1
+            ok_result.metadata_summary = ""
+            ok_result.metadata_keywords = []
+            ok_result.processing_log = []
+            ok_result.source_hash = "h"
+            ok_result.clean_hash = "ch"
+            ok_result.trace_id = "t1"
+            ok_result.validation = {}
+            mock_ingest_file.return_value = ok_result
+
+            from src.ingest.impl import ingest_directory
+            ingest_directory(tmp_path, config=config)
+
+        assert len(mkdir_calls) == 1, "PROCESSED_DIR.mkdir should be called when export_processed=True"
+
+
+class TestIngestDirectorySkipKeyMigration:
+    """Line 822: manifest.pop(matched_key) during skip when matched_key != source_key."""
+
+    def _make_minimal_config(self, **kwargs):
+        from src.ingest.common.types import IngestionConfig
+        base = dict(
+            chunk_size=512,
+            chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
+            store_documents=False,
+            export_processed=False,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+        base.update(kwargs)
+        return IngestionConfig(**base)
+
+    def test_mock_skipped_file_migrates_key_when_matched_key_differs(self, tmp_path):
+        """When file is skipped (unchanged) and matched_key != source_key, old key is removed.
+
+        To exercise line 822, we need:
+        - update=True
+        - file hash unchanged (matches manifest)
+        - matched_key (from _find_manifest_entry) != current source_key
+
+        Strategy: put BOTH the correct key and an old key in the manifest.
+        Mock _find_manifest_entry to return the old key for the file.
+        The manifest has correct_key so removed_sources is empty.
+        _find_manifest_entry returns old_key, which differs from source_key.
+        """
+        import src.ingest.impl as impl_mod
+        from pathlib import Path
+
+        config = self._make_minimal_config()
+        doc = tmp_path / "doc.md"
+        doc.write_text("content")
+
+        stat = doc.stat()
+        correct_key = f"local_fs:{stat.st_dev}:{stat.st_ino}"
+        old_key = "local_fs:0:9999"  # different key for same file
+
+        from src.ingest.impl import sha256_bytes
+        content_hash = sha256_bytes(doc.read_bytes())
+
+        old_entry = {
+            "source_key": old_key,
+            "source_id": "999:888",
+            "source_uri": "file:///no-match.md",
+            "legacy_name": "doc.md",
+            "source_name": "doc.md",
+            "source": "doc.md",
+            "content_hash": content_hash,  # same hash => skip
+            "schema_version": "1.0.0",
+            "trace_id": "t-old",
+            "batch_id": "",
+            "deleted": False,
+            "deleted_at": "",
+            "validation": {},
+            "clean_hash": "",
+        }
+
+        # Manifest has both old_key and correct_key so removed_sources is empty
+        old_manifest = {
+            old_key: old_entry,
+            correct_key: {
+                **old_entry,
+                "source_key": correct_key,
+                "content_hash": content_hash,
+            },
+        }
+
+        saved_manifests = []
+
+        # Mock _find_manifest_entry to return old_key (different from actual source_key)
+        def fake_find_manifest_entry(manifest, source):
+            return old_key, old_entry
+
+        with patch.object(impl_mod, "load_manifest", return_value=old_manifest), \
+             patch.object(impl_mod, "save_manifest", side_effect=lambda m: saved_manifests.append(dict(m))), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "_find_manifest_entry", side_effect=fake_find_manifest_entry):
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            from src.ingest.impl import ingest_directory
+            summary = ingest_directory(tmp_path, config=config, update=True)
+
+        assert summary.skipped == 1
+        # Old key should be removed from final saved manifest
+        if saved_manifests:
+            final = saved_manifests[-1]
+            assert old_key not in final
+
+
+class TestIngestDirectoryProcessedKeyMigration:
+    """Line 876: manifest.pop(matched_key) during success when matched_key != source_key."""
+
+    def _make_minimal_config(self, **kwargs):
+        from src.ingest.common.types import IngestionConfig
+        base = dict(
+            chunk_size=512,
+            chunk_overlap=64,
+            enable_knowledge_graph_storage=False,
+            enable_knowledge_graph_extraction=False,
+            build_kg=False,
+            store_documents=False,
+            export_processed=False,
+            enable_docling_parser=False,
+            enable_vision_processing=False,
+        )
+        base.update(kwargs)
+        return IngestionConfig(**base)
+
+    def test_mock_processed_file_migrates_key_when_matched_key_differs(self, tmp_path):
+        """When file is processed and matched_key != source_key, old key is removed."""
+        import src.ingest.impl as impl_mod
+        from pathlib import Path
+
+        config = self._make_minimal_config()
+        doc = tmp_path / "doc.md"
+        doc.write_text("content")
+
+        stat = doc.stat()
+        correct_key = f"local_fs:{stat.st_dev}:{stat.st_ino}"
+        old_key = "legacy_name:doc.md"
+
+        # Manifest with old key but DIFFERENT content hash (so file is not skipped)
+        old_manifest = {
+            old_key: {
+                "source_key": old_key,
+                "legacy_name": "doc.md",
+                "source_uri": doc.as_uri(),
+                "source_name": "doc.md",
+                "source": "doc.md",
+                "content_hash": "old_hash_differs",  # different hash => re-process
+                "schema_version": "1.0.0",
+                "trace_id": "t-old",
+                "batch_id": "",
+                "deleted": False,
+                "deleted_at": "",
+                "validation": {},
+                "clean_hash": "",
+            }
+        }
+
+        saved_manifests = []
+
+        with patch.object(impl_mod, "load_manifest", return_value=old_manifest), \
+             patch.object(impl_mod, "save_manifest", side_effect=lambda m: saved_manifests.append(dict(m))), \
+             patch.object(impl_mod, "get_client") as mock_get_client, \
+             patch.object(impl_mod, "ensure_collection"), \
+             patch.object(impl_mod, "get_embedding_provider", return_value=MagicMock()), \
+             patch.object(impl_mod, "ParserRegistry", return_value=MagicMock()), \
+             patch.object(impl_mod, "ingest_file") as mock_ingest_file:
+
+            ctx_client = MagicMock()
+            mock_get_client.return_value.__enter__ = MagicMock(return_value=ctx_client)
+            mock_get_client.return_value.__exit__ = MagicMock(return_value=False)
+
+            ok_result = MagicMock()
+            ok_result.errors = []
+            ok_result.stored_count = 1
+            ok_result.metadata_summary = ""
+            ok_result.metadata_keywords = []
+            ok_result.processing_log = []
+            ok_result.source_hash = "new_hash"
+            ok_result.clean_hash = "ch"
+            ok_result.trace_id = "t-new"
+            ok_result.validation = {}
+            mock_ingest_file.return_value = ok_result
+
+            from src.ingest.impl import ingest_directory
+            summary = ingest_directory(tmp_path, config=config, update=True)
+
+        assert summary.processed == 1
+        # Old key should not be in the saved manifest
+        if saved_manifests:
+            final = saved_manifests[-1]
+            assert old_key not in final
