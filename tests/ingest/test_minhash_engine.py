@@ -6,7 +6,10 @@ datasketch IS installed in this environment.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import sys
+import types
+from contextlib import contextmanager
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,6 +22,60 @@ import pytest
 def _import_module():
     from src.ingest.embedding.support import minhash_engine
     return minhash_engine
+
+
+@contextmanager
+def _weaviate_filter_stub():
+    """Context manager that injects a stub weaviate.classes.query module
+    and restores the original sys.modules state on exit."""
+    filter_stub = MagicMock()
+    filter_stub.by_property.return_value.is_not_none.return_value = MagicMock()
+
+    weaviate_query = types.ModuleType("weaviate.classes.query")
+    weaviate_query.Filter = filter_stub
+
+    # Snapshot current state so we can restore it
+    saved = {
+        "weaviate": sys.modules.get("weaviate"),
+        "weaviate.classes": sys.modules.get("weaviate.classes"),
+        "weaviate.classes.query": sys.modules.get("weaviate.classes.query"),
+    }
+
+    # Inject stubs only for keys that aren't already real modules
+    if "weaviate" not in sys.modules:
+        weaviate_mod = types.ModuleType("weaviate")
+        weaviate_classes = types.ModuleType("weaviate.classes")
+        weaviate_mod.classes = weaviate_classes
+        sys.modules["weaviate"] = weaviate_mod
+        sys.modules["weaviate.classes"] = weaviate_classes
+    # Always override the query submodule so our Filter stub is used
+    sys.modules["weaviate.classes.query"] = weaviate_query
+
+    try:
+        yield filter_stub
+    finally:
+        # Restore original state
+        for key, value in saved.items():
+            if value is None:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = value
+
+
+def _make_mock_client(objects):
+    """Build a minimal mock Weaviate client (no sys.modules side-effects)."""
+    client = MagicMock()
+    collection = MagicMock()
+    client.collections.get.return_value = collection
+    results = MagicMock()
+    results.objects = objects
+    collection.query.fetch_objects.return_value = results
+    return client
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 
 class TestWordShingles:
@@ -79,25 +136,27 @@ class TestRequireDatesketch:
         assert MinHash is RealMinHash
 
     def test_raises_import_error_when_unavailable(self, monkeypatch):
-        import sys
         import builtins
         mod = _import_module()
         real_import = builtins.__import__
+
+        # Save and remove cached datasketch before patching __import__
+        saved_datasketch = sys.modules.pop("datasketch", None)
 
         def _blocking_import(name, *args, **kwargs):
             if name == "datasketch":
                 raise ImportError("datasketch not available (mocked)")
             return real_import(name, *args, **kwargs)
 
-        # Remove cached module so the import inside _require_datasketch re-runs
-        real_mod = sys.modules.pop("datasketch", None)
+        # Use monkeypatch so cleanup is automatic even on test failure
         monkeypatch.setattr(builtins, "__import__", _blocking_import)
         try:
             with pytest.raises(ImportError, match="datasketch"):
                 mod._require_datasketch()
         finally:
-            if real_mod is not None:
-                sys.modules["datasketch"] = real_mod
+            # Always restore datasketch to sys.modules
+            if saved_datasketch is not None:
+                sys.modules["datasketch"] = saved_datasketch
 
 
 class TestComputeFuzzyFingerprint:
@@ -140,12 +199,11 @@ class TestDeserialiseMinHash:
     """_deserialise_minhash() — roundtrip fidelity."""
 
     def test_roundtrip_hashvalues_match(self):
-        mod = _import_module()
         import numpy as np
+        mod = _import_module()
         text = "roundtrip test with several distinct words here now"
         fp = mod.compute_fuzzy_fingerprint(text, num_hashes=128)
         mh = mod._deserialise_minhash(fp, num_hashes=128)
-        # Recompute independently and compare
         mh2 = mod._deserialise_minhash(fp, num_hashes=128)
         assert np.array_equal(mh.hashvalues, mh2.hashvalues)
 
@@ -260,36 +318,12 @@ class TestMinHashEngineClass:
 
 
 class TestFindChunkByFuzzyFingerprint:
-    """find_chunk_by_fuzzy_fingerprint() — mock-based Weaviate path tests."""
+    """find_chunk_by_fuzzy_fingerprint() — mock-based Weaviate path tests.
 
-    def _make_client_with_objects(self, objects):
-        """Build a minimal mock Weaviate client with Filter stub."""
-        import sys
-        import types
-
-        # Stub weaviate.classes.query.Filter so the lazy import inside the
-        # function resolves correctly and the Filter chain returns a MagicMock.
-        filter_stub = MagicMock()
-        filter_stub.by_property.return_value.is_not_none.return_value = MagicMock()
-
-        weaviate_mod = types.ModuleType("weaviate")
-        weaviate_classes = types.ModuleType("weaviate.classes")
-        weaviate_query = types.ModuleType("weaviate.classes.query")
-        weaviate_query.Filter = filter_stub
-        weaviate_mod.classes = weaviate_classes
-        weaviate_classes.query = weaviate_query
-
-        sys.modules.setdefault("weaviate", weaviate_mod)
-        sys.modules.setdefault("weaviate.classes", weaviate_classes)
-        sys.modules["weaviate.classes.query"] = weaviate_query
-
-        client = MagicMock()
-        collection = MagicMock()
-        client.collections.get.return_value = collection
-        results = MagicMock()
-        results.objects = objects
-        collection.query.fetch_objects.return_value = results
-        return client
+    The weaviate.classes.query stub is injected/restored per-test via the
+    _weaviate_filter_stub() context manager to avoid polluting sys.modules
+    for other test modules.
+    """
 
     def test_mock_match_found_above_threshold(self):
         mod = _import_module()
@@ -304,8 +338,10 @@ class TestFindChunkByFuzzyFingerprint:
             "source_documents": [],
         }
 
-        client = self._make_client_with_objects([obj])
-        result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.9)
+        with _weaviate_filter_stub():
+            client = _make_mock_client([obj])
+            result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.9)
+
         assert result is not None
         assert result["uuid"] == "aaaa-bbbb-cccc"
         assert result["similarity"] >= 0.9
@@ -328,16 +364,18 @@ class TestFindChunkByFuzzyFingerprint:
             "source_documents": [],
         }
 
-        client = self._make_client_with_objects([obj])
-        # Use a high threshold that won't be met
-        result = mod.find_chunk_by_fuzzy_fingerprint(client, fp_query, threshold=0.95)
+        with _weaviate_filter_stub():
+            client = _make_mock_client([obj])
+            result = mod.find_chunk_by_fuzzy_fingerprint(client, fp_query, threshold=0.95)
+
         assert result is None
 
     def test_mock_empty_collection_returns_none(self):
         mod = _import_module()
         fp = mod.compute_fuzzy_fingerprint("some text to search for")
-        client = self._make_client_with_objects([])
-        result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.8)
+        with _weaviate_filter_stub():
+            client = _make_mock_client([])
+            result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.8)
         assert result is None
 
     def test_mock_exception_path_returns_none(self):
@@ -345,9 +383,9 @@ class TestFindChunkByFuzzyFingerprint:
         fp = mod.compute_fuzzy_fingerprint("exception test input text")
 
         client = MagicMock()
-        # Raise on collections.get to trigger the outer except block
         client.collections.get.side_effect = RuntimeError("Weaviate unavailable")
 
+        # Exception path does NOT call the lazy weaviate import — no stub needed
         result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.8)
         assert result is None
 
@@ -359,8 +397,9 @@ class TestFindChunkByFuzzyFingerprint:
         obj_bad.uuid = "no-fp-uuid"
         obj_bad.properties = {"fuzzy_fingerprint": None, "text": "some text"}
 
-        client = self._make_client_with_objects([obj_bad])
-        result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.5)
+        with _weaviate_filter_stub():
+            client = _make_mock_client([obj_bad])
+            result = mod.find_chunk_by_fuzzy_fingerprint(client, fp, threshold=0.5)
         assert result is None
 
     def test_mock_best_match_selected_among_multiple(self):
@@ -387,7 +426,9 @@ class TestFindChunkByFuzzyFingerprint:
             "text": "quantum text",
         }
 
-        client = self._make_client_with_objects([obj_low, obj_high])
-        result = mod.find_chunk_by_fuzzy_fingerprint(client, fp_query, threshold=0.5)
+        with _weaviate_filter_stub():
+            client = _make_mock_client([obj_low, obj_high])
+            result = mod.find_chunk_by_fuzzy_fingerprint(client, fp_query, threshold=0.5)
+
         assert result is not None
         assert result["uuid"] == "high-sim-uuid"
