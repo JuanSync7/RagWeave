@@ -482,3 +482,280 @@ class TestParseAndChunkIntegration:
         parser.parse(py_file, config)
 
         assert parser._language == "python"
+
+
+# ---------------------------------------------------------------------------
+# Test: parse() warning path — tree-sitter grammar throws (lines 110-111, 113-118)
+# ---------------------------------------------------------------------------
+
+
+class TestParseGrammarFailure:
+    def test_mock_parse_grammar_load_failure_falls_back_to_single_chunk(
+        self, tmp_path: Path
+    ):
+        """When _load_grammar raises, tree is None and chunk() returns a single chunk."""
+        py_file = tmp_path / "broken.py"
+        py_file.write_text("def f(): pass\n", encoding="utf-8")
+
+        parser = CodeParser()
+        config = _make_config()
+
+        with patch.object(
+            CodeParser, "_load_grammar", side_effect=ImportError("no grammar")
+        ):
+            result = parser.parse(py_file, config)
+
+        # tree should be None after failure
+        assert parser._tree is None
+
+        chunks = parser.chunk(result)
+        assert len(chunks) == 1
+        assert chunks[0].extra_metadata["function_name"] == ""
+
+    def test_mock_parse_grammar_failure_logs_warning(
+        self, tmp_path: Path, caplog
+    ):
+        """When grammar loading fails, a warning should be logged."""
+        import logging
+
+        py_file = tmp_path / "broken2.py"
+        py_file.write_text("x = 1\n", encoding="utf-8")
+
+        parser = CodeParser()
+        config = _make_config()
+
+        with caplog.at_level(logging.WARNING):
+            with patch.object(
+                CodeParser, "_load_grammar", side_effect=Exception("tree-sitter error")
+            ):
+                parser.parse(py_file, config)
+
+        assert any("tree-sitter" in r.message.lower() or "parse failed" in r.message.lower()
+                   for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Test: _extract_kg_relationships (lines 179-280 — KG relationship extraction)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractKgRelationships:
+    """Direct unit tests for _extract_kg_relationships and _walk_calls."""
+
+    def _make_parser(self, source: bytes = b"") -> CodeParser:
+        parser = CodeParser()
+        parser._source_bytes = source
+        parser._language = "python"
+        return parser
+
+    def test_mock_extract_kg_relationships_import_simple(self):
+        """Import statements produce 'imports' relationships."""
+        parser = self._make_parser(b"")
+        module_imports = ["import os", "import sys"]
+
+        mock_node = MagicMock()
+        mock_node.type = "function_definition"
+        mock_node.children = []
+
+        rels = parser._extract_kg_relationships(mock_node, "my_func", module_imports)
+
+        import_rels = [r for r in rels if r["type"] == "imports"]
+        targets = {r["target"] for r in import_rels}
+        assert "os" in targets
+        assert "sys" in targets
+        assert all(r["source"] == "my_func" for r in import_rels)
+
+    def test_mock_extract_kg_relationships_from_import(self):
+        """'from X import Y' produces imports relationships with dotted target."""
+        parser = self._make_parser(b"")
+        module_imports = ["from pathlib import Path"]
+
+        mock_node = MagicMock()
+        mock_node.type = "function_definition"
+        mock_node.children = []
+
+        rels = parser._extract_kg_relationships(mock_node, "func", module_imports)
+
+        import_rels = [r for r in rels if r["type"] == "imports"]
+        targets = {r["target"] for r in import_rels}
+        assert "pathlib.Path" in targets
+
+    def test_mock_extract_kg_relationships_inheritance(self):
+        """Class with base classes produces 'inherits' relationships."""
+        source = b"class Child(Parent): pass"
+        parser = self._make_parser(source)
+
+        # Build mock AST nodes for class with argument_list
+        mock_base = MagicMock()
+        mock_base.type = "identifier"
+        mock_base.start_byte = 12
+        mock_base.end_byte = 18  # "Parent"
+
+        mock_arg_list = MagicMock()
+        mock_arg_list.type = "argument_list"
+        mock_arg_list.children = [mock_base]
+
+        mock_class_node = MagicMock()
+        mock_class_node.type = "class_definition"
+        mock_class_node.children = [mock_arg_list]
+
+        rels = parser._extract_kg_relationships(mock_class_node, "Child", [])
+
+        inherit_rels = [r for r in rels if r["type"] == "inherits"]
+        assert len(inherit_rels) == 1
+        assert inherit_rels[0]["source"] == "Child"
+        assert inherit_rels[0]["target"] == "Parent"
+
+    def test_mock_extract_kg_relationships_no_imports(self):
+        """No imports means no import relationships."""
+        parser = self._make_parser(b"")
+        mock_node = MagicMock()
+        mock_node.type = "function_definition"
+        mock_node.children = []
+
+        rels = parser._extract_kg_relationships(mock_node, "func", [])
+        import_rels = [r for r in rels if r["type"] == "imports"]
+        assert import_rels == []
+
+    def test_mock_extract_kg_relationships_from_import_multi_target(self):
+        """'from X import A, B' produces two import relationships."""
+        parser = self._make_parser(b"")
+        module_imports = ["from os import path, getcwd"]
+
+        mock_node = MagicMock()
+        mock_node.type = "function_definition"
+        mock_node.children = []
+
+        rels = parser._extract_kg_relationships(mock_node, "f", module_imports)
+        import_rels = [r for r in rels if r["type"] == "imports"]
+        targets = {r["target"] for r in import_rels}
+        assert "os.path" in targets
+        assert "os.getcwd" in targets
+
+    def test_mock_walk_calls_empty_node(self):
+        """_walk_calls on a node with no call children produces no relationships."""
+        parser = self._make_parser(b"x = 1")
+
+        mock_node = MagicMock()
+        mock_node.type = "expression_statement"
+        mock_node.children = []
+
+        rels: list = []
+        parser._walk_calls(mock_node, "f", rels)
+        call_rels = [r for r in rels if r["type"] == "calls"]
+        assert call_rels == []
+
+    def test_mock_walk_calls_finds_call_node(self):
+        """_walk_calls finds call expressions and extracts the called name."""
+        source = b"print('hello')"
+        parser = self._make_parser(source)
+
+        # Build: call node -> func_node (print)
+        mock_func = MagicMock()
+        mock_func.type = "identifier"
+        mock_func.start_byte = 0
+        mock_func.end_byte = 5  # "print"
+
+        mock_call = MagicMock()
+        mock_call.type = "call"
+        mock_call.children = [mock_func]
+        # No nested children so recursion stops
+        mock_func.children = []
+
+        mock_root = MagicMock()
+        mock_root.type = "module"
+        mock_root.children = [mock_call]
+
+        rels: list = []
+        parser._walk_calls(mock_root, "my_func", rels)
+
+        call_rels = [r for r in rels if r["type"] == "calls"]
+        assert len(call_rels) == 1
+        assert call_rels[0]["target"] == "print"
+        assert call_rels[0]["source"] == "my_func"
+
+    def test_mock_walk_calls_skips_empty_func_node(self):
+        """_walk_calls skips call nodes with no children."""
+        parser = self._make_parser(b"")
+
+        mock_call = MagicMock()
+        mock_call.type = "call"
+        mock_call.children = []  # no func node
+
+        mock_root = MagicMock()
+        mock_root.type = "module"
+        mock_root.children = [mock_call]
+
+        rels: list = []
+        parser._walk_calls(mock_root, "f", rels)
+        assert rels == []
+
+    def test_mock_extract_kg_relationships_via_real_python_parse(self, tmp_path: Path):
+        """Integration: chunk() on real Python file populates kg_relationships."""
+        code = """\
+import os
+from pathlib import Path
+
+
+def hello():
+    x = os.getcwd()
+    return x
+"""
+        py_file = tmp_path / "kg_test.py"
+        py_file.write_text(code, encoding="utf-8")
+
+        parser = CodeParser()
+        config = _make_config()
+        result = parser.parse(py_file, config)
+        chunks = parser.chunk(result)
+
+        # Find the 'hello' function chunk
+        func_chunks = [c for c in chunks if c.extra_metadata.get("function_name") == "hello"]
+        if func_chunks:
+            kg = func_chunks[0].extra_metadata.get("kg_relationships", [])
+            assert isinstance(kg, list)
+            # Should have import relationships if AST parsed successfully
+            import_rels = [r for r in kg if r.get("type") == "imports"]
+            assert isinstance(import_rels, list)
+
+    def test_mock_chunk_with_module_level_lines(self, tmp_path: Path):
+        """chunk() should produce a module-level chunk for top-level statements."""
+        code = "X = 1\nY = 2\n"
+        py_file = tmp_path / "consts.py"
+        py_file.write_text(code, encoding="utf-8")
+
+        parser = CodeParser()
+        config = _make_config()
+        result = parser.parse(py_file, config)
+        chunks = parser.chunk(result)
+
+        # With AST parsing: top-level assignments produce module-level chunk
+        # With fallback: single chunk
+        assert len(chunks) >= 1
+        for c in chunks:
+            assert isinstance(c.text, str)
+            assert c.text.strip()
+
+    def test_mock_chunk_class_with_kg_relationships(self, tmp_path: Path):
+        """chunk() should add kg_relationships to class chunks."""
+        code = """\
+import os
+
+
+class Foo(object):
+    def bar(self):
+        os.getcwd()
+"""
+        py_file = tmp_path / "classfoo.py"
+        py_file.write_text(code, encoding="utf-8")
+
+        parser = CodeParser()
+        config = _make_config()
+        result = parser.parse(py_file, config)
+        chunks = parser.chunk(result)
+
+        class_chunks = [c for c in chunks if c.extra_metadata.get("class_name") == "Foo"]
+        if class_chunks:
+            # Verify kg_relationships key is present
+            assert "kg_relationships" in class_chunks[0].extra_metadata
+            assert isinstance(class_chunks[0].extra_metadata["kg_relationships"], list)

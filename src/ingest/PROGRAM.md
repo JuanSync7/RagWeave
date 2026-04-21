@@ -1,10 +1,10 @@
-# Ingestion Pipeline Test Coverage — Auto-Research Program (v3)
+# Ingestion Pipeline Test Coverage — Auto-Research Program (v5)
 
 ## Objective
 
-Increase test coverage of `src/ingest/` from 60% to 75% by writing new tests. Each iteration adds one *type* of test (pure logic, edge case/error path, mock-based, or fixture-based integration) across one or more files.
+Increase test coverage of `src/ingest/` from 96% to 98% by writing new tests (unit, mock, and integration). Each iteration adds tests targeting the remaining uncovered code paths. Scorer excludes scorer_*.py tooling files from measurement.
 
-Baseline: 60% coverage (1121 tests passing, 4785 statements, 1855 missed).
+Baseline: 96% coverage (1831 tests passing, ~4331 production statements, ~183 missed).
 
 ## Scoring mode
 
@@ -12,12 +12,12 @@ Numerical
 
 ## Metric
 
-Score = integer coverage percentage reported by `pytest-cov` on `src/ingest/`.
-Higher is better. Target: 75%.
+Score = integer coverage percentage reported by scorer_v5.py (excludes scorer tooling files).
+Higher is better. Target: 98%.
 
 ## Scoring mechanism
 
-`uv run python src/ingest/scorer_v3.py` from the project root.
+`uv run python src/ingest/scorer_v5.py --target 98` from the project root.
 
 ### Correctness guard
 
@@ -33,7 +33,6 @@ Only test files may be modified or created:
 - `tests/ingest/test_cli_args.py`
 - `tests/ingest/test_ingest_cli.py`
 - `tests/ingest/test_shared_helpers.py`
-- `tests/ingest/test_manifest_io.py`
 - `tests/ingest/test_orchestrator.py`
 - `tests/ingest/test_parser_integration.py`
 - `tests/ingest/test_dedup_revert.py`
@@ -44,6 +43,30 @@ Only test files may be modified or created:
 - `tests/ingest/test_visual_embedding_minio.py`
 - `tests/ingest/test_visual_embedding_docling.py`
 - `tests/ingest/test_visual_store.py`
+- `tests/ingest/test_document_support.py`
+- `tests/ingest/test_markdown_support.py`
+- `tests/ingest/test_parser_code.py`
+- `tests/ingest/test_parser_text.py`
+- `tests/ingest/test_parser_registry.py`
+- `tests/ingest/test_vision_support.py`
+- `tests/ingest/test_minhash_engine.py`
+- `tests/ingest/test_minio_clean_store.py`
+- `tests/ingest/test_temporal_constants.py`
+- `tests/ingest/test_temporal_worker.py`
+- `tests/ingest/test_temporal_workflows.py`
+- `tests/ingest/test_temporal_activities.py`
+- `tests/ingest/test_impl_coverage.py`
+- `tests/ingest/test_cli_coverage.py`
+- `tests/ingest/test_embedding_impl.py`
+- `tests/ingest/test_cross_document_dedup.py`
+- `tests/ingest/test_dedup_utils.py`
+- `tests/ingest/test_common_utils.py`
+- `tests/ingest/test_common_shared.py`
+- `tests/ingest/test_colqwen_support.py`
+- `tests/ingest/test_docling_support.py`
+- `tests/ingest/test_visual_embedding_coverage.py`
+- `tests/ingest/test_structure_detection_extra.py`
+- `tests/ingest/test_parser_code_coverage.py`
 - `tests/ingest/doc_processing/test_structure_detection_coverage.py`
 - `tests/ingest/embedding/test_chunk_enrichment.py`
 - `tests/ingest/embedding/test_chunking.py`
@@ -56,25 +79,14 @@ Only test files may be modified or created:
 - `tests/ingest/lifecycle/test_validation.py`
 - `tests/ingest/lifecycle/test_changelog.py`
 - `tests/ingest/lifecycle/test_sync_engine.py`
+- `tests/ingest/lifecycle/test_orphan_report.py`
 
 ### New test files (create as needed)
-- `tests/ingest/test_document_support.py` — for `support/document.py`
-- `tests/ingest/test_markdown_support.py` — for `support/markdown.py`
-- `tests/ingest/test_parser_code.py` — for `support/parser_code.py`
-- `tests/ingest/test_parser_text.py` — for `support/parser_text.py`
-- `tests/ingest/test_parser_registry.py` — for `support/parser_registry.py`
-- `tests/ingest/test_vision_support.py` — for `support/vision.py`
-- `tests/ingest/test_minhash_engine.py` — for `embedding/support/minhash_engine.py`
-- `tests/ingest/test_dedup_utils.py` — for `embedding/common/dedup_utils.py`
-- `tests/ingest/test_minio_clean_store.py` — for `common/minio_clean_store.py`
-- `tests/ingest/test_temporal_constants.py` — for `temporal/constants.py`
-- `tests/ingest/test_temporal_worker.py` — for `temporal/worker.py`
-- `tests/ingest/test_temporal_activities.py` — for `temporal/activities.py`
-- `tests/ingest/test_temporal_workflows.py` — for `temporal/workflows.py`
-- `tests/ingest/test_embedding_impl.py` — for `embedding/impl.py`
-- `tests/ingest/test_cross_document_dedup.py` — for `embedding/nodes/cross_document_dedup.py`
-- `tests/ingest/test_common_utils.py` — for `common/utils.py`
-- `tests/ingest/test_impl_coverage.py` — for `impl.py` (orchestrator edge cases)
+- `tests/ingest/test_vlm_enrichment_coverage.py` — for `embedding/nodes/vlm_enrichment.py`
+- `tests/ingest/test_sync_coverage.py` — for `lifecycle/sync.py`
+- `tests/ingest/test_lifecycle_init_coverage.py` — for `lifecycle/__init__.py`
+- `tests/ingest/test_parser_base_coverage.py` — for `support/parser_base.py`
+- `tests/ingest/test_orphan_report_coverage.py` — for `lifecycle/orphan_report.py`
 
 ### Existing conftest files (modify to add shared fixtures)
 - `tests/ingest/conftest.py`
@@ -83,7 +95,8 @@ Only test files may be modified or created:
 ## Immutable files (DO NOT MODIFY)
 
 - `src/ingest/PROGRAM.md` — this file
-- `src/ingest/scorer_v3.py` — the scoring script
+- `src/ingest/scorer_v5.py` — the scoring script
+- `src/ingest/scorer_v3.py` — previous scoring script
 - `src/ingest/scorer_v2.py` — previous scoring script
 - `src/ingest/scorer.py` — v1 scoring script
 - All source files under `src/ingest/` — this run adds tests only, never changes production code
@@ -91,56 +104,57 @@ Only test files may be modified or created:
 
 ## Exploration directions
 
-Each iteration picks ONE test type and applies it across the highest-impact uncovered files:
+Remaining gaps by missed statements (183 total across production code):
 
-### 1. Pure logic tests (highest priority — easiest wins)
-Unit tests for functions with no external dependencies. Target files in priority order:
-- `support/document.py` (42% → all uncovered lines are pure string ops)
-- `support/markdown.py` (42% → heading normalization, sentence splitting, section metadata)
-- `temporal/constants.py` (0% → `trigger_to_priority`, `trigger_to_queue`, env-driven constants)
-- `temporal/worker.py` (0% → `_resolve_slots`, `_resolve_queues`, `_validate_*` pure functions)
-- `embedding/support/minhash_engine.py` (0% → `_word_shingles`, `MinHashEngine`, `compute_fuzzy_fingerprint`)
-- `common/utils.py` (81% → `sha256_path`, `decode_with_fallbacks` edge cases)
+### 1. parser_code.py deep coverage (31 missed — biggest single file)
+Lines 110-111, 179-280, 383-384. Targets: `_extract_kg_relationships`, `_walk_calls`, multi-language chunk() paths (Rust/Go imports), tree-sitter grammar fallback.
 
-### 2. Edge case and error path tests
-Tests for error handling, boundary conditions, and fallback paths in partially-covered modules:
-- `support/parser_text.py` (57% → HTML/RST fallback paths, RuntimeError on chunk before parse)
-- `support/parser_code.py` (37% → `chunk()` RuntimeError, `_get_name` anonymous fallback, `_extract_docstring`, `_extract_imports`)
-- `support/parser_registry.py` (64% → ImportError fallback paths, unknown extension, missing dep fallback)
-- `lifecycle/validation.py` (67% → Weaviate error paths, KG count None paths, manifest load errors)
-- `lifecycle/migration.py` (56% → unknown strategy ValueError, manifest load/save errors, lazy init paths)
-- `lifecycle/gc.py` (44% → dry-run paths, cleanup error paths, manifest soft/hard branches)
-- `embedding/common/dedup_utils.py` (72% → exception handlers, no-op paths)
-- `embedding/nodes/cross_document_dedup.py` (65% → degraded path, fuzzy dedup tier 2)
+### 2. lifecycle/migration.py remaining paths (29 missed)
+Lines 300, 302, 389-390, 422-424, 539, 553-555, 593-599, 619-621, 629-630, 638-640, 644-649, 718. Targets: `_migrate_full_phase2()`, `_migrate_kg_reextract()`, CLI helpers, `_emit_migration_report()`.
 
-### 3. Mock-based tests (test_mock_* naming required)
-Tests using `unittest.mock` or `pytest-mock` for code that calls external services. All mock test functions MUST be named `test_mock_*`:
-- `support/vision.py` (34% → mock VLM provider for `_describe_image`, `generate_vision_notes`, `ensure_vision_ready`)
-- `common/minio_clean_store.py` (43% → mock MinIO client for write/read/exists/delete/soft_delete/list_keys)
-- `temporal/activities.py` (0% → mock embedder, db_client, docling for `prewarm_worker_resources`, `_deserialise_config`)
-- `temporal/workflows.py` (0% → mock Temporal workflow test harness)
-- `embedding/impl.py` (50% → mock graph invoke for `run_embedding_pipeline` error/success paths)
-- `cli.py` (44% → mock `ingest_directory` for CLI entry points)
-- `support/docling.py` (69% → mock DocumentConverter for parse/chunk paths)
+### 3. lifecycle/gc.py remaining paths (19 missed)
+Lines 290, 400-408, 525, 565-567, 611-613, 632-634, 642-643, 654, 691. Targets: remaining `run_gc_cli()` paths, `_open_*_client` helpers, manifest/report edge cases.
 
-### 4. Fixture-based integration tests
-Tests using pytest fixtures (`tmp_path`, custom conftest fixtures) to wire up real components:
-- `impl.py` (83% → fixture with temp directory + sample files for `ingest_directory` edge cases)
-- `lifecycle/gc.py` (44% → fixture-based GC engine with in-memory manifest)
-- `lifecycle/migration.py` (56% → fixture-based migration plan/execute with tmp manifest)
+### 4. impl.py orchestrator edge cases (14 missed)
+Lines 258, 261, 266, 492, 498, 712, 718, 735, 781-787, 801, 822, 876. Targets: error handling in Phase 1/2 pipelines, skip logic, design warnings.
+
+### 5. lifecycle/validation.py remaining paths (10 missed)
+Lines 142, 432, 441-457, 467, 477, 533. Targets: CLI helpers, `_emit_validation_report()`.
+
+### 6. structure_detection.py uncovered block (9 missed)
+Lines 100-118. Targets: structure detection fallback paths.
+
+### 7. Broad sweep of small gaps (8+ files, 1-8 missed each)
+- `common/shared.py` (8 missed: 133, 156-157, 170, 212, 217-219)
+- `lifecycle/sync.py` (8 missed: 98-100, 106-108, 183-187)
+- `embedding/nodes/vlm_enrichment.py` (7 missed: 200, 211, 219, 225, 249, 265-271)
+- `support/docling.py` (7 missed: 84-85, 245, 249-251, 354)
+- `embedding/nodes/chunking.py` (5 missed: 117-125)
+- `support/colqwen.py` (4 missed: 117-118, 223, 320)
+- `support/parser_base.py` (4 missed: 148-151)
+- `lifecycle/orphan_report.py` (4 missed: 89-92)
+- `common/clean_store.py` (3 missed: 93-95)
+- `common/utils.py` (3 missed: 86-87, 125)
+- `embedding/nodes/quality_validation.py` (3 missed: 55-57)
+- `embedding/support/minhash_engine.py` (3 missed: 181-187)
+- `doc_processing/impl.py` (2 missed: 56-76)
+- `lifecycle/changelog.py` (2 missed: 235, 248)
+- `lifecycle/__init__.py` (2 missed: 95, 128)
+- `temporal/worker.py` (2 missed: 120, 213)
+- Various 1-line gaps: cli.py:323, markdown.py:201, parser_registry.py:97, clean_store.py:1
 
 ## Constraints
 
 - **Never modify production source code** — only test files are mutable
-- **Mock naming convention** — any test function using mocks whose name contains "mock" must start with `test_mock_`. This is enforced by the scorer's naming guard.
+- **Mock naming convention** — any test function using mocks whose name contains "mock" must start with `test_mock_`
 - **No new external dependencies** — use only `pytest`, `pytest-cov`, `unittest.mock`, and existing project deps
-- **Test isolation** — new tests must not depend on external services being running (MinIO is available but tests should work without it via mocks; use real MinIO only for minio-specific integration tests)
-- **Backward compatibility** — existing 1121 tests must continue to pass at all times
-- **One test TYPE per iteration** — pick one exploration direction per iteration, apply it to one or more files
+- **Test isolation** — new tests must not depend on external services being running
+- **Backward compatibility** — existing 1831 tests must continue to pass at all times
+- **Test types allowed** — unit tests, mock-based tests, and integration tests (no live services)
 
 ## Stop conditions
 
-- Coverage reaches 75% — success, stop
+- Coverage reaches 98% — success, stop
 - 5 consecutive iterations with no coverage improvement — stop and report
 - Correctness guard fails 3× in a row — stop, infrastructure broken
 - 20 iterations reached — stop and report regardless of score
