@@ -464,7 +464,11 @@ def _install_stub_modules() -> None:
         def connect_to_embedded(**kwargs):
             return WeaviateClient()
 
+        def connect_to_local(**kwargs):
+            return WeaviateClient()
+
         weaviate.connect_to_embedded = connect_to_embedded
+        weaviate.connect_to_local = connect_to_local
         weaviate.WeaviateClient = WeaviateClient
         sys.modules["weaviate"] = weaviate
 

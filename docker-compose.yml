@@ -138,12 +138,19 @@ services:
       - RAG_AUTH_OIDC_JWKS_URL=${RAG_AUTH_OIDC_JWKS_URL:-}
       - RAG_AUTH_API_KEYS_STORE_PATH=/app/.runtime/security/api_keys.json
       - RAG_AUTH_QUOTAS_STORE_PATH=/app/.runtime/security/quotas.json
+      # Shared Weaviate container (see rag-weaviate service below).
+      - RAG_WEAVIATE_MODE=networked
+      - RAG_WEAVIATE_HOST=rag-weaviate
+      - RAG_WEAVIATE_HTTP_PORT=8080
+      - RAG_WEAVIATE_GRPC_PORT=50051
     depends_on:
       temporal:
         condition: service_started
       rag-redis:
         condition: service_started
       rag-postgres:
+        condition: service_healthy
+      rag-weaviate:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -163,15 +170,7 @@ services:
     build:
       context: .
       dockerfile: containers/Dockerfile.runtime
-    command: >
-      sh -lc '
-      WORKER_WV_DIR="/tmp/rag-weaviate-$${HOSTNAME}" &&
-      if [ -d "/seed_weaviate" ] && [ ! -d "$${WORKER_WV_DIR}" ]; then
-        cp -a /seed_weaviate "$${WORKER_WV_DIR}";
-      fi &&
-      export RAG_WEAVIATE_DATA_DIR="$${WORKER_WV_DIR}" &&
-      python -m server.worker
-      '
+    command: python -m server.worker
     environment:
       - RAG_TEMPORAL_TARGET_HOST=temporal:${RAG_TEMPORAL_PORT:-7233}
       # Ollama is expected to run on the host in this setup.
@@ -188,15 +187,22 @@ services:
       - RAG_CACHE_REDIS_URL=redis://rag-redis:${RAG_REDIS_PORT:-6379}/0
       - RAG_QUERY_CONFIDENCE_THRESHOLD=${RAG_QUERY_CONFIDENCE_THRESHOLD:-0.0}
       - RAG_STAGE_BUDGET_EMBEDDING_MS=${RAG_STAGE_BUDGET_EMBEDDING_MS:-8000}
+      # Shared Weaviate container (see rag-weaviate service above).
+      - RAG_WEAVIATE_MODE=networked
+      - RAG_WEAVIATE_HOST=rag-weaviate
+      - RAG_WEAVIATE_HTTP_PORT=8080
+      - RAG_WEAVIATE_GRPC_PORT=50051
     depends_on:
-      - temporal
-      - rag-redis
+      temporal:
+        condition: service_started
+      rag-redis:
+        condition: service_started
+      rag-weaviate:
+        condition: service_healthy
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Seed embedded Weaviate data from local ingestion output (read-only).
-      - ./.weaviate_data:/seed_weaviate:ro
       # Host model cache (read-only) for containerized worker startup.
       - ${RAG_MODEL_ROOT:-./models}:/models:ro
     # GPU note: if needed, run with NVIDIA container runtime enabled.
@@ -232,6 +238,32 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  rag-weaviate:
+    # Shared Weaviate vector store. Replaces the per-worker embedded instances that
+    # previously ran inside each rag-worker (they could not share state).
+    image: semitechnologies/weaviate:1.28.0
+    container_name: rag-weaviate
+    ports:
+      - "${RAG_WEAVIATE_HTTP_HOST_PORT:-8090}:8080"
+      - "${RAG_WEAVIATE_GRPC_HOST_PORT:-50051}:50051"
+    environment:
+      QUERY_DEFAULTS_LIMIT: "25"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: "node1"
+    volumes:
+      # Existing on-disk data from the previous embedded setup is mounted directly
+      # so no re-ingest is needed on first boot.
+      - ./.weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/v1/.well-known/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   rag-redis:
