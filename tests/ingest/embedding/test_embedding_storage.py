@@ -15,7 +15,6 @@ from src.ingest.embedding.nodes.embedding_storage import embedding_storage_node
 # Patch targets — functions imported at module level in embedding_storage
 _ADD_DOCS = "src.ingest.embedding.nodes.embedding_storage.add_documents"
 _DELETE = "src.ingest.embedding.nodes.embedding_storage.delete_by_source_key"
-_ENSURE = "src.ingest.embedding.nodes.embedding_storage.ensure_collection"
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +70,7 @@ def test_empty_chunks_returns_zero_stored():
 
 def test_empty_chunks_no_weaviate_call():
     """With no chunks, add_documents must not be called."""
-    with patch(_ADD_DOCS) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS) as mock_add:
         state = _make_state(chunks=[])
         embedding_storage_node(state)
     mock_add.assert_not_called()
@@ -81,7 +80,7 @@ def test_single_chunk_stored():
     """A single chunk is embedded and inserted; stored_count becomes 1."""
     state = _make_state(chunks=[_make_chunk()])
     state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-    with patch(_ADD_DOCS, return_value=1) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS, return_value=1) as mock_add:
         result = embedding_storage_node(state)
     assert result["stored_count"] == 1
     mock_add.assert_called_once()
@@ -94,7 +93,7 @@ def test_multiple_chunks_all_stored():
     state["runtime"].embedder.embed_documents.return_value = [
         [0.1] * 3, [0.2] * 3, [0.3] * 3
     ]
-    with patch(_ADD_DOCS, return_value=3) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS, return_value=3) as mock_add:
         result = embedding_storage_node(state)
     assert result["stored_count"] == 3
     mock_add.assert_called_once()
@@ -107,8 +106,7 @@ def test_update_mode_delete_called_before_insert():
     state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
     call_order = []
     with patch(_DELETE, side_effect=lambda *a, **kw: call_order.append("delete")) as mock_del, \
-         patch(_ADD_DOCS, side_effect=lambda *a, **kw: call_order.append("add") or 1) as mock_add, \
-         patch(_ENSURE):
+         patch(_ADD_DOCS, side_effect=lambda *a, **kw: call_order.append("add") or 1) as mock_add:
         embedding_storage_node(state)
     assert "delete" in call_order, "Expected delete_by_source_key to be called"
     assert "add" in call_order, "Expected add_documents to be called"
@@ -124,7 +122,7 @@ def test_update_mode_delete_called_once():
     state["runtime"].embedder.embed_documents.return_value = [
         [0.1] * 3, [0.2] * 3, [0.3] * 3
     ]
-    with patch(_DELETE) as mock_del, patch(_ADD_DOCS, return_value=3), patch(_ENSURE):
+    with patch(_DELETE) as mock_del, patch(_ADD_DOCS, return_value=3):
         embedding_storage_node(state)
     mock_del.assert_called_once()
 
@@ -134,7 +132,7 @@ def test_non_update_mode_delete_not_called():
     chunks = [_make_chunk()]
     state = _make_state(chunks=chunks, update_mode=False)
     state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-    with patch(_DELETE) as mock_del, patch(_ADD_DOCS, return_value=1), patch(_ENSURE):
+    with patch(_DELETE) as mock_del, patch(_ADD_DOCS, return_value=1):
         embedding_storage_node(state)
     mock_del.assert_not_called()
 
@@ -144,7 +142,7 @@ def test_correct_collection_used():
     chunks = [_make_chunk()]
     state = _make_state(chunks=chunks, target_collection="MyCollection")
     state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-    with patch(_ADD_DOCS, return_value=1) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS, return_value=1) as mock_add:
         embedding_storage_node(state)
     call_kwargs = mock_add.call_args
     # collection is passed as keyword arg
@@ -161,8 +159,7 @@ def test_embed_error_appended_not_raised():
     chunk = _make_chunk()
     state = _make_state(chunks=[chunk])
     state["runtime"].embedder.embed_documents.side_effect = RuntimeError("embed boom")
-    with patch(_ENSURE):
-        result = embedding_storage_node(state)
+    result = embedding_storage_node(state)
     assert len(result["errors"]) >= 1
     error_str = " ".join(str(e) for e in result["errors"])
     assert "embed" in error_str.lower() or "embedding" in error_str.lower()
@@ -176,7 +173,7 @@ def test_partial_success_stored_count():
         [0.1] * 3, [0.2] * 3, [0.3] * 3
     ]
     # Simulate add_documents storing only 2 of 3
-    with patch(_ADD_DOCS, return_value=2) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS, return_value=2) as mock_add:
         result = embedding_storage_node(state)
     assert result["stored_count"] == 2
 
@@ -186,8 +183,7 @@ def test_all_chunks_fail_stored_count_zero():
     chunks = [_make_chunk(f"chunk {i}") for i in range(3)]
     state = _make_state(chunks=chunks)
     state["runtime"].embedder.embed_documents.side_effect = RuntimeError("always fails")
-    with patch(_ENSURE):
-        result = embedding_storage_node(state)
+    result = embedding_storage_node(state)
     assert result.get("stored_count", 0) == 0
     assert len(result.get("errors", [])) >= 1
 
@@ -197,7 +193,7 @@ def test_should_skip_flag_skips_storage():
     chunks = [_make_chunk("some text")]
     state = _make_state(chunks=chunks)
     state["should_skip"] = True
-    with patch(_ADD_DOCS) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS) as mock_add:
         result = embedding_storage_node(state)
     assert result["stored_count"] == 0
     mock_add.assert_not_called()
@@ -208,7 +204,7 @@ def test_vector_store_raises_propagated_as_error():
     chunks = [_make_chunk()]
     state = _make_state(chunks=chunks)
     state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-    with patch(_ADD_DOCS, side_effect=RuntimeError("weaviate down")), patch(_ENSURE):
+    with patch(_ADD_DOCS, side_effect=RuntimeError("weaviate down")):
         result = embedding_storage_node(state)
     assert len(result.get("errors", [])) >= 1
     assert any("weaviate down" in str(e) or "embedding_storage" in str(e)
@@ -226,7 +222,7 @@ def test_enriched_content_fallback_to_chunk_text():
     assert "enriched_content" not in chunk.metadata
     state = _make_state(chunks=[chunk])
     state["runtime"].embedder.embed_documents.return_value = [[0.1, 0.2, 0.3]]
-    with patch(_ADD_DOCS, return_value=1) as mock_add, patch(_ENSURE):
+    with patch(_ADD_DOCS, return_value=1) as mock_add:
         result = embedding_storage_node(state)
     # Node must not raise; must attempt storage.
     assert result.get("stored_count", 0) == 1
