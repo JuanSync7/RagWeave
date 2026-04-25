@@ -7,7 +7,7 @@
 .PHONY: help install console-install console-check console-build console-watch \
         py-compile-check test dep-check import-check import-check-tracked \
         all-check precommit-check setup restart restart-all \
-        start dev worker tunnel restart-worker scale-workers \
+        start start-all dev worker tunnel restart-worker scale-workers \
         venv-doctor _venv-auto-heal \
         container-build container-build-api container-build-worker \
         container-build-podman container-probe container-probe-worker \
@@ -67,12 +67,13 @@ help:
 	@echo "Daily dev startup (cold start after WSL2 restart)"
 	@echo "  restart-worker     Rebuild + restart rag-worker (use after .env or code changes)"
 	@echo "  start              Bring up infra + workers (no rebuild)"
+	@echo "  start-all          Bring up FULL stack (all profiles incl. monitoring/langfuse)"
 	@echo "  dev                Start uvicorn with hot-reload (run in its own terminal)"
 	@echo "  worker             Start Temporal worker locally (run in its own terminal)"
 	@echo "  scale-workers      Scale containerised workers: make scale-workers N=3"
 	@echo "  tunnel             Start Cloudflare trycloudflare.com tunnel (run in its own terminal)"
 	@echo ""
-	@echo "Stack restart (uses scripts/restart_stack.sh — auto-detects docker/podman)"
+	@echo "Stack restart (uses scripts/stack.sh — auto-detects docker/podman)"
 	@echo "  restart            Restart app + workers with rebuild"
 	@echo "  restart-all        Restart all profiles with rebuild"
 	@echo ""
@@ -275,6 +276,11 @@ start:
 	./scripts/compose.sh up -d
 	./scripts/compose.sh --profile workers up -d
 
+# Bring up the full stack: every profile (app, workers, monitoring,
+# observability, gateway, temporal). Equivalent to `./scripts/stack.sh up`.
+start-all:
+	./scripts/stack.sh up
+
 dev:
 	uv run uvicorn server.api:app --host 0.0.0.0 --port 8000 --reload
 
@@ -284,11 +290,13 @@ worker:
 tunnel:
 	cloudflared tunnel --url http://localhost:8000
 
+# Mirrors `make start` (base + workers) but rebuilds images and force-recreates.
 restart: console-build
-	./scripts/restart_stack.sh --temporal --app --workers --build
+	./scripts/stack.sh restart
 
+# Mirrors `make start-all` (every profile) but rebuilds images and force-recreates.
 restart-all: console-build
-	./scripts/restart_stack.sh --all --build
+	./scripts/stack.sh restart-all
 
 # ---------------------------------------------------------------------------
 # Container images

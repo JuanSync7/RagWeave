@@ -500,6 +500,26 @@ RAG_INGESTION_PERSIST_DOCLING_DOCUMENT: bool = os.environ.get(
 """If True (default), persist DoclingDocument JSON to CleanDocumentStore.
 Set to false to trade storage for compute (re-parse in Phase 2)."""
 
+RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN: bool = os.environ.get(
+    "RAG_INGESTION_USE_DOCLING_CHUNKER_FOR_MARKDOWN", "true"
+).lower() in ("true", "1", "yes")
+"""If True (default), .md/.html/.rst files use Docling's HybridChunker
+(structure-aware: preserves lists, tables, and requirement blocks as atomic
+units). Set to false to fall back to the legacy LangChain char-splitter."""
+
+RAG_INGESTION_STORE_FIGURES_IN_DB: bool = os.environ.get(
+    "RAG_INGESTION_STORE_FIGURES_IN_DB", "false"
+).lower() in ("true", "1", "yes")
+"""If True, copy markdown image bytes to the configured document store
+(currently MinIO) at ingest time and record a stable ``store_key`` in chunk
+metadata so citation UIs can presign and render even if the original source
+moves. Default False — chunks carry only the relative ``src`` path; UI
+resolves against the original source location.
+
+Backend-agnostic flag — actual upload destination is whatever document store
+the pipeline is configured for. Flip on when the doc store should act as the
+canonical figure store."""
+
 # --- Ingestion Hardening: Document Parsing Abstraction (FR-3301, FR-3320) ---
 RAG_INGESTION_PARSER_STRATEGY: str = os.environ.get(
     "RAG_INGESTION_PARSER_STRATEGY", "auto"

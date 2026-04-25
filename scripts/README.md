@@ -42,7 +42,7 @@ When making changes — especially to deps, imports, or containers — run these
 | --- | --- |
 | `compose.sh` | Docker/Podman compose wrapper with auto-runtime detection. **Use this instead of `docker-compose` directly.** Reads `docker-compose.yml` at repo root. |
 | `container-runtime.sh` | Detects and exports the active container runtime (`docker` or `podman`). Sourced by `compose.sh`. |
-| `restart_stack.sh` | Stops and restarts the compose stack services. |
+| `stack.sh` | Stack control: status table + per-service start/stop/restart/logs + full up/down. Run `./scripts/stack.sh` for an interactive menu, or `stack.sh status\|start <svc>\|stop <svc>\|up\|down\|ui`. CLI companion to Dozzle (web UI at http://localhost:9999, always-on, start/stop buttons enabled). |
 
 ## TLS / Certificates
 

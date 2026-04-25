@@ -230,16 +230,20 @@ services:
       - ./opentitan_data:/app/opentitan_data:ro
 
   dozzle:
-    profiles: ["monitoring"]
+    # Always-on: web UI for container visibility + start/stop/restart actions.
+    # Companion to scripts/stack.sh (CLI). Browse to http://localhost:9999.
     image: amir20/dozzle:latest
     container_name: rag-monitor
+    environment:
+      # Enable start/stop/restart buttons in the UI. Requires writable socket below.
+      DOZZLE_ENABLE_ACTIONS: "true"
     ports:
       - "${DOZZLE_HOST_PORT:-9999}:8080"
     volumes:
-      # Use CONTAINER_SOCK env var for Docker/Podman compatibility.
+      # Writable socket (no :ro) so Dozzle actions can control containers.
       # Docker default: /var/run/docker.sock
       # Podman: set CONTAINER_SOCK=$XDG_RUNTIME_DIR/podman/podman.sock in .env
-      - ${CONTAINER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ${CONTAINER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     restart: unless-stopped
 
   rag-minio:

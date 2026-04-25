@@ -32,6 +32,31 @@ operations tooling for observability, backup/restore, and scaling.
 | **Battle-tested safety** | Defense-in-depth: regex + NeMo + LLM semantic classification for injection detection; Presidio + GLiNER for PII; claim-level hallucination scoring |
 | **Multi-tenant ready** | JWT + API key auth, per-tenant Redis conversation memory with sliding window + rolling summary, rate limiting and quotas |
 
+### Architecture & Layout
+
+```text
+Users/CLI -> FastAPI (server/api.py) -> Temporal workflow -> Worker activity
+                                                    |
+                                                    v
+                                          RAGChain singleton
+                                  (retrieval, reranking, optional generation)
+```
+
+Ingestion runs as a separate Temporal workflow that writes content + embeddings consumed by retrieval.
+
+| Directory | Purpose |
+| --- | --- |
+| `src/ingest/` | 13-node LangGraph ingestion pipeline (node-per-file + shared helpers) |
+| `src/retrieval/` | Query processing, retrieval orchestration, reranking, generation |
+| `src/platform/` | Cross-cutting services: auth, quotas/rate limits, cache, metrics, observability |
+| `src/common/` | Deterministic helpers shared across ingestion/retrieval |
+| `server/` | FastAPI/Temporal runtime: API, workflows, activities, worker, schemas, web console |
+| `config/` | Environment-driven settings (`config/settings.py`) |
+| `docs/` | Engineering guides, specs, operations runbooks |
+| `tests/` | Unit + integration tests (ingestion in `tests/ingest/`) |
+| `scripts/` | Ops helpers (stack control, backup/restore, DR drill, smoke test) |
+| `prompts/` | Prompt templates for retrieval query processing |
+
 ## Quick Start
 
 ### Prerequisites
@@ -74,9 +99,6 @@ uv sync --extra gliner       # GLiNER entity extraction
 uv sync --extra all          # All optional dependencies
 ```
 
-> **Always use `uv`, never plain `pip`.** A `uv.lock` ships with the repo;
-> plain `pip` ignores it and can corrupt resolution in a uv-managed venv.
-
 > **Vector store:** Weaviate is the default and currently the only fully supported backend.
 > ChromaDB, Pinecone, and Qdrant extras (`.[chromadb]`, `.[pinecone]`, `.[qdrant]`) install
 > the client libraries but the backend adapters are not yet implemented — they are planned.
@@ -115,45 +137,18 @@ RagWeave will not start correctly without the three steps below. Everything else
 #### Step A — Download embedding and reranker models
 
 The worker loads BGE models from your local filesystem — they are not bundled in the image.
-Download them anywhere you like, then tell RagWeave where they are via `RAG_MODEL_ROOT`.
-
-**1. Download the models** (pick one):
 
 ```bash
-# huggingface-cli (recommended)
-uv pip install huggingface-hub
-uv run huggingface-cli download BAAI/bge-m3 --local-dir ~/models/baai/bge-m3
-uv run huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
+uv run --with huggingface-hub huggingface-cli download BAAI/bge-m3             --local-dir ~/models/baai/bge-m3
+uv run --with huggingface-hub huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
 
-# git-lfs
-git lfs install
-git clone https://huggingface.co/BAAI/bge-m3 ~/models/baai/bge-m3
-git clone https://huggingface.co/BAAI/bge-reranker-v2-m3 ~/models/baai/bge-reranker-v2-m3
-```
-
-**2. Point `RAG_MODEL_ROOT` at the parent directory** (pick one):
-
-```bash
-# Option A — set the env var directly in .env (works anywhere):
+# Tell RagWeave where they live (in .env):
 RAG_MODEL_ROOT=/home/you/models
-
-# Option B — symlink so the default (./models) resolves correctly:
-ln -s ~/models <repo>/models
-# then leave RAG_MODEL_ROOT=./models in .env (the default)
 ```
 
-Expected layout inside `$RAG_MODEL_ROOT`:
+Each model is ~570 MB (~1.2 GB total). For alternative download methods (`git-lfs`) or path layouts (`./models` symlink), see [COLD_START_GUIDE.md §3](docs/operations/COLD_START_GUIDE.md).
 
-```
-$RAG_MODEL_ROOT/
-  baai/
-    bge-m3/               ← embedding model (~570 MB)
-    bge-reranker-v2-m3/   ← reranker model (~570 MB)
-```
-
-> **Sharing models across projects?** Keep them in one place (e.g. `~/models`) and point each project at them via `RAG_MODEL_ROOT` or a symlink. No duplication needed.
-
-> **TEI mode?** Set `RAG_INFERENCE_BACKEND=tei` to delegate embedding + reranking to the `rag-embed` and `rag-rerank` containers (TEI). They are part of the default compose stack and use the same BGE weights from Step A.
+> **TEI mode?** Set `RAG_INFERENCE_BACKEND=tei` to delegate embedding + reranking to the `rag-embed` / `rag-rerank` containers (always-on; TEI downloads weights into `./.tei_cache/` on first start — Step A is then optional).
 
 ---
 
@@ -361,14 +356,7 @@ podman build --format docker -t rag-worker -f containers/Dockerfile.runtime .
 
 ### Architecture notes
 
-- **Multi-stage builds** — `build-essential` (gcc et al) lives in the builder stage only; the runtime stage copies just the installed `site-packages`. Saves ~170 MB per image.
-- **BuildKit pip cache mounts** — `RUN --mount=type=cache,target=/root/.cache/pip` persists pip's wheel cache across rebuilds. Does not affect final image size but dramatically speeds up dep-change rebuilds (e.g. bumping torch version).
-- **`.dockerignore`** — excludes `.venv/`, `tests/`, `evals/`, `docs/`, `node_modules/`, etc. Fully-cached rebuilds take ~1.5 seconds.
-- **HEALTHCHECK lives in `docker-compose.yml`**, not in the Dockerfile — podman's default OCI image format drops `HEALTHCHECK` directives, and compose-level healthchecks work identically under both docker-compose and podman-compose.
-- **Source code is on `PYTHONPATH=/app`**, so there's no `pip install .` step. Changing source doesn't invalidate the dep layer.
-- **GPU inference is supported** in the worker image — full torch with bundled CUDA libs. To enable on the host: set `gpus: all` under `rag-worker` in `docker-compose.yml` and ensure the NVIDIA container runtime is installed.
-
-Full optimization history (9-iteration auto-research run): [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md)
+Multi-stage builds, BuildKit pip-cache mounts, `.dockerignore`, compose-level healthchecks (podman-friendly), `PYTHONPATH=/app` (no `pip install .`), and GPU support in the worker image — see [`docs/operations/DOCKER_OPTIMIZATION.md`](docs/operations/DOCKER_OPTIMIZATION.md) for the full design and 9-iteration optimization history.
 
 ## HTTPS Gateway (nginx)
 
@@ -401,28 +389,16 @@ The `gateway` profile requires the `app` profile. See `certs/README.md` for deta
 
 ### Internet access (Cloudflare Tunnel)
 
-For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free, no account needed) to get a public HTTPS URL:
+For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free, no account needed) to get a public HTTPS URL.
+
+Install `cloudflared` once (it's a system binary, not in default Ubuntu repos) — see [COLD_START_GUIDE.md §0.5](docs/operations/COLD_START_GUIDE.md) for the apt-repo install commands. Then:
 
 ```bash
-# Install cloudflared (one-time — system binary, not a Python package).
-# It is NOT in default Ubuntu/Debian repos; use Cloudflare's apt repo:
-sudo mkdir -p --mode=0755 /usr/share/keyrings
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-    | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
-echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' \
-    | sudo tee /etc/apt/sources.list.d/cloudflared.list
-sudo apt-get update && sudo apt-get install -y cloudflared
-# Or grab the .deb directly: see docs/operations/COLD_START_GUIDE.md §0.5.
-# brew install cloudflared             # macOS
-
-# Point tunnel at the API server (local dev)
-make tunnel
-
-# Or point at nginx gateway (containerised stack with TLS)
-cloudflared tunnel --url https://localhost:443 --no-tls-verify
+make tunnel                                                        # tunnel local dev API (port 8000)
+cloudflared tunnel --url https://localhost:443 --no-tls-verify     # or tunnel the nginx gateway
 ```
 
-This prints a public URL like `https://random-name.trycloudflare.com` — share it with anyone. Kill with Ctrl+C when done.
+Prints a `https://*.trycloudflare.com` URL. Kill with Ctrl+C when done.
 
 ## WSL2 Setup
 
@@ -471,54 +447,8 @@ echo "CONTAINER_SOCK=\$XDG_RUNTIME_DIR/podman/podman.sock" >> .env
 ./scripts/compose.sh --profile temporal --profile app up -d
 ```
 
-See `docs/operations/PODMAN_SPEC.md` for full details.
+For internal design notes (rootless networking, socket detection, image-format trade-offs), see [`docs/operations/PODMAN_SPEC.md`](docs/operations/PODMAN_SPEC.md) — that doc is the implementation spec, not the setup guide. The five steps above are the setup.
 
-
-## Overview
-
-This repository contains:
-
-- A modular **13-node ingestion workflow** (`src/ingest/`) for document-to-vector/KG processing
-- A **retrieval and query-serving runtime** (`src/retrieval/`, `server/`) with Temporal orchestration
-- Tenant-aware **conversation memory** (Redis-backed) with sliding-window + rolling-summary context management
-- **Platform modules** for auth, limits, observability, and caching (`src/platform/`)
-- **LiteLLM SDK integration** for provider-agnostic LLM access (Ollama, OpenAI, Anthropic, etc.)
-- Operations and architecture documentation (`docs/`)
-
-### Architecture (Runtime)
-
-```text
-Users/CLI -> FastAPI (server/api.py) -> Temporal workflow -> Worker activity
-                                                    |
-                                                    v
-                                          RAGChain singleton
-                                  (retrieval, reranking, optional generation)
-```
-
-Ingestion runs separately and writes processed content/embeddings consumed by retrieval.
-
-### Ingestion Source Identity
-
-The ingestion pipeline uses stable source identity metadata instead of filename-only matching:
-
-- `source_key`: stable ingestion identity for manifest and update cleanup.
-- `source_id`: immutable connector-native document identifier.
-- `source_uri`: canonical source location used for retrieval trace-back.
-
-## Directory Map
-
-| Directory | Purpose |
-| --- | --- |
-| `src/common/` | Cross-domain deterministic helpers reused across ingestion/retrieval features |
-| `src/ingest/` | Modular ingestion pipeline (node-per-file, shared helpers, LangGraph workflow) |
-| `src/retrieval/` | Query processing, retrieval orchestration, reranking, and generation |
-| `src/platform/` | Cross-cutting platform services: auth, quotas/rate limits, cache, metrics, observability |
-| `server/` | FastAPI/Temporal runtime: API, workflows, activities, worker, schemas, and CLI client |
-| `config/` | Central environment-driven settings (`config/settings.py`) |
-| `docs/` | Engineering guides, specs, operations runbooks, onboarding checklists |
-| `tests/` | Unit/integration tests, including ingestion-focused tests in `tests/ingest/` |
-| `scripts/` | Ops helpers (backup/restore, DR drill, tuning signal watcher, smoke test) |
-| `prompts/` | Prompt templates for retrieval query processing |
 
 ## Entry Points
 
@@ -565,9 +495,11 @@ Run `make help` for this list in the terminal. All targets are also documented i
 | `make container-clean` | Remove local `rag-api` / `rag-worker` images + dangling images |
 | `make smoke-test` | Full integration check: build + stack + cloudflared tunnel + API checks + teardown |
 | `make container-build-and-test` | Build images then immediately run smoke test (`SKIP_BUILD=1`) |
-| **Stack restart** (uses `scripts/restart_stack.sh` — auto-detects docker/podman) | |
-| `make restart` | Compile frontend + restart `app` + `workers` profiles with rebuild |
-| `make restart-all` | Compile frontend + restart all profiles with rebuild |
+| **Stack control** (uses `scripts/stack.sh` — auto-detects docker/podman) | |
+| `make start` | Bring up base + workers (no rebuild) |
+| `make start-all` | Bring up every profile (no rebuild) |
+| `make restart` | Frontend rebuild + recreate base + workers (mirrors `start`, with rebuild) |
+| `make restart-all` | Frontend rebuild + recreate every profile (mirrors `start-all`, with rebuild) |
 
 ## Engineering Docs
 
