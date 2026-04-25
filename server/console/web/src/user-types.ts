@@ -1,0 +1,86 @@
+// @summary
+// User-console-specific type definitions.
+// Kept separate from `./types.ts` (which serves the operator console with a
+// different shape) so each console can evolve its own contract.
+// @end-summary
+
+export type ThemeValue = "dark" | "light" | "system";
+
+export interface SlashCommand {
+    name: string;
+    description: string;
+    args_hint?: string;
+    category?: string;
+}
+
+export interface PresetConfig {
+    searchLimit: number;
+    rerankTopK: number;
+}
+
+export interface ContextBreakdown {
+    system: number;
+    memory: number;
+    chunks: number;
+    query: number;
+}
+
+export interface ConversationMeta {
+    conversation_id: string;
+    title?: string;
+    updated_at_ms?: number;
+    message_count?: number;
+}
+
+export interface ChunkResult {
+    text: string;
+    score: number;
+    metadata: Record<string, unknown>;
+}
+
+export interface SourceRef {
+    source?: string;
+    source_uri?: string;
+    section?: string;
+    score?: number;
+    text?: string;
+    original_char_start?: number;
+    original_char_end?: number;
+}
+
+export interface TokenBudget {
+    usage_percent?: number;
+    breakdown?: Record<string, unknown>;
+    input_tokens?: number;
+    context_length?: number;
+}
+
+export interface StreamEventData {
+    token?: string;
+    message?: string;
+    results?: ChunkResult[];
+    conversation_id?: string;
+    token_budget?: TokenBudget;
+    summary?: string;
+    [key: string]: unknown;
+}
+
+export interface CommandResult {
+    action?: string;
+    message?: string;
+    data?: Record<string, unknown>;
+}
+
+export function sourceRefToChunkResult(ref: SourceRef): ChunkResult {
+    return {
+        text: ref.text ?? "",
+        score: ref.score ?? 0,
+        metadata: {
+            source: ref.source ?? "",
+            source_uri: ref.source_uri ?? "",
+            section: ref.section ?? "",
+            original_char_start: ref.original_char_start,
+            original_char_end: ref.original_char_end,
+        },
+    };
+}

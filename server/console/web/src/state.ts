@@ -1,18 +1,11 @@
 // @summary
 // Mutable singleton state shared across user-console feature modules.
-// Centralizing the previously closure-scoped variables here lets future PRs split
-// feature code (sidebar, settings, streaming, conversations, slash commands, …)
-// into their own modules without each one having to re-establish state plumbing.
-// Exports: state, AttachmentChip, SlashCommand
-// Deps: (none)
+// Centralizes everything that was previously closure-scoped in the original IIFE
+// so feature modules can read/write without prop-drilling. Object property
+// updates are visible across module boundaries (single shared reference).
 // @end-summary
 
-export interface SlashCommand {
-    name: string;
-    description: string;
-    args_hint?: string;
-    category?: string;
-}
+import type { SlashCommand } from "./user-types";
 
 export interface AttachmentChip {
     id: string;
@@ -31,6 +24,9 @@ export interface ConsoleState {
     attachments: AttachmentChip[];
     userScrolledUp: boolean;
     streamAbortCtrl: AbortController | null;
+    convMenuTargetId: string | null;
+    convMenuTargetTitle: string;
+    renameTargetId: string | null;
 }
 
 export const state: ConsoleState = {
@@ -44,4 +40,13 @@ export const state: ConsoleState = {
     attachments: [],
     userScrolledUp: false,
     streamAbortCtrl: null,
+    convMenuTargetId: null,
+    convMenuTargetTitle: "",
+    renameTargetId: null,
 };
+
+export function setActiveConversation(id: string | null): void {
+    state.activeConversationId = id;
+    if (id) localStorage.setItem("nc_active_conv", id);
+    else localStorage.removeItem("nc_active_conv");
+}
