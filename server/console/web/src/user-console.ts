@@ -5,14 +5,15 @@
 // Deps: marked (ES module import), DOMPurify (ES module import), /query/stream, /console/* API endpoints
 // @end-summary
 
-import { marked } from "marked";
-import DOMPurify from "dompurify";
+import { byId, escHtml, fmtTime, fmtRelative } from "./dom";
+import { parseMarkdown, normalizeMarkdown } from "./markdown";
+import { getSettings, authHeaders, apiBase, api } from "./api";
 
 /**
  * User Console — vanilla TypeScript DOM application.
  *
  * Drives the RagWeave user-facing console at /console.
- * No framework dependencies; external libs (marked, DOMPurify) as ES module imports.
+ * No framework dependencies; external libs (marked, DOMPurify) loaded via ./markdown.
  */
 
 // ──────────────────────────────────────────────
@@ -97,125 +98,6 @@ interface CommandResult {
 export {};
 
 // ──────────────────────────────────────────────
-//  Helpers
-// ──────────────────────────────────────────────
-
-const byId = <T extends HTMLElement = HTMLElement>(id: string): T => {
-    const el = document.getElementById(id);
-    if (!el) throw new Error(`Missing required element #${id}`);
-    return el as T;
-};
-
-function escHtml(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function fmtTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function fmtRelative(ms: number): string {
-    const now = Date.now();
-    const diff = now - ms;
-    if (diff < 86400000) return "Today";
-    if (diff < 172800000) return "Yesterday";
-    return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-// ──────────────────────────────────────────────
-//  Markdown configuration
-// ──────────────────────────────────────────────
-
-// Custom code-block renderer: wraps <pre><code> in a copy-button UI.
-// Clicks are handled via event delegation on #thread — no inline onclick needed,
-// which also means DOMPurify does not need to allow event attributes.
-marked.use({
-    gfm: true,   // tables, task lists, strikethrough, autolinks
-    breaks: false,
-    renderer: {
-        code({ text, lang }: { text: string; lang?: string }): string {
-            const langLabel = escHtml(lang ?? "code");
-            const escaped = text
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;");
-            return [
-                `<div class="code-block-wrap">`,
-                `<div class="code-block-header">`,
-                `<span>${langLabel}</span>`,
-                `<button class="copy-code-btn">&#128203; Copy</button>`,
-                `</div>`,
-                `<div class="code-block">${escaped}</div>`,
-                `</div>`,
-            ].join("");
-        },
-    },
-});
-
-// ──────────────────────────────────────────────
-//  Markdown normalizer + renderer
-// ──────────────────────────────────────────────
-
-/** Returns true if a word looks like a numbered list marker: "1.", "2.", "10.", etc. */
-function isListMarker(word: string): boolean {
-    if (!word.endsWith(".")) return false;
-    const n = Number(word.slice(0, -1));
-    return Number.isInteger(n) && n > 0;
-}
-
-/**
- * If a line packs multiple list items inline (e.g. "1. Foo 2. Bar" or "- A - B"),
- * splits each item onto its own line. Bullet splitting is guarded: only fires when
- * the line already starts with "- "/"* " so standalone dashes in prose are unaffected.
- */
-function splitInlineList(line: string): string {
-    const words = line.split(" ");
-    if (words.length < 3) return line;
-
-    const lineStartsWithBullet = words[0] === "-" || words[0] === "*";
-    const subLines: string[] = [];
-    let current: string[] = [];
-
-    for (let i = 0; i < words.length; i++) {
-        const w = words[i];
-        const isBulletCont = lineStartsWithBullet && i > 0 && (w === "-" || w === "*");
-        const isNumberedCont = i > 0 && isListMarker(w);
-        if (current.length > 0 && (isBulletCont || isNumberedCont)) {
-            subLines.push(current.join(" "));
-            current = [w];
-        } else {
-            current.push(w);
-        }
-    }
-    if (current.length) subLines.push(current.join(" "));
-    return subLines.length > 1 ? subLines.join("\n") : line;
-}
-
-/**
- * Pre-process LLM output so list items always start on their own line.
- * Code fences are split out first so their content is never modified.
- */
-function normalizeMarkdown(raw: string): string {
-    // Split on complete fences only — partial fences during streaming are left as-is
-    const segments = raw.split(/(```[\s\S]*?```)/);
-    return segments.map((seg, i) => {
-        if (i % 2 === 1) return seg; // inside a fence — leave unchanged
-        return seg.split("\n").map(splitInlineList).join("\n");
-    }).join("");
-}
-
-/**
- * Render markdown to sanitized HTML.
- * marked handles the full CommonMark + GFM spec (tables, task lists, strikethrough,
- * autolinks, block quotes, nested lists, footnotes, etc.).
- * DOMPurify strips any unsafe HTML before the result is set as innerHTML.
- * marked.parse is synchronous when no async hooks are configured.
- */
-function parseMarkdown(raw: string): string {
-    return DOMPurify.sanitize(marked.parse(normalizeMarkdown(raw)) as string);
-}
-
-// ──────────────────────────────────────────────
 //  Main entry point
 // ──────────────────────────────────────────────
 
@@ -249,44 +131,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let attachments: AttachmentChip[] = [];
     let userScrolledUp = false;
     let streamAbortCtrl: AbortController | null = null;
-
-    // ──────────────────────────────────────────
-    //  Auth & API layer
-    // ──────────────────────────────────────────
-
-    function getSettings(): Record<string, unknown> {
-        const raw = localStorage.getItem("nc_settings");
-        return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    }
-
-    function authHeaders(): Record<string, string> {
-        const s = getSettings();
-        const token = (s.auth_token as string | undefined) || "";
-        const h: Record<string, string> = { "Content-Type": "application/json" };
-        if (token) {
-            h["Authorization"] = `Bearer ${token}`;
-            h["x-api-key"] = token;
-        }
-        return h;
-    }
-
-    function apiBase(): string {
-        const s = getSettings();
-        const ep = ((s.api_endpoint as string | undefined) || "").trim();
-        return ep ? ep.replace(/\/$/, "") : "";
-    }
-
-    async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-        const url = apiBase() + path;
-        const opts: RequestInit = { method, headers: authHeaders() };
-        if (body !== undefined) opts.body = JSON.stringify(body);
-        const res = await fetch(url, opts);
-        const json = (await res.json()) as { ok: boolean; data?: T; error?: { message: string } };
-        if (!res.ok || !json.ok) {
-            throw new Error(json.error?.message || `HTTP ${res.status}`);
-        }
-        return json.data as T;
-    }
 
     // ──────────────────────────────────────────
     //  Sidebar logic
@@ -685,13 +529,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const chunkId = `chunk-${i}-${Date.now()}`;
             const sourceUri = String(meta.source_uri ?? "").trim();
             const source    = String(meta.source ?? "").trim();
+            const sourceKey = String(meta.source_key ?? "").trim();
             const start = meta.original_char_start;
             const end   = meta.original_char_end;
             let viewHref = "";
-            if (sourceUri || source) {
+            if (sourceKey || sourceUri || source) {
                 const p = new URLSearchParams();
+                if (sourceKey) p.set("source_key", sourceKey);
                 if (sourceUri) p.set("source_uri", sourceUri);
-                else p.set("source", source);
+                else if (source) p.set("source", source);
                 if (start !== undefined && end !== undefined) {
                     p.set("start", String(start));
                     p.set("end", String(end));
@@ -783,6 +629,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 const id = el.dataset.convId;
                 if (id) selectConversation(id);
             });
+            el.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+                const id = el.dataset.convId;
+                if (!id) return;
+                const conv = convs.find((c) => c.conversation_id === id);
+                showConvCtxMenu(e.clientX, e.clientY, id, conv?.title || "");
+            });
         });
         container.querySelectorAll<HTMLElement>(".conv-item-del").forEach((btn) => {
             btn.addEventListener("click", (e) => {
@@ -870,21 +723,144 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    async function createNewConversation(): Promise<void> {
-        try {
-            const data = await api<{ conversation: ConversationMeta }>("POST", "/console/conversations/new", {
-                title: "New conversation",
-            });
-            const conv = data.conversation;
-            setActiveConversation(conv.conversation_id);
-            thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
-            byId("convTitle").textContent = conv.title || "New conversation";
-            await loadConversations();
-            showToast("New conversation started");
-        } catch (err) {
-            showToast("Failed to create conversation: " + String(err));
+    function createNewConversation(): void {
+        setActiveConversation(null);
+        thread.innerHTML = `<div class="thread-empty" id="threadEmpty"><div class="thread-empty-icon">&#128172;</div><div class="thread-empty-title">New conversation</div><div class="thread-empty-sub">Send a message to get started.</div></div>`;
+        byId("convTitle").textContent = "New conversation";
+        byId("convList").querySelectorAll<HTMLElement>(".conv-item").forEach((el) => {
+            el.classList.remove("active");
+        });
+        const input = document.getElementById("msgInput") as HTMLTextAreaElement | null;
+        if (input) {
+            input.focus();
         }
     }
+
+    // ──────────────────────────────────────────
+    //  Conversation context menu + rename modal
+    // ──────────────────────────────────────────
+
+    let convMenuTargetId: string | null = null;
+    let convMenuTargetTitle = "";
+    let renameTargetId: string | null = null;
+
+    function hideConvCtxMenu(): void {
+        const menu = byId("convCtxMenu");
+        menu.classList.remove("open");
+        menu.setAttribute("aria-hidden", "true");
+        convMenuTargetId = null;
+    }
+
+    function showConvCtxMenu(x: number, y: number, id: string, title: string): void {
+        const menu = byId("convCtxMenu");
+        convMenuTargetId = id;
+        convMenuTargetTitle = title;
+        // Pre-position offscreen so we can measure
+        menu.style.left = "-9999px";
+        menu.style.top = "-9999px";
+        menu.classList.add("open");
+        menu.setAttribute("aria-hidden", "false");
+        const rect = menu.getBoundingClientRect();
+        const maxX = window.innerWidth - rect.width - 8;
+        const maxY = window.innerHeight - rect.height - 8;
+        menu.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
+        menu.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
+    }
+
+    function openRenameModal(id: string, currentTitle: string): void {
+        renameTargetId = id;
+        const overlay = byId("renameModal");
+        const input = byId<HTMLInputElement>("renameInput");
+        input.value = currentTitle || "";
+        overlay.classList.add("open");
+        overlay.setAttribute("aria-hidden", "false");
+        // Focus + select on next tick so the modal animation has started
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 40);
+    }
+
+    function closeRenameModal(): void {
+        const overlay = byId("renameModal");
+        overlay.classList.remove("open");
+        overlay.setAttribute("aria-hidden", "true");
+        renameTargetId = null;
+    }
+
+    async function submitRename(): Promise<void> {
+        const id = renameTargetId;
+        if (!id) return;
+        const input = byId<HTMLInputElement>("renameInput");
+        const trimmed = input.value.trim();
+        if (!trimmed) {
+            input.focus();
+            return;
+        }
+        closeRenameModal();
+        try {
+            await api("PATCH", `/console/conversations/${encodeURIComponent(id)}`, {
+                title: trimmed,
+            });
+            if (activeConversationId === id) {
+                byId("convTitle").textContent = trimmed;
+            }
+            await loadConversations();
+            showToast("Conversation renamed");
+        } catch (err) {
+            showToast("Failed to rename: " + String(err));
+        }
+    }
+
+    // Wire context menu actions
+    byId("convCtxMenu").querySelectorAll<HTMLButtonElement>("[data-action]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = convMenuTargetId;
+            const title = convMenuTargetTitle;
+            const action = btn.dataset.action;
+            hideConvCtxMenu();
+            if (!id) return;
+            if (action === "rename") {
+                openRenameModal(id, title);
+            } else if (action === "delete") {
+                void deleteConversation(id);
+            }
+        });
+    });
+
+    // Dismiss context menu on outside click / Escape
+    document.addEventListener("mousedown", (e) => {
+        const menu = byId("convCtxMenu");
+        if (!menu.classList.contains("open")) return;
+        if (e.target instanceof Node && menu.contains(e.target)) return;
+        hideConvCtxMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            hideConvCtxMenu();
+            if (byId("renameModal").classList.contains("open")) closeRenameModal();
+        }
+    });
+    window.addEventListener("resize", hideConvCtxMenu);
+    window.addEventListener("scroll", hideConvCtxMenu, true);
+
+    // Wire rename modal controls
+    byId("renameCancel").addEventListener("click", closeRenameModal);
+    byId("renameSave").addEventListener("click", () => void submitRename());
+    byId("renameInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            void submitRename();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            closeRenameModal();
+        }
+    });
+    byId("renameModal").addEventListener("click", (e) => {
+        // Click on the backdrop (not inside the card) → close
+        if (e.target === e.currentTarget) closeRenameModal();
+    });
 
     async function deleteConversation(id: string): Promise<void> {
         try {
@@ -1053,6 +1029,23 @@ document.addEventListener("DOMContentLoaded", () => {
         let errorShown = false;
         let pendingClarification = "";
 
+        // rAF-coalesced render: avoids back-to-back layout passes during fast streams
+        let renderRaf = 0;
+        const flushRender = () => {
+            renderRaf = 0;
+            bubbleEl.innerHTML = parseMarkdown(answer);
+        };
+        const scheduleRender = () => {
+            if (renderRaf) return;
+            renderRaf = requestAnimationFrame(flushRender);
+        };
+        const cancelRender = () => {
+            if (renderRaf) {
+                cancelAnimationFrame(renderRaf);
+                renderRaf = 0;
+            }
+        };
+
         try {
             while (true) {
                 const { done, value } = await reader.read();
@@ -1073,10 +1066,11 @@ document.addEventListener("DOMContentLoaded", () => {
                         if (!started) {
                             typingEl.style.display = "none";
                             bubbleEl.style.display = "block";
+                            bubbleEl.classList.add("streaming");
                             started = true;
                         }
                         answer += data.token || "";
-                        bubbleEl.innerHTML = parseMarkdown(answer) + '<span class="cursor"></span>';
+                        scheduleRender();
                         scrollToBottom();
 
                     } else if (evtType === "retrieval") {
@@ -1108,6 +1102,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
                     } else if (evtType === "error") {
                         errorShown = true;
+                        cancelRender();
+                        bubbleEl.classList.remove("streaming");
                         typingEl.style.display = "none";
                         bubbleEl.innerHTML = "&#9888; " + escHtml(String(data.message ?? "Unknown error"));
                         bubbleEl.classList.add("error-bubble");
@@ -1118,6 +1114,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         const cid = String(data.conversation_id ?? "").trim();
                         if (cid) setActiveConversation(cid);
 
+                        cancelRender();
+                        bubbleEl.classList.remove("streaming");
                         typingEl.style.display = "none";
                         if (!errorShown) {
                             if (!started) {
@@ -1128,14 +1126,21 @@ document.addEventListener("DOMContentLoaded", () => {
                                 bubbleEl.innerHTML = parseMarkdown(msg);
                                 bubbleEl.style.display = "block";
                             } else {
-                                // Tokens streamed: finalize (remove cursor)
+                                // Tokens streamed: finalize render
                                 bubbleEl.innerHTML = parseMarkdown(answer);
                                 bubbleEl.style.display = "block";
                             }
                         }
 
                         const showCitations = byId<HTMLInputElement>("citationsToggle").checked;
-                        if (showCitations && citationsEl.innerHTML) citationsEl.style.display = "block";
+                        if (showCitations && citationsEl.innerHTML) {
+                            citationsEl.style.display = "block";
+                            // Trigger staggered fade-in so the 5 chunks don't pop in all at once.
+                            citationsEl.classList.remove("reveal");
+                            // Force reflow before re-adding so the animation re-fires reliably.
+                            void citationsEl.offsetWidth;
+                            citationsEl.classList.add("reveal");
+                        }
                         actionsEl.style.display = "flex";
                         metaEl.textContent = fmtTime(Date.now());
                         metaEl.style.display = "block";
@@ -1150,6 +1155,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if ((err as Error).name !== "AbortError") {
                 appendErrorMsg("Stream interrupted: " + String(err));
             }
+        } finally {
+            cancelRender();
+            bubbleEl.classList.remove("streaming");
         }
 
         isStreaming = false;
@@ -1191,6 +1199,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (showCitations && results.length) {
                 citationsEl.innerHTML = buildCitationsHtml(results);
                 citationsEl.style.display = "block";
+                citationsEl.classList.remove("reveal");
+                void citationsEl.offsetWidth;
+                citationsEl.classList.add("reveal");
             }
 
             actionsEl.style.display = "flex";
