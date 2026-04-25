@@ -719,33 +719,31 @@ RAG_RETRIEVAL_QUALITY_WEAK_THRESHOLD = float(
 )
 
 # --- Inference Backend ---
-# "local": BGE models run in-process inside the worker (default, backward-compatible).
-# "vllm":  Qwen3 models served by separate rag-vllm-* containers via LiteLLM routing.
+# "local": BGE models run in-process (dev venv path; requires the `local-embed`
+#          pyproject extra — torch + sentence-transformers + transformers).
+# "tei":   BGE models served by separate TEI containers (rag-embed / rag-rerank)
+#          via direct HTTP. Compose default. Worker image does NOT ship torch.
 INFERENCE_BACKEND: str = os.environ.get("RAG_INFERENCE_BACKEND", "local").strip().lower()
-_VALID_INFERENCE_BACKENDS = {"local", "vllm"}
+_VALID_INFERENCE_BACKENDS = {"local", "tei"}
 if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     raise ValueError(
         f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; "
         f"must be one of {sorted(_VALID_INFERENCE_BACKENDS)}"
     )
 
-# vLLM service URLs — used when INFERENCE_BACKEND="vllm".
-# Inside the compose network these resolve to rag-vllm-embed / rag-vllm-rerank.
-VLLM_EMBED_URL: str = os.environ.get("RAG_VLLM_EMBED_URL", "http://rag-vllm-embed:8001")
-VLLM_RERANK_URL: str = os.environ.get("RAG_VLLM_RERANK_URL", "http://rag-vllm-rerank:8002")
+# TEI service URLs — used when INFERENCE_BACKEND="tei".
+# Inside the compose network these resolve to rag-embed / rag-rerank.
+TEI_EMBED_URL: str = os.environ.get("RAG_TEI_EMBED_URL", "http://rag-embed:80")
+TEI_RERANK_URL: str = os.environ.get("RAG_TEI_RERANK_URL", "http://rag-rerank:80")
 
-# Model IDs loaded by the vLLM containers (HuggingFace repo IDs).
-# CPU default: 0.6B models. GPU recommended: 4B models (see .env.example).
-VLLM_EMBEDDING_MODEL: str = os.environ.get(
-    "RAG_VLLM_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"
-)
-VLLM_RERANKER_MODEL: str = os.environ.get(
-    "RAG_VLLM_RERANKER_MODEL", "Qwen/Qwen3-Reranker-0.6B"
-)
+# Model IDs loaded by the TEI containers (HuggingFace repo IDs). BGE-M3 gives
+# mature multilingual retrieval; BGE-reranker-v2-m3 is the matching cross-encoder.
+TEI_EMBEDDING_MODEL: str = os.environ.get("RAG_TEI_EMBEDDING_MODEL", "BAAI/bge-m3")
+TEI_RERANKER_MODEL: str = os.environ.get("RAG_TEI_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
 # Timeout for HTTP inference calls (embed + rerank). Should exceed the
 # model's p99 latency, including GPU warm-up on first call.
-VLLM_TIMEOUT_SECONDS: int = int(os.environ.get("RAG_VLLM_TIMEOUT_SECONDS", "30"))
+TEI_TIMEOUT_SECONDS: int = int(os.environ.get("RAG_TEI_TIMEOUT_SECONDS", "30"))
 
 # --- Reranker ---
 RERANKER_MAX_LENGTH = int(os.environ.get("RAG_RERANKER_MAX_LENGTH", "512"))

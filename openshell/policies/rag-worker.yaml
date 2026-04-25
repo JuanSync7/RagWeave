@@ -1,9 +1,10 @@
 # Sandbox policy for the RAG Temporal worker.
 #
-# The worker loads BAAI embedding/reranker models into GPU memory at startup,
-# connects to Temporal for task scheduling, and processes user queries against
-# the shared rag-weaviate container. It also calls Ollama for LLM inference and
-# optionally reports traces to Langfuse.
+# The worker is a thin HTTP client — it delegates embedding to the rag-embed TEI
+# container and reranking to the rag-rerank TEI container (no torch / models in
+# the worker image), connects to Temporal for task scheduling, and processes
+# user queries against the shared rag-weaviate container. It also calls Ollama
+# for LLM inference and optionally reports traces to Langfuse.
 #
 # This policy restricts the worker to only the resources it needs.
 
@@ -24,10 +25,6 @@ spec:
         - path: /app
           access: read-only
           description: "Application source code and config"
-
-        - path: /models
-          access: read-only
-          description: "BAAI BGE-M3 embedding and BGE-Reranker-v2-M3 models"
 
         - path: /tmp
           access: read-write
@@ -65,6 +62,16 @@ spec:
           port: 50051
           protocol: tcp
           description: "Weaviate gRPC — hybrid search and batch operations"
+
+        - host: rag-embed
+          port: 80
+          protocol: tcp
+          description: "TEI embed — /v1/embeddings HTTP endpoint"
+
+        - host: rag-rerank
+          port: 80
+          protocol: tcp
+          description: "TEI rerank — /rerank HTTP endpoint"
 
         - host: host.docker.internal
           port: 11435

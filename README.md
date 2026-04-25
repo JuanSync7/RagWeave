@@ -39,33 +39,43 @@ operations tooling for observability, backup/restore, and scaling.
 - **Python 3.10+** (3.12 recommended)
 - **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
 - **Node.js 18+** and **npm** — for the web console TypeScript build
-- **Docker** and **Docker Compose** (or **Podman** and **podman-compose**) — for infrastructure services (Temporal, Redis)
-- **[Ollama](https://ollama.com/)** — for local LLM inference (or set `RAG_LLM_*` vars for cloud providers)
+- **Docker** and **Docker Compose v2** (or **Podman** and **podman-compose**) — for the full container stack (Temporal, Redis, Ollama, Weaviate, …)
+
+> **No host Ollama needed.** The LLM runs in the bundled `rag-ollama`
+> container. Cloud LLMs are also supported — see [Step B](#step-b--set-up-your-llm).
 
 > **Podman users**: Podman is supported as a drop-in replacement for Docker.
 > See [Podman Setup](#podman-setup) below for one-time configuration.
 
+> **First time on a clean Linux box?** Follow
+> [docs/operations/COLD_START_GUIDE.md](docs/operations/COLD_START_GUIDE.md) —
+> it walks every prerequisite install command and the exact gaps in this
+> Quick Start (cloudflared install, nvm/PATH issues, profile combinations).
+
 ### 1. Clone and set up the project
 
 ```bash
-git clone <repo-url> && cd RAG
+git clone <repo-url> RagWeave && cd RagWeave
 make setup
 ```
 
 `make setup` runs the full one-shot: creates `.venv/`, installs all runtime + dev dependencies via `uv`, installs web-console npm deps, and compiles the TypeScript console. Run once per clone.
 
 > Prefer explicit steps? `make install` does just the Python deps; `make console-install && make console-build` handles the console. Or skip `make` entirely:
-> `uv venv && uv pip install -e ".[dev]"`, or `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`.
+> `uv sync --extra dev` (auto-creates `.venv/`, respects `uv.lock`). Use `uv` everywhere — plain `pip` is not supported.
 
 #### Optional dependency groups
 
 Some features require extra packages that are not installed by default:
 
 ```bash
-uv pip install -e ".[pii]"          # PII detection (presidio, spacy)
-uv pip install -e ".[gliner]"       # GLiNER entity extraction
-uv pip install -e ".[all]"          # All optional dependencies
+uv sync --extra pii          # PII detection (presidio, spacy)
+uv sync --extra gliner       # GLiNER entity extraction
+uv sync --extra all          # All optional dependencies
 ```
+
+> **Always use `uv`, never plain `pip`.** A `uv.lock` ships with the repo;
+> plain `pip` ignores it and can corrupt resolution in a uv-managed venv.
 
 > **Vector store:** Weaviate is the default and currently the only fully supported backend.
 > ChromaDB, Pinecone, and Qdrant extras (`.[chromadb]`, `.[pinecone]`, `.[qdrant]`) install
@@ -111,9 +121,9 @@ Download them anywhere you like, then tell RagWeave where they are via `RAG_MODE
 
 ```bash
 # huggingface-cli (recommended)
-pip install huggingface-hub
-huggingface-cli download BAAI/bge-m3 --local-dir ~/models/baai/bge-m3
-huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
+uv pip install huggingface-hub
+uv run huggingface-cli download BAAI/bge-m3 --local-dir ~/models/baai/bge-m3
+uv run huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir ~/models/baai/bge-reranker-v2-m3
 
 # git-lfs
 git lfs install
@@ -143,20 +153,33 @@ $RAG_MODEL_ROOT/
 
 > **Sharing models across projects?** Keep them in one place (e.g. `~/models`) and point each project at them via `RAG_MODEL_ROOT` or a symlink. No duplication needed.
 
-> **Using vLLM instead?** Skip this step entirely — set `RAG_INFERENCE_BACKEND=vllm` and vLLM pulls Qwen3 weights from HuggingFace Hub automatically. See [Step D](#step-d--optional-switch-to-vllm-inference-backend).
+> **TEI mode?** Set `RAG_INFERENCE_BACKEND=tei` to delegate embedding + reranking to the `rag-embed` and `rag-rerank` containers (TEI). They are part of the default compose stack and use the same BGE weights from Step A.
 
 ---
 
 #### Step B — Set up your LLM
 
-**Option 1 — Local (Ollama, default):**
+**Option 1 — Containerised Ollama (default):**
+
+The `rag-ollama` container is part of the always-on compose stack — no
+host-side Ollama install. Once `make start` brings the stack up, pull the
+generation model into it:
 
 ```bash
-# Ollama must be installed and running: https://ollama.com
-ollama pull qwen2.5:3b        # generation model (required)
+docker exec rag-ollama ollama pull qwen2.5:3b        # generation model (required)
+# Optional vision model (only if you ingest images/figures):
+# docker exec rag-ollama ollama pull qwen2.5vl:3b
 ```
 
-No further `.env` changes needed — the defaults point at `localhost:11434`.
+The container publishes `127.0.0.1:11434` to the host, so the default
+`RAG_OLLAMA_URL=http://localhost:11434` in `.env` works as-is. Models are
+cached in the repo-local `./.ollama_data/` bind mount and survive
+container recreation.
+
+**Disabling generation** (e.g. retrieval-only mode, or to free GPU/RAM): stop
+the container with `docker compose stop rag-ollama`. Retrieval keeps working;
+generation calls fail fast with `ECONNREFUSED`. Bring it back with
+`docker compose start rag-ollama`.
 
 **Option 2 — Cloud provider (OpenRouter, OpenAI, Anthropic, etc.):**
 
@@ -185,42 +208,6 @@ These have working defaults but are worth reviewing before production use:
 | `RAG_RETRIEVAL_TIMEOUT_MS` | `30000` | End-to-end query timeout |
 
 See [.env.example](.env.example) for all available settings.
-
----
-
-#### Step D — (Optional) switch to vLLM inference backend
-
-By default, embeddings and reranking run **in-process** inside `rag-worker` using the BGE models from Step A. This works for local dev but loads ~3–4 GB of weights into the worker process and is slow on CPU.
-
-**vLLM mode** offloads inference to two dedicated containers (`rag-vllm-embed` and `rag-vllm-rerank`) running Qwen3 models, routed through LiteLLM. The worker becomes a lean HTTP coordinator and inference scales independently.
-
-```bash
-# 1. Start inference containers (requires Docker + ~1.2 GB HuggingFace download)
-./scripts/compose.sh --profile inference up -d
-
-# 2. Pre-warm Qwen3 model caches (first time only)
-make vllm-pull-models
-
-# 3. Verify both containers are healthy
-make container-probe-vllm
-
-# 4. In .env — switch the worker to vLLM mode:
-RAG_INFERENCE_BACKEND=vllm
-
-# 5. Restart the worker
-make restart-worker
-```
-
-**CPU vs GPU model selection** (set in `.env`):
-
-| Profile | `RAG_VLLM_EMBEDDING_MODEL` | `RAG_VLLM_RERANKER_MODEL` | Notes |
-|---------|---------------------------|--------------------------|-------|
-| CPU / WSL2 (default) | `Qwen/Qwen3-Embedding-0.6B` | `Qwen/Qwen3-Reranker-0.6B` | ~0.6 GB each |
-| GPU (NVIDIA) | `Qwen/Qwen3-Embedding-4B` | `Qwen/Qwen3-Reranker-4B` | ~4 GB each, fp16 |
-
-See the GPU profile comments in `.env.example` for the exact vars to uncomment.
-
-To revert to local BGE models: set `RAG_INFERENCE_BACKEND=local` and `make restart-worker`.
 
 ---
 
@@ -417,8 +404,15 @@ The `gateway` profile requires the `app` profile. See `certs/README.md` for deta
 For demos on a different network, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (free, no account needed) to get a public HTTPS URL:
 
 ```bash
-# Install cloudflared (one-time — system binary, not a Python package)
-sudo apt install cloudflared          # Debian/Ubuntu
+# Install cloudflared (one-time — system binary, not a Python package).
+# It is NOT in default Ubuntu/Debian repos; use Cloudflare's apt repo:
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+    | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' \
+    | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install -y cloudflared
+# Or grab the .deb directly: see docs/operations/COLD_START_GUIDE.md §0.5.
 # brew install cloudflared             # macOS
 
 # Point tunnel at the API server (local dev)
@@ -546,7 +540,7 @@ Run `make help` for this list in the terminal. All targets are also documented i
 |---|---|
 | **Setup & install** | |
 | `make setup` | **First-time setup.** Creates venv, installs Python deps, runs `npm install`, builds the web console |
-| `make install` | (Re)install Python deps into the active env (`uv pip install -e ".[dev]"`) |
+| `make install` | (Re)install Python deps into the active env (`uv sync --extra dev`) |
 | **Web console (TypeScript)** | |
 | `make console-install` | `npm install` for the web console |
 | `make console-check` | TypeScript type-check (no emit) |
