@@ -20,7 +20,6 @@ from typing import Any
 from src.vector_db import (
     add_documents,
     delete_by_source_key,
-    ensure_collection,
     DocumentRecord,
 )
 from src.ingest.common import append_processing_log
@@ -30,7 +29,7 @@ from src.ingest.embedding.state import EmbeddingPipelineState
 logger = logging.getLogger("rag.ingest.embedding.storage")
 
 _BATCH_MAX_RETRIES = 3
-_BATCH_RETRY_DELAY = 1.0  # seconds
+_BATCH_RETRY_DELAY = 0.3  # seconds; kept short to limit event-loop blocking in async paths
 
 
 def _form_batches(items: list, batch_size: int) -> list[list]:
@@ -166,6 +165,7 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
         ``processing_log``. When the workflow is skipped or there are no chunks,
         returns ``stored_count=0``.
     """
+    t0 = time.monotonic()
     if state.get("should_skip", False) or not state["chunks"]:
         return {
             "stored_count": 0,
@@ -174,7 +174,6 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
 
     runtime = state["runtime"]
     try:
-        ensure_collection(runtime.weaviate_client)
         if runtime.config.update_mode:
             delete_by_source_key(
                 runtime.weaviate_client,
@@ -220,13 +219,14 @@ def embedding_storage_node(state: EmbeddingPipelineState) -> dict[str, Any]:
             collection=runtime.config.target_collection or None,
         )
     except Exception as exc:
+        logger.error("embedding_storage failed source=%s: %s", state.get("source_key", ""), exc, exc_info=True)
         return {
-            **state,
             "errors": state.get("errors", []) + [f"embedding_storage:{exc}"],
             "processing_log": append_processing_log(state, "embedding_storage:error"),
         }
 
     existing_errors = state.get("errors", [])
+    logger.debug("embedding_storage_node completed in %.3fs", time.monotonic() - t0)
     return {
         "stored_count": stored_count,
         "errors": existing_errors + batch_errors,

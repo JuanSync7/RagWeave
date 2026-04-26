@@ -162,8 +162,7 @@ class TestUploadGating:
             minio_client=mock_client,
             cleaned_text="# Content to upload",
         )
-        with patch("src.ingest.embedding.nodes.document_storage_node.put_document") as mock_put, \
-             patch("src.ingest.embedding.nodes.document_storage_node.ensure_bucket"):
+        with patch("src.ingest.embedding.nodes.document_storage_node.put_document") as mock_put:
             document_storage_node(state)
         mock_put.assert_called_once()
 
@@ -226,8 +225,7 @@ class TestUploadErrorHandling:
         )
 
         with patch("src.ingest.embedding.nodes.document_storage_node.put_document",
-                   side_effect=RuntimeError("connection refused")), \
-             patch("src.ingest.embedding.nodes.document_storage_node.ensure_bucket"):
+                   side_effect=RuntimeError("connection refused")):
             result = document_storage_node(state)
 
         # At least one error must be recorded
