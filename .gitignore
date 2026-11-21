@@ -94,3 +94,8 @@ opentitan_data/
 scripts/.bench_results/*.json
 !scripts/.bench_results/cpu-1777015485.json
 !scripts/.bench_results/gpu-1777015578.json
+
+# Local backups (may hold secrets or host-specific config)
+.env.bak*
+*.bak
+*.bak.*
