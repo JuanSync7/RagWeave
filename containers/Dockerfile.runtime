@@ -13,7 +13,8 @@ WORKDIR /app
 # matches the project-wide tooling (see memory: prefer uv over pip).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99no-sandbox \
+    && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -48,20 +49,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# No apt packages needed in runtime — Temporal worker has no HTTP healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Runtime apt deps: ca-certificates for TLS, plus the shared libraries Docling's
+# PDF/Office parsing pulls in transitively (OpenCV/Qt -> libGL, glib, libxcb, X11).
+# Without these, Docling conversion fails at import with "libxcb.so.1: cannot open
+# shared object file" and all PDF/docx/pptx ingestion errors out.
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99no-sandbox \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
+    libxrender1 \
+    libxext6 \
+    libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder (no build tools come along)
 COPY --from=builder /install /usr/local
 
-# Create non-root user
-RUN groupadd --system app && useradd --system --gid app --create-home app
-
-COPY --chown=app:app config /app/config
-COPY --chown=app:app src /app/src
-COPY --chown=app:app server /app/server
-COPY --chown=app:app prompts /app/prompts
-
-USER app
+# Run as root — in rootless Podman, container root maps to the host user,
+# so this is safe. (chown to a non-root uid requires setuid newuidmap/newgidmap.)
+COPY config /app/config
+COPY src /app/src
+COPY server /app/server
+COPY prompts /app/prompts

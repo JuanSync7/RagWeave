@@ -12,7 +12,8 @@ WORKDIR /app
 # matches the project-wide tooling (see memory: prefer uv over pip).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-RUN apt-get update \
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99no-sandbox \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -38,7 +39,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99no-sandbox \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -47,16 +49,14 @@ RUN apt-get update \
 # Copy installed packages from builder (no build tools come along)
 COPY --from=builder /install /usr/local
 
-RUN groupadd --system app && useradd --system --gid app --create-home app \
-    && mkdir -p /home/app/.litellm /app/logs /app/documents \
-    && chown -R app:app /home/app /app/logs /app/documents
+# Run as root — in rootless Podman, container root maps to the host user,
+# so this is safe. (chown to a non-root uid requires setuid newuidmap/newgidmap.)
+RUN mkdir -p /app/logs /app/documents
 
-COPY --chown=app:app config /app/config
-COPY --chown=app:app src /app/src
-COPY --chown=app:app server /app/server
-COPY --chown=app:app prompts /app/prompts
-
-USER app
+COPY config /app/config
+COPY src /app/src
+COPY server /app/server
+COPY prompts /app/prompts
 
 ARG RAG_API_PORT=8000
 ENV RAG_API_PORT=${RAG_API_PORT}

@@ -12,6 +12,10 @@
 # touch in this container — no GPU code runs here).
 # API server deps are in requirements-api.txt.
 httpx
+torch
+transformers
+sentence-transformers
+accelerate
 numpy
 docling>=2.82.0
 weaviate-client
