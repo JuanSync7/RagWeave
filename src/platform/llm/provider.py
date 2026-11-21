@@ -202,6 +202,13 @@ class LLMProvider:
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
         }
+        # Ollama "thinking" models (e.g. qwen3.x) emit verbose chain-of-thought
+        # that is very slow on CPU and exhausts the max_tokens budget before any
+        # answer is produced (reformulation/generation come back empty). Disable
+        # thinking so the model returns the final answer directly. Callers can
+        # still override via **overrides (e.g. think=True for a reasoning task).
+        if str(self.config.model).startswith("ollama/"):
+            kwargs["think"] = False
         if user_id:
             kwargs["user"] = user_id
         kwargs.update(overrides)

@@ -12,7 +12,12 @@ import orjson as json_mod
 import logging
 import time
 import uuid
+from datetime import timedelta
 from typing import Awaitable, Callable
+
+# CPU-only: a full query can take 130s+, so each gRPC poll for the workflow
+# result must be allowed to run long enough not to surface "Timeout expired".
+_TEMPORAL_RPC_TIMEOUT = timedelta(minutes=30)
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -161,13 +166,39 @@ def _stream_llm(
 
     stream_start = time.perf_counter()
     provider = get_llm_provider()
-    for token in provider.generate_stream(
-        messages,
-        model_alias="default",
-        temperature=GENERATION_TEMPERATURE,
-        max_tokens=GENERATION_MAX_TOKENS,
-    ):
-        yield token
+    # Use think=False to disable qwen3 chain-of-thought in streaming mode.
+    # Thinking tokens stream in reasoning_content (not content), exhausting the
+    # max_tokens budget before any answer appears when streaming chunk-by-chunk.
+    # Non-streaming generate() works fine because the model returns only the
+    # final answer. Streaming requires think=False to get content tokens directly.
+    import os as _os
+    _stream_kwargs = {}
+    _model = _os.environ.get("RAG_LLM_MODEL", "")
+    _api_base = _os.environ.get("RAG_OLLAMA_URL", "")
+    if _model.startswith("ollama/") and _api_base:
+        _stream_kwargs = {
+            "model": _model,
+            "messages": messages,
+            "stream": True,
+            "api_base": _api_base,
+            "temperature": GENERATION_TEMPERATURE,
+            "max_tokens": GENERATION_MAX_TOKENS,
+            "think": False,
+        }
+    if _stream_kwargs:
+        _response = provider._router.completion(**_stream_kwargs)
+        for _chunk in _response:
+            _delta = _chunk.choices[0].delta
+            if _delta and _delta.content:
+                yield _delta.content
+    else:
+        for token in provider.generate_stream(
+            messages,
+            model_alias="default",
+            temperature=GENERATION_TEMPERATURE,
+            max_tokens=GENERATION_MAX_TOKENS,
+        ):
+            yield token
     _record_stage("stream_tokens", "generation", stream_start)
 
 
@@ -250,6 +281,7 @@ async def run_query(
                 payload,
                 id=workflow_id,
                 task_queue=RAG_QUERY_TASK_QUEUE,
+                rpc_timeout=_TEMPORAL_RPC_TIMEOUT,
             )
         except RPCError as exc:
             REQUESTS_TOTAL.labels(endpoint=endpoint, method="POST", status="503").inc()
@@ -460,6 +492,7 @@ def create_query_router(
                         payload,
                         id=workflow_id,
                         task_queue=RAG_QUERY_TASK_QUEUE,
+                        rpc_timeout=_TEMPORAL_RPC_TIMEOUT,
                     )
                 except RPCError as exc:
                     REQUESTS_TOTAL.labels(endpoint="/query/stream", method="POST", status="503").inc()
@@ -526,6 +559,7 @@ def create_query_router(
                 )
                 retrieval_stages = list(retrieval_result.get("stage_timings", []))
                 yield _sse("retrieval", retrieval_result)
+                await asyncio.sleep(0)  # flush retrieval event before blocking LLM call
 
                 chunks = retrieval_result.get("results", [])
                 processed_query = retrieval_result.get("processed_query", request.query)

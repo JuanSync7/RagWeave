@@ -25,8 +25,6 @@ import time
 from collections import defaultdict
 from typing import Optional
 
-from langgraph.graph import END, StateGraph
-
 from config.settings import (
     DOMAIN_DESCRIPTION,
     KG_PATH,
@@ -698,6 +696,8 @@ def exhaust_node(state: QueryState) -> dict:
 def _route_after_sanitize(state: QueryState) -> str:
     if state.get("action") == "ask_user":
         return "end"
+    if state.get("fast_path", False):
+        return "end"
     return "reformulate_and_evaluate"
 
 
@@ -715,6 +715,7 @@ def _route_after_combined(state: QueryState) -> str:
 
 
 def _build_graph():
+    from langgraph.graph import END, StateGraph  # noqa: PLC0415 — lazy import to avoid top-level dep in API container
     graph = StateGraph(QueryState)
 
     graph.add_node("sanitize", sanitize_node)
@@ -763,6 +764,7 @@ def warm_up_ollama() -> None:
     Call this at worker startup so the first real query doesn't pay the
     cold-start cost (~5-10s model load).
     """
+    import concurrent.futures
     _ensure_file_logging()
     if not _check_llm_available():
         logger.warning("LLM not reachable — skipping warm-up")
@@ -770,9 +772,18 @@ def warm_up_ollama() -> None:
 
     logger.info("Warming up query LLM model...")
     t0 = time.perf_counter()
-    _call_llm("ping", system="Reply with 'ok' only.")
-    elapsed = (time.perf_counter() - t0) * 1000
-    logger.info("LLM warm-up done in %.0fms", elapsed)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(_call_llm, "ping", system="Reply with 'ok' only.")
+        future.result(timeout=30)
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.info("LLM warm-up done in %.0fms", elapsed)
+    except concurrent.futures.TimeoutError:
+        logger.warning("LLM warm-up timed out after 30s — Ollama queue busy; worker starting anyway")
+    except Exception as e:
+        logger.warning("LLM warm-up failed: %s — starting worker anyway", e)
+    finally:
+        executor.shutdown(wait=False)
 
 
 def process_query(

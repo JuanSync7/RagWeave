@@ -4,25 +4,6 @@
 # Deps: src.retrieval.common, src.retrieval.pipeline, src.retrieval.query, src.retrieval.generation
 # @end-summary
 
-from src.retrieval.common import (
-    RAGRequest,
-    RAGResponse,
-    RankedResult,
-)
-from src.retrieval.query import (
-    QueryAction,
-    QueryResult,
-)
-from src.retrieval.query.nodes import process_query
-from src.retrieval.query.nodes import LocalBGEReranker
-from src.retrieval.pipeline import RAGChain
-from src.retrieval.generation.nodes import OllamaGenerator
-from src.retrieval.generation.confidence import (
-    ConfidenceBreakdown,
-    PostGuardrailAction,
-    compute_composite_confidence,
-)
-
 __all__ = [
     "RAGRequest",
     "RAGChain",
@@ -37,3 +18,27 @@ __all__ = [
     "PostGuardrailAction",
     "compute_composite_confidence",
 ]
+
+_lazy = {
+    "RAGRequest": ("src.retrieval.common", "RAGRequest"),
+    "RAGResponse": ("src.retrieval.common", "RAGResponse"),
+    "RankedResult": ("src.retrieval.common", "RankedResult"),
+    "QueryAction": ("src.retrieval.query", "QueryAction"),
+    "QueryResult": ("src.retrieval.query", "QueryResult"),
+    "process_query": ("src.retrieval.query.nodes", "process_query"),
+    "LocalBGEReranker": ("src.retrieval.query.nodes", "LocalBGEReranker"),
+    "RAGChain": ("src.retrieval.pipeline", "RAGChain"),
+    "OllamaGenerator": ("src.retrieval.generation.nodes", "OllamaGenerator"),
+    "ConfidenceBreakdown": ("src.retrieval.generation.confidence", "ConfidenceBreakdown"),
+    "PostGuardrailAction": ("src.retrieval.generation.confidence", "PostGuardrailAction"),
+    "compute_composite_confidence": ("src.retrieval.generation.confidence", "compute_composite_confidence"),
+}
+
+
+def __getattr__(name: str):
+    if name in _lazy:
+        import importlib
+        mod_name, attr = _lazy[name]
+        mod = importlib.import_module(mod_name)
+        return getattr(mod, attr)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

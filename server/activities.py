@@ -23,6 +23,7 @@ from src.platform import (
     CACHE_HITS,
     CACHE_MISSES,
 )
+from config.settings import RAG_RETRIEVAL_TIMEOUT_MS
 
 logger = logging.getLogger("rag.server.activities")
 
@@ -81,7 +82,7 @@ def execute_rag_query(request: dict) -> dict:
     tenant_id: Optional[str] = request.get("tenant_id")
     max_query_iterations: int = int(request.get("max_query_iterations", 3))
     fast_path: Optional[bool] = request.get("fast_path")
-    overall_timeout_ms: int = int(request.get("overall_timeout_ms", 30000))
+    overall_timeout_ms: int = int(request.get("overall_timeout_ms", RAG_RETRIEVAL_TIMEOUT_MS))
     stage_budget_overrides: dict = request.get("stage_budget_overrides", {}) or {}
     conversation_id: Optional[str] = request.get("conversation_id")
     memory_context: Optional[str] = request.get("memory_context")
