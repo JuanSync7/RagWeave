@@ -55,6 +55,11 @@ WEAVIATE_DATA_DIR = os.environ.get(
     "RAG_WEAVIATE_DATA_DIR",
     str(PROJECT_ROOT / ".weaviate_data"),
 )
+# When RAG_WEAVIATE_HOST is set, connect_to_local() is used instead of
+# connect_to_embedded(). Set to the hostname of a standalone Weaviate container.
+WEAVIATE_HOST: str = os.environ.get("RAG_WEAVIATE_HOST", "")
+WEAVIATE_PORT: int = int(os.environ.get("RAG_WEAVIATE_PORT", "8080"))
+WEAVIATE_GRPC_PORT: int = int(os.environ.get("RAG_WEAVIATE_GRPC_PORT", "50051"))
 
 # Connection mode: "embedded" runs Weaviate in-process (dev default, CI stubs
 # rely on this). "networked" connects to a shared Weaviate container.
@@ -754,6 +759,18 @@ _VALID_INFERENCE_BACKENDS = {"local", "tei"}
 if INFERENCE_BACKEND not in _VALID_INFERENCE_BACKENDS:
     raise ValueError(
         f"RAG_INFERENCE_BACKEND={INFERENCE_BACKEND!r} is not valid; "
+        f"must be one of {sorted(_VALID_INFERENCE_BACKENDS)}"
+    )
+
+# Per-component override: embeddings may use a different backend than the
+# reranker. Defaults to INFERENCE_BACKEND. Lets a CPU-only app host run query embeddings
+# remotely (tei → vLLM bge-m3 on the GPU host) while keeping the reranker local
+# (no remote cross-encoder reranker exists). Must match the model that built
+# the index (bge-m3) — Weaviate uses cosine distance, so it's scale-invariant.
+EMBEDDING_BACKEND: str = os.environ.get("RAG_EMBEDDING_BACKEND", INFERENCE_BACKEND).strip().lower()
+if EMBEDDING_BACKEND not in _VALID_INFERENCE_BACKENDS:
+    raise ValueError(
+        f"RAG_EMBEDDING_BACKEND={EMBEDDING_BACKEND!r} is not valid; "
         f"must be one of {sorted(_VALID_INFERENCE_BACKENDS)}"
     )
 

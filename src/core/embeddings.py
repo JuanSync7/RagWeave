@@ -20,6 +20,7 @@ from langchain_core.embeddings import Embeddings
 from config.settings import (
     EMBEDDING_MODEL_PATH,
     INFERENCE_BACKEND,
+    EMBEDDING_BACKEND,
     TEI_EMBED_URL,
     TEI_EMBEDDING_MODEL,
     TEI_TIMEOUT_SECONDS,
@@ -149,6 +150,6 @@ def get_embedding_provider(tier: str | None = None) -> Embeddings:
             leaving the GPU free for latency-sensitive query embedding.
             Ignored by ``LocalBGEEmbeddings`` (no LB layer in dev).
     """
-    if INFERENCE_BACKEND == "tei":
+    if EMBEDDING_BACKEND == "tei":
         return TEIEmbeddings(tier=tier)
     return LocalBGEEmbeddings()
