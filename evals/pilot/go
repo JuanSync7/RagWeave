@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# "go" — one-command launcher for the RagWeave pilot evaluation.
+#
+#   ./go                 full run (all cases, query mode) + judge + improvement plan
+#   ./go --limit 3       smoke test on the first 3 cases
+#   ./go --mode retrieval --no-judge   retrieval-only, no judging
+#   ./go --loop 3        self-improving loop: eval -> improve, x3
+#
+# Picks a Python 3.10+ interpreter (the harness is stdlib-only).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+pick_python() {
+  for p in python3.12 python3.11 python3.10 "$HOME/.local/bin/python3.12" python3; do
+    if command -v "$p" >/dev/null 2>&1; then
+      ver=$("$p" -c 'import sys;print(sys.version_info[:2]>=(3,10))' 2>/dev/null || echo False)
+      [ "$ver" = "True" ] && { echo "$p"; return; }
+    fi
+  done
+  echo "ERROR: need Python >= 3.10 on PATH" >&2; exit 1
+}
+
+PY="$(pick_python)"
+# Default behaviour for a bare "./go": run everything and produce the plan.
+if [ "$#" -eq 0 ]; then
+  exec "$PY" run.py --improve
+fi
+exec "$PY" run.py "$@"

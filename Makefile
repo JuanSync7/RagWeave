@@ -397,3 +397,14 @@ smoke-test:
 # own build step since container-build already produced fresh images.
 container-build-and-test: container-build
 	SKIP_BUILD=1 bash scripts/smoke_test.sh
+
+# ---------------------------------------------------------------------------
+# Pilot evaluation harness (evals/pilot) — runs the QnA test cases against
+# RagWeave, judges with Claude headless, emits an HTML report + improvement plan.
+.PHONY: eval-pilot eval-pilot-smoke eval-pilot-extract
+eval-pilot:            ## Full pilot eval: all cases + judge + improvement plan
+	cd evals/pilot && ./go --improve
+eval-pilot-smoke:      ## Quick pilot eval on the first 3 cases
+	cd evals/pilot && ./go --limit 3
+eval-pilot-extract:    ## Rebuild testcases.json from the source QnA .docx
+	cd evals/pilot && python extract_testcases.py
