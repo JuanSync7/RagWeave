@@ -305,6 +305,23 @@ def parse_with_docling(
         ) from exc
 
     converter_kwargs: dict[str, Any] = {}
+    # OCR disabled: scanned/image PDFs triggered multi-hour CPU OCR (rapidocr)
+    # that thrashed the 15GiB/no-swap app host and OOM-killed ingestion. Native
+    # text in normal PDFs/docx/pptx still extracts fine. document_timeout caps any
+    # pathological doc. Best-effort: fall back to defaults if the option API differs.
+    try:
+        from docling.datamodel.base_models import InputFormat as _IF
+        from docling.datamodel.pipeline_options import PdfPipelineOptions as _PPO
+        from docling.document_converter import PdfFormatOption as _PFO
+        _ocr_off = _PPO()
+        _ocr_off.do_ocr = False
+        try:
+            _ocr_off.document_timeout = 300.0
+        except Exception:
+            pass
+        converter_kwargs["format_options"] = {_IF.PDF: _PFO(pipeline_options=_ocr_off)}
+    except Exception:
+        pass
     # Note: artifacts_path is accepted for caller compat but no longer passed
     # to DocumentConverter (removed in newer Docling versions). Model location
     # is controlled by warmup_docling_models / HF cache.

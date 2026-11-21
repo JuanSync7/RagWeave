@@ -13,10 +13,13 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from config.settings import RAG_WORKFLOW_DEFAULT_TIMEOUT_MS
     from server.activities import execute_rag_query
 
 RAG_QUERY_TASK_QUEUE = "rag-query"
+
+# Default: 1200s (20 min) to accommodate slow CPU-only Ollama inference.
+# The client can override via request["overall_timeout_ms"] (capped at 180s by schema).
+_DEFAULT_TIMEOUT_MS = 1200000
 
 
 @workflow.defn
@@ -33,7 +36,7 @@ class RAGQueryWorkflow:
 
     @workflow.run
     async def run(self, request: dict) -> dict:
-        timeout_ms = int(request.get("overall_timeout_ms", RAG_WORKFLOW_DEFAULT_TIMEOUT_MS))
+        timeout_ms = int(request.get("overall_timeout_ms", 360000))
         # Honor client timeout budgets by rounding up milliseconds to seconds.
         timeout_seconds = max(1, math.ceil(timeout_ms / 1000))
         return await workflow.execute_activity(
