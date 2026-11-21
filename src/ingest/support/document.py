@@ -50,7 +50,7 @@ _BOILERPLATE_PATTERNS: list[re.Pattern[str]] = [
     # them (e.g., banner blocks). Only matches consecutive non-blank lines
     # sandwiched between delimiter lines.
     re.compile(
-        r"^[=]{3,}\s*\n(?:[^\n]*\n)*?[=]{3,}\s*$",
+        r"^[=]{3,}\s*\n(?:[^\n]*\n){0,40}?[=]{3,}\s*$",
         re.MULTILINE,
     ),
     # Metadata key-value header lines (Title:, Author:, Date:, etc.)
@@ -69,9 +69,11 @@ _BOILERPLATE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"^©.*$", re.MULTILINE),
     # Email headers (Subject/From/To/Date/MIME/Content-Type block)
     re.compile(
-        r"^\s*(?:Subject|From|To|Date|MIME-Version|Content-Type):.*?"
-        r"(?=\n\s*\n|\n\s*-{3,})",
-        re.DOTALL | re.MULTILINE,
+        # Line-scoped (no DOTALL): the previous lazy ".*?" to a lookahead with
+        # DOTALL+MULTILINE backtracked catastrophically (hours) on large docs
+        # containing tokens like "Date:"/"To:"/"From:".
+        r"^\s*(?:Subject|From|To|Date|MIME-Version|Content-Type):.*$",
+        re.MULTILINE,
     ),
     # Email greetings and sign-offs
     re.compile(r"^\s*Hi everyone,?\s*$", re.MULTILINE),
@@ -123,6 +125,11 @@ def strip_boilerplate(text: str) -> str:
     Returns:
         Text with boilerplate patterns removed.
     """
+    # Backstop: skip regex boilerplate stripping on very large inputs to avoid
+    # any pathological regex backtracking. These patterns target emails/wiki
+    # pages, not multi-hundred-KB technical PDFs.
+    if len(text) > 300_000:
+        return text
     for pattern in _BOILERPLATE_PATTERNS:
         text = pattern.sub("", text)
     return text

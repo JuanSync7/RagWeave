@@ -44,7 +44,11 @@ _WIKI_HEADING_RE = re.compile(
     re.MULTILINE,
 )
 _NUMBERED_HEADING_RE = re.compile(
-    r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Za-z &/()\-]+(?:\s+[A-Za-z][A-Za-z &/()\-]*)*)$",
+    # Heading text as ONE linear char-class run (bounded). The previous
+    # "[A-Za-z &/()\\-]+(?:\\s+[A-Za-z ...]*)*" had ambiguous nested quantifiers
+    # (both could match spaces) -> catastrophic backtracking (hours) on long
+    # lines of raw PDF-byte text. FR: keep matching "1. INTRODUCTION" etc.
+    r"^\s*(\d+(?:\.\d+)*)\.?\s+([A-Z][A-Za-z0-9 &/()\-]{1,200})$",
     re.MULTILINE,
 )
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+|\n\n+')
