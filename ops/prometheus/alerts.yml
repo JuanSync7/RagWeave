@@ -17,3 +17,70 @@ groups:
         annotations:
           summary: "RAG API p95 latency above 5s"
 
+  - name: vllm-fleet
+    rules:
+      # The scrape itself failing means the model is not answering at all:
+      # either the instance is down, or the tunnel to the GPU host is.
+      - alert: VLLMInstanceDown
+        expr: up{job=~"vllm-.*"} == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "vLLM {{ $labels.instance_name }} is not answering"
+          description: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }}). The instance is down, or the SSH tunnel to the GPU host is."
+
+      # Requests queueing steadily means the fleet is saturated rather than
+      # broken: it still answers, but latency is climbing.
+      - alert: VLLMRequestsQueueing
+        expr: avg_over_time(vllm:num_requests_waiting[10m]) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "vLLM {{ $labels.instance_name }} has a standing queue"
+          description: "More than five requests have been waiting on average for ten minutes. The instance is saturated, not failed."
+
+      # A KV cache that stays nearly full forces preemption and slows every
+      # request; it is the signal that max-model-len or the GPU share needs
+      # revisiting.
+      - alert: VLLMKVCacheSaturated
+        expr: avg_over_time(vllm:kv_cache_usage_perc[15m]) > 0.95
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "vLLM {{ $labels.instance_name }} KV cache is saturated"
+          description: "KV cache usage has averaged above 95% for fifteen minutes. Expect preemptions. Revisit gpu-memory-utilization or max-model-len for this instance."
+
+      - alert: VLLMPreempting
+        expr: increase(vllm:num_preemptions_total[15m]) > 10
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "vLLM {{ $labels.instance_name }} is preempting requests"
+          description: "More than ten preemptions in fifteen minutes: the instance is running out of KV cache and evicting work in progress."
+
+      # The GPU stopped being readable. Deliberately its own alert rather than
+      # folded into InstanceDown: the models can be serving perfectly while
+      # nvidia-smi is wedged, and the consequence is specific — nobody can
+      # confirm the card is free, so `vllmctl pause` can no longer be trusted
+      # to have delivered a GPU (fleet MANUAL 1.5.1). The exporter publishes
+      # this as a value rather than going silent, precisely so it can be
+      # alerted on: an absent series would look like an idle GPU.
+      - alert: VLLMGpuUnreadable
+        expr: vllm_fleet_gpu_query_ok == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "vLLM fleet cannot read the GPU on {{ $labels.fleet }}"
+          description: "nvidia-smi has not answered for ten minutes. The models may still be serving, but no tool can confirm whether the card is free, so a pause cannot be verified. Check the driver on the serving host."
+
+      # A pause that was forgotten. Nothing in the fleet resumes on its own by
+      # design, so the only thing that catches this is somebody noticing —
+      # which is what an alert is for. Four hours is longer than any of the
+      # maintenance pauses this fleet takes and shorter than a working day.
+      - alert: VLLMPausedTooLong
+        expr: vllm_fleet_paused == 1
+        for: 4h
+        labels: { severity: warning }
+        annotations:
+          summary: "vLLM fleet has been paused for over four hours"
+          description: "control/PAUSED has existed for four hours. Nothing resumes on its own: every model is down and every consumer is failing. `vllmctl status` on the serving host names who paused it and why; `vllmctl resume` clears it."

@@ -1,0 +1,312 @@
+{
+  "title": "vLLM Fleet",
+  "uid": "vllm-fleet",
+  "tags": [
+    "vllm"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Instances answering",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "up{job=~\"vllm-.*\"}",
+          "legendFormat": "{{instance_name}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Requests running",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 9,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "vllm:num_requests_running",
+          "legendFormat": "{{instance_name}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Requests waiting (queue depth)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 9,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "vllm:num_requests_waiting",
+          "legendFormat": "{{instance_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "KV cache usage",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "vllm:kv_cache_usage_perc",
+          "legendFormat": "{{instance_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Throughput (tokens/sec)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "rate(vllm:generation_tokens_total[5m])",
+          "legendFormat": "{{instance_name}} generated"
+        },
+        {
+          "expr": "rate(vllm:prompt_tokens_total[5m])",
+          "legendFormat": "{{instance_name}} prompt"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Completed requests/sec",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "rate(vllm:request_success_total[5m])",
+          "legendFormat": "{{instance_name}} {{finished_reason}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Preemptions (15m)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "increase(vllm:num_preemptions_total[15m])",
+          "legendFormat": "{{instance_name}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "GPU memory by instance (stacked) \u2014 and what is free",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 14,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "vllm_fleet_gpu_instance_memory_bytes",
+          "legendFormat": "{{instance_name}}"
+        },
+        {
+          "expr": "vllm_fleet_gpu_memory_other_bytes",
+          "legendFormat": "other + driver"
+        },
+        {
+          "expr": "vllm_fleet_gpu_memory_free_bytes",
+          "legendFormat": "free"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 30,
+            "lineWidth": 1
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "free"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "title": "Card free now",
+      "type": "stat",
+      "gridPos": {
+        "x": 14,
+        "y": 16,
+        "w": 5,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "vllm_fleet_gpu_memory_free_bytes",
+          "legendFormat": "free"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2147483648
+              },
+              {
+                "color": "green",
+                "value": 6442450944
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Share of the card",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 19,
+        "y": 16,
+        "w": 5,
+        "h": 7
+      },
+      "targets": [
+        {
+          "expr": "vllm_fleet_gpu_instance_memory_ratio",
+          "legendFormat": "{{instance_name}}"
+        },
+        {
+          "expr": "vllm_fleet_gpu_memory_free_ratio",
+          "legendFormat": "free"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "GPU readable / fleet paused",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 3
+      },
+      "targets": [
+        {
+          "expr": "vllm_fleet_gpu_query_ok",
+          "legendFormat": "nvidia-smi answering"
+        },
+        {
+          "expr": "vllm_fleet_paused",
+          "legendFormat": "fleet paused"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "no",
+                  "index": 0
+                },
+                "1": {
+                  "text": "yes",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    }
+  ]
+}
